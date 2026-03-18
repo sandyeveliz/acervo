@@ -64,6 +64,9 @@ logs/
 Thumbs.db
 desktop.ini
 
+# MkDocs
+site/
+
 # Editors
 .idea/
 .vscode/

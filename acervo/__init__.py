@@ -1,9 +1,14 @@
-"""acervo — episodic memory graph for AVS-Agents.
+"""acervo — context proxy for AI agents.
 
-Exporta las clases y funciones principales del paquete.
+Sits between the user and the LLM:
+1. prepare() — enrich context from knowledge graph before LLM call
+2. process() — extract knowledge from response after LLM call
 """
 
+from acervo.facade import Acervo, PrepareResult
 from acervo.graph import TopicGraph, _make_id
+from acervo.llm import LLMClient, Embedder
+from acervo.openai_client import OpenAIClient
 from acervo.extractor import (
     ConversationExtractor,
     SearchExtractor,
@@ -13,12 +18,33 @@ from acervo.extractor import (
     Relation,
     ExtractedFact,
 )
-from acervo.layers import Layer
+from acervo.synthesizer import synthesize
+from acervo.layers import Layer, NodeMeta
 from acervo.ontology import register_type, register_relation, get_type, all_types
+from acervo.query_planner import QueryPlanner, PlanResult
+from acervo.topic_detector import TopicDetector, TopicVerdict, DetectionResult
+from acervo.context_index import ContextIndex
+from acervo.token_counter import count_tokens
 
 __all__ = [
+    # High-level API
+    "Acervo",
+    "PrepareResult",
+    "LLMClient",
+    "Embedder",
+    "OpenAIClient",
+    # Pipeline components
+    "QueryPlanner",
+    "PlanResult",
+    "TopicDetector",
+    "TopicVerdict",
+    "DetectionResult",
+    "ContextIndex",
+    "count_tokens",
+    # Graph
     "TopicGraph",
     "_make_id",
+    # Extractors
     "ConversationExtractor",
     "SearchExtractor",
     "RAGExtractor",
@@ -26,58 +52,13 @@ __all__ = [
     "Entity",
     "Relation",
     "ExtractedFact",
+    # Synthesizer
+    "synthesize",
+    # Layers & ontology
     "Layer",
+    "NodeMeta",
     "register_type",
     "register_relation",
     "get_type",
     "all_types",
 ]
-
-
-if __name__ == "__main__":
-    # Ejemplo de nodos con capas y ontología
-    from acervo.layers import Layer
-    from acervo.ontology import BUILTIN_ENTITY_TYPES
-
-    print("\n=== acervo — ejemplo de nodos ===\n")
-
-    sandy = {
-        "label": "Sandy",
-        "type": "Persona",
-        "layer": Layer.PERSONAL.name,
-        "source": "user_assertion",
-        "confidence_for_owner": 1.0,
-        "status": "complete",
-        "pending_fields": [],
-        "facts": [
-            {"fact": "Sandy es dueña de AltoValleStudio", "source": "user_assertion"}
-        ],
-        "relations": [
-            {"relation": "DUEÑO_DE", "target": "AltoValleStudio"}
-        ],
-    }
-
-    cipolletti = {
-        "label": "Cipolletti",
-        "type": "Lugar",
-        "layer": Layer.UNIVERSAL.name,
-        "source": "world",
-        "confidence_for_owner": 1.0,
-        "status": "complete",
-        "pending_fields": [],
-        "facts": [
-            {"fact": "Cipolletti es una ciudad en la provincia de Río Negro, Argentina", "source": "world"}
-        ],
-    }
-
-    for node in [sandy, cipolletti]:
-        capa = f"Capa {'1 (UNIVERSAL)' if node['layer'] == 'UNIVERSAL' else '2 (PERSONAL)'}"
-        print(f"  Nodo: {node['label']}")
-        print(f"    tipo     : {node['type']}")
-        print(f"    capa     : {capa}")
-        print(f"    source   : {node['source']}")
-        print(f"    status   : {node['status']}")
-        print(f"    facts    : {[f['fact'] for f in node['facts']]}")
-        if node.get("relations"):
-            print(f"    relaciones: {node['relations']}")
-        print()

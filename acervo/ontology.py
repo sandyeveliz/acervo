@@ -1,21 +1,21 @@
-"""Registro extensible de tipos de entidades y relaciones.
+"""Extensible registry of entity types and relations.
 
-Uso:
+Usage:
     from acervo.ontology import register_type, get_type, all_types
     from acervo.ontology import BUILTIN_RELATIONS
 
-    # Registrar tipo personalizado
-    register_type("Mascota", ["nombre", "especie", "edad"])
+    # Register a custom type
+    register_type("Pet", ["name", "species", "age"])
 
-    # Registrar relación personalizada
-    register_relation("TIENE_MASCOTA")
+    # Register a custom relation
+    register_relation("HAS_PET")
 """
 
 from __future__ import annotations
 
 from acervo.layers import Layer
 
-# ── Tipos de entidad built-in ──────────────────────────────────────────────
+# ── Built-in entity types ──────────────────────────────────────────────
 
 BUILTIN_ENTITY_TYPES: dict[str, list[str]] = {
     "Persona":       ["nombre", "edad", "rol", "relacion_con_owner"],
@@ -25,11 +25,12 @@ BUILTIN_ENTITY_TYPES: dict[str, list[str]] = {
     "Tecnología":    ["nombre", "tipo", "version"],
     "Documento":     ["nombre", "tipo", "path", "contenido_resumen"],
     "Regla":         ["descripcion", "aplica_a", "tecnologia", "severity"],
+    "Obra":          ["nombre", "tipo", "autor", "genero", "año"],
 }
 
 _entity_registry: dict[str, list[str]] = dict(BUILTIN_ENTITY_TYPES)
 
-# ── Relaciones built-in ────────────────────────────────────────────────────
+# ── Built-in relations ────────────────────────────────────────────────────
 
 BUILTIN_RELATIONS: set[str] = {
     "TRABAJA_EN",
@@ -41,7 +42,7 @@ BUILTIN_RELATIONS: set[str] = {
     "GUSTA_DE",
     "FAMILIAR_DE",
     "RELACIONADO_CON",
-    # Legado del extractor conversacional (snake_case)
+    # Legacy from conversation extractor (snake_case)
     "ubicado_en", "tecnico_de", "parte_de", "hincha_de",
     "juega_en", "pertenece_a", "relacionado_con", "co_mentioned",
     "jugó_contra", "dirigido_por", "ganó_a", "perdió_contra",
@@ -49,37 +50,74 @@ BUILTIN_RELATIONS: set[str] = {
 
 _relation_registry: set[str] = set(BUILTIN_RELATIONS)
 
-# ── API de registro ────────────────────────────────────────────────────────
+# ── Registration API ────────────────────────────────────────────────────────
 
 def register_type(
     name: str,
     attributes: list[str],
     layer_default: Layer = Layer.PERSONAL,
 ) -> None:
-    """Registra un nuevo tipo de entidad en el registro global."""
+    """Register a new entity type in the global registry."""
     _entity_registry[name] = attributes
 
 
 def register_relation(name: str) -> None:
-    """Registra un nuevo tipo de relación en el registro global."""
+    """Register a new relation type in the global registry."""
     _relation_registry.add(name)
 
 
 def get_type(name: str) -> list[str] | None:
-    """Retorna los atributos esperados de un tipo de entidad, o None si no existe."""
+    """Return the expected attributes for an entity type, or None if unknown."""
     return _entity_registry.get(name)
 
 
 def all_types() -> dict[str, list[str]]:
-    """Retorna todos los tipos de entidad registrados (built-in + custom)."""
+    """Return all registered entity types (built-in + custom)."""
     return dict(_entity_registry)
 
 
 def all_relations() -> set[str]:
-    """Retorna todas las relaciones registradas (built-in + custom)."""
+    """Return all registered relations (built-in + custom)."""
     return set(_relation_registry)
 
 
 def is_known_type(name: str) -> bool:
-    """Retorna True si el tipo de entidad está registrado."""
+    """Return True if the entity type is registered."""
     return name in _entity_registry
+
+
+# ── Type mapping (extractor lowercase → ontology capitalized) ──────────────
+
+_EXTRACTOR_TYPE_MAP: dict[str, str] = {
+    "lugar": "Lugar",
+    "persona": "Persona",
+    "entidad": "Unknown",  # too broad — let incomplete resolution handle it
+    "actividad": "Proyecto",
+    "tecnologia": "Tecnología",
+    "tecnología": "Tecnología",
+    "documento": "Documento",
+    "regla": "Regla",
+    "organizacion": "Organización",
+    "organización": "Organización",
+    "proyecto": "Proyecto",
+    "obra": "Obra",
+}
+
+
+def map_extractor_type(raw_type: str) -> str:
+    """Map a raw extractor type (lowercase) to an ontology type.
+
+    Returns the ontology type name, or "Unknown" if no mapping exists.
+    """
+    return _EXTRACTOR_TYPE_MAP.get(raw_type.lower().strip(), "Unknown")
+
+
+# ── Universal knowledge detection ──────────────────────────────────────────
+
+# Entity types that are typically universal (world knowledge)
+_UNIVERSAL_TYPES: frozenset[str] = frozenset({"Lugar", "Tecnología"})
+
+
+def is_likely_universal(entity_type: str) -> bool:
+    """Heuristic: return True if this entity type is typically universal knowledge."""
+    return entity_type in _UNIVERSAL_TYPES

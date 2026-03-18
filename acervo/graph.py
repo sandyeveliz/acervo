@@ -1,15 +1,13 @@
 """Topic graph — persists entity nodes and edges to JSON.
 
-Structure follows docs/CONTEXT_ENGINE_DESIGN.md.
-
-Cada nodo tiene:
-  layer (Layer): UNIVERSAL o PERSONAL
-  source (str): "world" o "user_assertion"
+Each node has:
+  layer (Layer): UNIVERSAL or PERSONAL
+  source (str): "world" or "user_assertion"
   confidence_for_owner (float): 0.0-1.0
-  status (str): "complete", "incomplete" o "pending_verification"
-  pending_fields (list[str]): campos faltantes si status == "incomplete"
+  status (str): "complete", "incomplete" or "pending_verification"
+  pending_fields (list[str]): missing fields if status == "incomplete"
 
-Nodos existentes sin layer defaultean a PERSONAL con source="user_assertion".
+Existing nodes without layer default to PERSONAL with source="user_assertion".
 """
 
 from __future__ import annotations
@@ -21,7 +19,7 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 
-from acervo.layers import Layer
+from acervo.layers import Layer, NodeMeta
 from acervo.ontology import is_known_type
 
 log = logging.getLogger(__name__)
@@ -49,26 +47,20 @@ def _normalize_for_dedup(text: str) -> str:
     return " ".join(no_articles.split())
 
 
-def _default_node_meta(etype: str) -> dict:
-    """Genera los campos de capa/ontología para un nodo nuevo."""
-    known = is_known_type(etype)
-    return {
-        "layer": Layer.PERSONAL.name,
-        "source": "user_assertion",
-        "confidence_for_owner": 1.0,
-        "status": "complete" if known else "incomplete",
-        "pending_fields": [] if known else ["tipo"],
-    }
+def _default_node_meta(etype: str, owner: str | None = None) -> NodeMeta:
+    """Generate layer/ontology metadata for a new node."""
+    if is_known_type(etype):
+        return NodeMeta.personal(owner=owner)
+    return NodeMeta.incomplete(owner=owner, pending=["type"])
 
 
 def _migrate_node(node: dict) -> dict:
-    """Agrega campos de capa a nodos legacy que no los tienen."""
+    """Add layer fields to legacy nodes that don't have them."""
     if "layer" not in node:
-        node["layer"] = Layer.PERSONAL.name
-        node["source"] = "user_assertion"
-        node["confidence_for_owner"] = 1.0
-        node["status"] = "complete"
-        node["pending_fields"] = []
+        meta = NodeMeta.personal()
+        node.update(meta.to_dict())
+    if "owner" not in node:
+        node["owner"] = None
     return node
 
 
@@ -98,6 +90,11 @@ class TopicGraph:
             except json.JSONDecodeError:
                 self._edges = []
 
+        # Reset runtime statuses — previous session's hot/warm don't carry over
+        for node in self._nodes.values():
+            if node.get("status") in ("hot", "warm"):
+                node["status"] = "cold"
+
     def _save(self) -> None:
         self._path.mkdir(parents=True, exist_ok=True)
         (self._path / "nodes.json").write_text(
@@ -117,6 +114,7 @@ class TopicGraph:
         layer: Layer = Layer.PERSONAL,
         source: str = "user_assertion",
         confidence: float = 1.0,
+        owner: str | None = None,
     ) -> tuple[int, int]:
         """Upsert entities, add relations and source-tagged facts.
 
@@ -124,9 +122,10 @@ class TopicGraph:
             entities: list of (name, type) pairs
             relations: list of (source_name, target_name, relation) tuples
             facts: list of (entity_name, fact_text, source) tuples
-            layer: Layer enum — UNIVERSAL o PERSONAL (default PERSONAL)
-            source: "world" o "user_assertion" (default "user_assertion")
-            confidence: confianza para el owner (0.0-1.0, default 1.0)
+            layer: Layer enum — UNIVERSAL or PERSONAL (default PERSONAL)
+            source: "world" or "user_assertion" (default "user_assertion")
+            confidence: confidence for the owner (0.0-1.0, default 1.0)
+            owner: owner identifier (None for universal knowledge)
         """
         now = datetime.now().isoformat(timespec="seconds")
         node_ids: list[str] = []
@@ -144,27 +143,26 @@ class TopicGraph:
                 if self._session_id not in sessions_seen:
                     node["session_count"] = node.get("session_count", 0) + 1
             else:
-                meta = _default_node_meta(etype)
-                # Override with caller-provided layer/source if specified
-                meta["layer"] = layer.name
-                meta["source"] = source
-                meta["confidence_for_owner"] = confidence
+                meta = NodeMeta(
+                    layer=layer,
+                    owner=owner,
+                    source=source,
+                    confidence_for_owner=confidence,
+                    status="complete" if is_known_type(etype) else "incomplete",
+                    pending_fields=[] if is_known_type(etype) else ["type"],
+                )
                 self._nodes[nid] = {
                     "id": nid,
                     "label": name,
-                    "type": etype if is_known_type(etype) else "Desconocido",
+                    "type": etype if is_known_type(etype) else "Unknown",
                     "created_at": now,
                     "last_active": now,
                     "session_count": 1,
-                    "status": "hot",
                     "attributes": {},
                     "facts": [],
-                    **meta,
+                    **meta.to_dict(),
+                    "status": "hot",  # runtime status — must come after meta spread
                 }
-                # Si el tipo es desconocido, marcar incompleto
-                if not is_known_type(etype) and etype not in ("Desconocido",):
-                    self._nodes[nid]["status"] = "incomplete"
-                    self._nodes[nid]["pending_fields"] = ["tipo"]
 
         # Add semantic relations
         if relations:
@@ -302,6 +300,68 @@ class TopicGraph:
         if removed:
             log.info("Removed fact from %s: %s", entity_name, fact_text)
         return removed
+
+    # ── Public query API ──
+
+    def get_node(self, name_or_id: str) -> dict | None:
+        """Get a node by ID or by name (via _make_id)."""
+        node = self._nodes.get(name_or_id)
+        if node:
+            return node
+        return self._nodes.get(_make_id(name_or_id))
+
+    def get_nodes_by_status(self, status: str) -> list[dict]:
+        """Return nodes with the given status (hot/warm/cold)."""
+        return [n for n in self._nodes.values() if n.get("status") == status]
+
+    def get_all_nodes(self) -> list[dict]:
+        """Return all nodes as a list of dicts."""
+        return list(self._nodes.values())
+
+    def get_neighbors(self, node_id: str, max_count: int = 5) -> list[tuple[dict, float]]:
+        """Return neighbor nodes with edge weights, sorted by weight desc."""
+        neighbors: dict[str, float] = {}
+        for edge in self._edges:
+            src, tgt = edge["source"], edge["target"]
+            weight = edge.get("weight", 1.0)
+            if src == node_id and tgt != node_id:
+                neighbors[tgt] = max(neighbors.get(tgt, 0), weight)
+            elif tgt == node_id and src != node_id:
+                neighbors[src] = max(neighbors.get(src, 0), weight)
+        sorted_ids = sorted(neighbors, key=lambda k: neighbors[k], reverse=True)
+        result = []
+        for nid in sorted_ids[:max_count]:
+            node = self._nodes.get(nid)
+            if node:
+                result.append((node, neighbors[nid]))
+        return result
+
+    def get_edges_for(self, node_id: str) -> list[dict]:
+        """Return all edges where this node is source or target."""
+        return [
+            e for e in self._edges
+            if e["source"] == node_id or e["target"] == node_id
+        ]
+
+    def set_node_status(self, node_id: str, status: str) -> None:
+        """Set a node's status (hot/warm/cold)."""
+        node = self._nodes.get(node_id)
+        if node:
+            node["status"] = status
+
+    def save(self) -> None:
+        """Persist current graph state to disk."""
+        self._save()
+
+    @property
+    def dedup_log(self) -> list[tuple[str, str, str]]:
+        """Return the dedup log from the last upsert_entities call."""
+        return getattr(self, "_dedup_log", [])
+
+    @property
+    def session_id(self) -> str:
+        """Return the current session ID."""
+        return self._session_id
 
     @property
     def node_count(self) -> int:

@@ -6,10 +6,6 @@ Three specialized extractors by source:
 - RAGExtractor: facts from RAG retrieval (source: rag) — future
 
 Principle: an empty node is better than a node with unverified data.
-
-Note: ConversationExtractor depends on providers.model_router and utils.text
-from the host avs-agents project. This is intentional — acervo is designed
-to run inside the avs-agents environment.
 """
 
 from __future__ import annotations
@@ -19,8 +15,9 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-from providers.model_router import ModelRouter
-from utils.text import strip_think_blocks
+from acervo.llm import LLMClient
+from acervo._text import strip_think_blocks
+from acervo.ontology import map_extractor_type
 
 log = logging.getLogger(__name__)
 
@@ -62,7 +59,10 @@ Cada hecho lleva "speaker": "user" o "assistant" según quién lo dijo.
 NO agregar conocimiento general. Solo lo explícitamente dicho.
 Responder en JSON con "entities", "relations" y "facts". Responder siempre en español.
 
-Tipos de entidad: lugar, persona, entidad, actividad
+Tipos de entidad: lugar, persona, organizacion, tecnologia, obra, actividad
+"obra" es para libros, películas, series, sagas, videojuegos, etc.
+"organizacion" es para empresas, clubes, instituciones.
+"tecnologia" es para lenguajes, frameworks, herramientas.
 Tipos de relación: ubicado_en, tecnico_de, dirigido_por, parte_de, hincha_de, juega_en, jugó_contra, ganó_a, perdió_contra, pertenece_a, relacionado_con
 IMPORTANTE: "le ganó a X" es ganó_a, NO juega_en. "juega_en" es para torneos/ligas, no para partidos contra otro equipo.
 
@@ -117,25 +117,44 @@ def _clean_response(content: str) -> str:
 
 # ── Extractors ──
 
-VALID_TYPES = frozenset(("lugar", "persona", "entidad", "actividad"))
+VALID_TYPES = frozenset((
+    "lugar", "persona", "entidad", "actividad",
+    "organizacion", "organización", "tecnologia", "tecnología", "obra",
+))
 VALID_RELATIONS = frozenset((
     "ubicado_en", "tecnico_de", "parte_de", "hincha_de",
     "juega_en", "pertenece_a", "relacionado_con", "co_mentioned",
     "jugó_contra", "dirigido_por", "ganó_a", "perdió_contra",
 ))
 
-# Entities that are noise — roles, pronouns, generic terms, temporal words
+# Entities that are noise — roles, pronouns, generic terms, common nouns
 _ENTITY_BLACKLIST = frozenset({
+    # Roles and pronouns
     "user", "usuario", "assistant", "asistente", "bot", "ia", "ai",
-    "hoy", "ayer", "mañana", "ahora", "antes", "después",
     "yo", "tu", "el", "ella", "nosotros", "ustedes",
-    "persona", "lugar", "entidad", "actividad",
+    # Temporal
+    "hoy", "ayer", "mañana", "ahora", "antes", "después",
+    # Meta terms
+    "persona", "lugar", "entidad", "actividad", "obra",
     "conversación", "conversacion", "chat", "sesión", "sesion",
     "mensaje", "pregunta", "respuesta", "tema", "topic",
+    "información", "informacion", "dato", "datos",
+    # Greetings
     "hola", "chau", "adiós", "adios", "gracias", "por favor",
     "buenos días", "buenas tardes", "buenas noches",
+    # Geographic generics
     "provincia", "ciudad", "país", "pais", "club", "equipo",
-    "información", "informacion", "dato", "datos", "pino",
+    # Common nouns that should never be entities
+    "libro", "libros", "película", "películas", "pelicula", "peliculas",
+    "novela", "novelas", "serie", "series", "historia", "historias",
+    "personaje", "personajes", "autor", "autora", "escritor", "escritora",
+    "mundo", "vida", "muerte", "año", "años", "tiempo", "parte", "partes",
+    "tipo", "tipos", "forma", "formas", "cosa", "cosas", "gente",
+    "rata", "cueva", "bat", "pino", "casa", "familia",
+    "cultura", "popular", "memoria", "internet", "web",
+    # Numbers as words
+    "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho",
+    "nueve", "diez", "cien", "mil",
 })
 
 
@@ -146,8 +165,8 @@ class ConversationExtractor:
     it doesn't get recorded. Empty facts is the correct result for most turns.
     """
 
-    def __init__(self, router: ModelRouter) -> None:
-        self._router = router
+    def __init__(self, llm: LLMClient) -> None:
+        self._llm = llm
 
     async def extract(self, user_msg: str, assistant_msg: str) -> ExtractionResult:
         try:
@@ -157,20 +176,18 @@ class ConversationExtractor:
             return ExtractionResult()
 
     async def _call_llm(self, user_msg: str, assistant_msg: str) -> ExtractionResult:
-        from providers.base import ChatMessage
-
         prompt = _CONVERSATION_PROMPT.format(
             user_msg=user_msg[:500],
             assistant_msg=assistant_msg[:500],
         )
 
-        response = await self._router.chat_utility(
-            [ChatMessage(role="user", content=prompt)],
+        raw_response = await self._llm.chat(
+            [{"role": "user", "content": prompt}],
             temperature=0.0,
             max_tokens=500,
         )
 
-        raw = _clean_response(response.content)
+        raw = _clean_response(raw_response)
         return self._parse(raw)
 
     def _parse(self, raw: str) -> ExtractionResult:
@@ -222,22 +239,24 @@ class ConversationExtractor:
         if not isinstance(item, dict):
             return None
         name = str(item.get("name", "")).strip()
-        etype = str(item.get("type", "")).strip().lower()
-        if not name or etype not in VALID_TYPES:
+        raw_type = str(item.get("type", "")).strip().lower()
+        if not name or raw_type not in VALID_TYPES:
             return None
         name_clean = name.lower().strip("!?.,;:\"'()[]")
         if name_clean in _ENTITY_BLACKLIST:
             return None
-        if len(name) <= 2:
+        if len(name) <= 3:
             return None
-        return Entity(name=name, type=etype)
+        # Map extractor type to ontology type
+        ontology_type = map_extractor_type(raw_type)
+        return Entity(name=name, type=ontology_type)
 
 
 class SearchExtractor:
     """Extracts facts from web search results. Source: web."""
 
-    def __init__(self, router: ModelRouter) -> None:
-        self._router = router
+    def __init__(self, llm: LLMClient) -> None:
+        self._llm = llm
 
     async def extract(self, query: str, search_text: str) -> list[ExtractedFact]:
         try:
@@ -247,20 +266,18 @@ class SearchExtractor:
             return []
 
     async def _call_llm(self, query: str, search_text: str) -> list[ExtractedFact]:
-        from providers.base import ChatMessage
-
         prompt = _SEARCH_PROMPT.format(
             query=query,
             text=search_text[:1500],
         )
 
-        response = await self._router.chat_utility(
-            [ChatMessage(role="user", content=prompt)],
+        raw_response = await self._llm.chat(
+            [{"role": "user", "content": prompt}],
             temperature=0.0,
             max_tokens=400,
         )
 
-        raw = _clean_response(response.content)
+        raw = _clean_response(raw_response)
         arr = _parse_first_json(raw, "array")
         if not isinstance(arr, list):
             return []
@@ -280,8 +297,8 @@ class SearchExtractor:
 class RAGExtractor:
     """Extracts facts from RAG retrieval results. Source: rag."""
 
-    def __init__(self, router: ModelRouter) -> None:
-        self._router = router
+    def __init__(self, llm: LLMClient) -> None:
+        self._llm = llm
 
     async def extract(self, query: str, rag_text: str) -> list[ExtractedFact]:
         try:
@@ -291,20 +308,18 @@ class RAGExtractor:
             return []
 
     async def _call_llm(self, query: str, rag_text: str) -> list[ExtractedFact]:
-        from providers.base import ChatMessage
-
         prompt = _SEARCH_PROMPT.format(
             query=query,
             text=rag_text[:1500],
         )
 
-        response = await self._router.chat_utility(
-            [ChatMessage(role="user", content=prompt)],
+        raw_response = await self._llm.chat(
+            [{"role": "user", "content": prompt}],
             temperature=0.0,
             max_tokens=400,
         )
 
-        raw = _clean_response(response.content)
+        raw = _clean_response(raw_response)
         arr = _parse_first_json(raw, "array")
         if not isinstance(arr, list):
             return []

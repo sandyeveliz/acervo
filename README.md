@@ -176,6 +176,44 @@ Acervo is in early development. The core graph and context engine are working. L
 | MCP server | 📋 planned |
 | `acervo init` indexer | 📋 planned |
 | Community knowledge packs | 📋 planned |
+---
+
+## Why Acervo?
+
+In library science, an *acervo* is the complete collection of a library —
+every book, document, and record it holds, organized so anything can be
+found when needed.
+
+That's the mental model behind this library.
+
+An agent's memory should work like a well-run library: knowledge organized
+by subject, filed in the right place, and retrieved by a librarian who knows
+exactly which shelf to go to — not by someone who reads every book from
+cover to cover every time you ask a question.
+
+When you talk to an agent powered by Acervo, it doesn't dump everything it
+knows into the context window. It navigates: *what subject are we in, which
+shelf holds that, which document is relevant right now?* It pulls only those
+pages — and nothing else.
+
+This keeps token usage flat no matter how long the conversation runs, and
+gives the agent something closer to how human memory actually works: not
+perfect recall of everything, but fast, structured access to what matters
+in the moment.
+
+**Layer 1 — the reference collection:** universal knowledge anyone can
+verify. Cities, programming languages, frameworks, institutions. Contributed
+and shared by the community as downloadable packs — like open-access
+reference books any library can add to its shelves.
+
+**Layer 2 — the personal archive:** what the user tells the agent about
+themselves, their work, their projects. Treated as ground truth within that
+user's world — the way a librarian trusts that the person requesting a file
+knows what's in their own folder.
+
+Cross-layer links connect the two: Sandy's project *[PROJECT 1]* lives in Layer 2,
+but its link to Angular/React/Astro points into Layer 1 — so the agent
+understands both the personal context and the technical depth behind it.
 
 ---
 

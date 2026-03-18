@@ -6,15 +6,23 @@ license = {text = "Apache-2.0"}
 authors = [{name = "Sandy Veliz", email = "sandy.e.veliz@gmail.com"}]
 requires-python = ">=3.11"
 dependencies = [
-    # graph.py — pure stdlib, no extra deps
-    # extractor.py — requires model_router and utils from the host project (avs-agents)
-    # These are the PyPI deps used indirectly:
     "pydantic>=2.0",
 ]
+
+[project.optional-dependencies]
+docs = ["mkdocs-material"]
+dev = ["pytest", "pytest-asyncio", "mkdocs-material"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: requires a running LLM server (deselect with -m 'not integration')",
+]
+asyncio_mode = "auto"
+testpaths = ["tests"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["acervo"]
