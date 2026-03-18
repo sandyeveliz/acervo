@@ -1,49 +1,33 @@
 # acervo
 
-**Layered memory for AI agents.** Graph-based context engine with universal knowledge and personal user layers.
+**Context proxy for AI agents.** Sits between the user and the LLM — enriches context before, extracts knowledge after.
 
 ---
 
 Every conversation your AI agent has starts from scratch. Every context is forgotten. Your agent asks the same questions, loses the same insights, and has no idea who it's talking to.
 
-Acervo fixes that — not by dumping everything into the context window, but by building a structured, layered memory graph that knows what to retrieve, when to retrieve it, and how much it can trust what it knows.
+Acervo fixes that — not by dumping everything into the context window, but by building a structured knowledge graph that knows what to retrieve, when to retrieve it, and how much it can trust what it knows.
 
 ---
 
 ## How it works
 
-Acervo sits between your agent and its LLM. It intercepts every message, extracts knowledge, builds a graph, and assembles only the relevant context before each call — keeping token usage flat no matter how long the conversation runs.
+Acervo is a **context proxy**. It intercepts every message to build context from its knowledge graph, and intercepts every response to extract and store new knowledge.
 
 ```
-Agent sends message
-    ↓ Acervo extracts entities + facts → graph
-    ↓ Acervo assembles context (topic-aware, budget-aware)
-    ↓ LLM receives a tight, relevant context block
-    ↓ Token usage stays stable. Knowledge accumulates.
+User message
+    ↓
+acervo.prepare(message, history)
+    ↓  topic detection → query planning → context building
+    ↓  returns context_stack + plan (GRAPH or WEB_SEARCH)
+    ↓
+Client calls LLM with enriched context
+    ↓
+acervo.process(message, response, web_results?)
+    ↓  entity extraction → fact persistence → graph update
+    ↓
+Knowledge accumulates. Token usage stays flat.
 ```
-
----
-
-## Two knowledge layers
-
-Acervo separates what the agent knows into two distinct layers:
-
-**Layer 1 — Universal knowledge** (verifiable, shareable, community-built)
-Facts about the world: cities, programming languages, frameworks, institutions. Downloadable as community packs. Immutable once verified.
-
-**Layer 2 — Personal context** (user-asserted, real for that user)
-What the user tells the agent about themselves: their projects, team, preferences, work. Treated as ground truth within that user's context — like a new employee trusting what their manager says, even before it's publicly verifiable.
-
-```python
-# Layer 1 — anyone can verify this
-Node("Cipolletti", type="Place", layer=Layer.UNIVERSAL, source="world")
-
-# Layer 2 — Sandy says so, real for Sandy
-Node("Altovallestudio", type="Organization", layer=Layer.PERSONAL,
-     owner="Sandy", source="user_assertion", confidence_for_owner=1.0)
-```
-
-Nodes that are mentioned but not fully described are stored as `incomplete` with a `pending_fields` list — the agent fills them in naturally as the conversation continues, without interrogating the user.
 
 ---
 
@@ -54,94 +38,113 @@ pip install acervo
 ```
 
 ```python
-from acervo import Acervo
+from acervo import Acervo, OpenAIClient
 
-memory = Acervo(owner="Sandy")
+# Any OpenAI-compatible LLM (LM Studio, Ollama, OpenAI, etc.)
+llm = OpenAIClient(
+    base_url="http://localhost:1234/v1",
+    model="qwen2.5-3b-instruct",
+    api_key="lm-studio",
+)
 
-# After each message — Acervo extracts and stores
-memory.commit("I work at Altovallestudio, we have 4 projects: Butaco, Checkear, Walletfy and the main app")
+memory = Acervo(llm=llm, owner="Sandy")
 
-# Before each LLM call — Acervo assembles relevant context
-context = memory.materialize(query="project status", token_budget=800)
+# Before LLM call — Acervo builds context from knowledge graph
+prep = await memory.prepare(user_text, history)
+# prep.context_stack → ready for LLM
+# prep.plan.tool → "GRAPH_ALL", "WEB_SEARCH", or "READY"
 
-# context is a ready-to-use string — inject it into your prompt
+# After LLM call — Acervo extracts knowledge from the response
+await memory.process(user_text, assistant_response)
+```
+
+The lower-level API is also available:
+
+```python
+# Extract and store knowledge
+await memory.commit("Batman was created by Bill Finger in 1939")
+
+# Build context for a query
+context = memory.materialize("Batman", token_budget=800)
 ```
 
 ---
 
-## Run the init indexer on any directory
+## Two knowledge layers
 
-Point Acervo at a folder and it builds the initial graph from whatever it finds — code, documents, spreadsheets, folder structure. No manual configuration.
+Acervo separates what the agent knows into two layers:
 
-```bash
-acervo init ./my-project
+**Layer 1 — Universal** (world knowledge, verifiable)
+
+Facts about the world: cities, characters, technologies, institutions. Detected automatically when the entity type is universal (places, characters, technologies).
+
+**Layer 2 — Personal** (user-asserted, trusted within context)
+
+What the user tells the agent: their projects, preferences, relationships. Treated as ground truth for that user.
+
+```python
+from acervo.layers import Layer
+
+# Layer 1 — anyone can verify this
+# Detected automatically for Lugar, Personaje, Tecnología types
+graph.upsert_entities(
+    [("Gotham City", "Lugar")],
+    layer=Layer.UNIVERSAL, source="world",
+)
+
+# Layer 2 — Sandy says so, real for Sandy
+graph.upsert_entities(
+    [("Altovallestudio", "Organización")],
+    layer=Layer.PERSONAL, source="user_assertion", owner="Sandy",
+)
 ```
-
-What it extracts **without opening files**: file names, types, folder hierarchy, recency.
-What it extracts **when it can open them**: stack from `package.json`/`pyproject.toml`, module structure from source code, text from `.md` and `.txt`, metadata from `.docx` and `.xlsx`.
-
-After init, the agent already knows the shape of your work before you say a word.
 
 ---
 
-## MCP server
+## Auto-registering ontology
 
-Acervo exposes itself as an MCP server so any compatible agent — Claude Code, Cursor, Windsurf, or your own — can use it with zero integration code.
+Acervo ships with built-in entity types and relations, but the LLM can create new ones on the fly.
 
-```bash
-acervo mcp
+**Built-in types:** `Persona`, `Personaje`, `Organización`, `Proyecto`, `Lugar`, `Tecnología`, `Obra`, `Universo`, `Editorial`
+
+**Built-in relations:** `IS_A`, `CREATED_BY`, `ALIAS_OF`, `PART_OF`, `SET_IN`, `DEBUTED_IN`, `PUBLISHED_BY`, `TRABAJA_EN`, `VIVE_EN`, and more.
+
+When the LLM extracts an entity with a type that doesn't exist, Acervo auto-registers it:
+
+```python
+# LLM returns {"name": "Flash", "type": "superhero"}
+# → Acervo auto-registers "Superhero" as a new entity type
+# → No code changes needed
 ```
 
-Add to your `claude_desktop_config.json` or Claude Code config:
-
-```json
-{
-  "mcpServers": {
-    "acervo": {
-      "command": "acervo mcp"
-    }
-  }
-}
-```
-
-Two tools are exposed:
-
-| Tool | Description |
-|------|-------------|
-| `mem_commit(text, owner)` | Extract and store knowledge from raw text |
-| `mem_materialize(query, budget, owner)` | Retrieve a context string ready for prompt injection |
-
----
-
-## Ontology — extensible entity types
-
-Acervo ships with a base set of entity types. You can register your own.
-
-**Built-in types:** `Person`, `Organization`, `Project`, `Place`, `Technology`, `Document`, `Rule`
-
-**Built-in relations:** `WORKS_AT`, `LIVES_IN`, `OWNS`, `BELONGS_TO`, `USES_TECHNOLOGY`, `HAS_MODULE`, `LIKES`, `RELATED_TO`
+You can also register types explicitly:
 
 ```python
 from acervo.ontology import register_type, register_relation
 
-# Add your own entity type
-register_type(
-    name="Recipe",
-    attributes=["ingredients", "time", "difficulty"],
-    layer_default=Layer.PERSONAL
-)
-
-# Add your own relation
-register_relation("COAUTHORED_WITH")
+register_type("Recipe", ["ingredients", "time", "difficulty"])
+register_relation("INSPIRED_BY")
 ```
 
-Entities the extractor can't classify are stored as `type=Unknown` with `status=incomplete` and resolved in future turns.
+---
+
+## Pipeline components
+
+Acervo's `prepare()` runs a full pipeline internally, all behind a single `LLMClient` protocol:
+
+| Component | What it does |
+|-----------|-------------|
+| **Topic detector** | 3-level cascade: keywords → embeddings → LLM classification |
+| **Query planner** | LLM decides: use graph data, search web, or respond directly |
+| **Context index** | Builds a 3-layer context stack with sliding window and token budgeting |
+| **Extractor** | Extracts entities, relations, and facts from conversations and web results |
+| **Synthesizer** | Renders graph nodes into compact text for LLM context injection |
 
 ---
 
 ## Why not just use a bigger context window?
 
-Larger context windows delay the problem — they don't solve it. Acervo's context stays stable regardless of conversation length because the graph grows with topics, not with messages. A 50-turn conversation about one project produces roughly the same context block as a 5-turn one.
+Larger context windows delay the problem — they don't solve it. Acervo's context stays stable regardless of conversation length because the graph grows with topics, not with messages.
 
 ```
 Without Acervo:   turn 1 → 200tk  |  turn 50 → 9000tk  |  turn 100 → limit
@@ -150,83 +153,51 @@ With Acervo:      turn 1 → 200tk  |  turn 50 → 400tk   |  turn 100 → 420tk
 
 ---
 
-## Community knowledge packs (Layer 1)
-
-Community-contributed packs for Layer 1 knowledge — download only what your agent needs.
-
-```bash
-acervo install pack javascript
-acervo install pack python
-acervo install pack geography-argentina
-```
-
-Contributions welcome. See `CONTRIBUTING.md` for the pack format spec.
-
----
-
 ## Project status
-
-Acervo is in early development. The core graph and context engine are working. Layers, ontology, MCP server, and init indexer are in progress.
 
 | Feature | Status |
 |---------|--------|
-| Graph + topic detection | ✅ working |
-| Two-layer architecture | 🔧 in progress |
-| Typed ontology | 🔧 in progress |
-| MCP server | 📋 planned |
-| `acervo init` indexer | 📋 planned |
-| Community knowledge packs | 📋 planned |
+| Knowledge graph + JSON persistence | ✅ Working |
+| Two-layer architecture (UNIVERSAL/PERSONAL) | ✅ Working |
+| Auto-registering ontology | ✅ Working |
+| Semantic relations (IS_A, CREATED_BY, etc.) | ✅ Working |
+| prepare()/process() context proxy API | ✅ Working |
+| Topic detector (3-level cascade) | ✅ Working |
+| Query planner (LLM-based tool selection) | ✅ Working |
+| Context index with token budgeting | ✅ Working |
+| Built-in OpenAIClient (zero deps) | ✅ Working |
+| LLMClient + Embedder protocols | ✅ Working |
+| 56 unit tests | ✅ Passing |
+| MkDocs documentation | ✅ Published |
+| MCP server | 📋 Planned |
+| REST API (`acervo serve`) | 📋 Planned |
+| `acervo init` directory indexer | 📋 Planned |
+| Community knowledge packs | 📋 Planned |
+| Vector search (embeddings) | 📋 Planned |
+
+---
+
+## Documentation
+
+Full documentation available at **[sandyeveliz.github.io/acervo](https://sandyeveliz.github.io/acervo)**
+
+- [Getting Started](https://sandyeveliz.github.io/acervo/getting-started/)
+- [Configuration](https://sandyeveliz.github.io/acervo/configuration/)
+- [Knowledge Layers](https://sandyeveliz.github.io/acervo/layers/)
+
 ---
 
 ## Why Acervo?
 
-In library science, an *acervo* is the complete collection of a library —
-every book, document, and record it holds, organized so anything can be
-found when needed.
+In library science, an *acervo* is the complete collection of a library — every book, document, and record it holds, organized so anything can be found when needed.
 
-That's the mental model behind this library.
-
-An agent's memory should work like a well-run library: knowledge organized
-by subject, filed in the right place, and retrieved by a librarian who knows
-exactly which shelf to go to — not by someone who reads every book from
-cover to cover every time you ask a question.
-
-When you talk to an agent powered by Acervo, it doesn't dump everything it
-knows into the context window. It navigates: *what subject are we in, which
-shelf holds that, which document is relevant right now?* It pulls only those
-pages — and nothing else.
-
-This keeps token usage flat no matter how long the conversation runs, and
-gives the agent something closer to how human memory actually works: not
-perfect recall of everything, but fast, structured access to what matters
-in the moment.
-
-**Layer 1 — the reference collection:** universal knowledge anyone can
-verify. Cities, programming languages, frameworks, institutions. Contributed
-and shared by the community as downloadable packs — like open-access
-reference books any library can add to its shelves.
-
-**Layer 2 — the personal archive:** what the user tells the agent about
-themselves, their work, their projects. Treated as ground truth within that
-user's world — the way a librarian trusts that the person requesting a file
-knows what's in their own folder.
-
-Cross-layer links connect the two: Sandy's project *[PROJECT 1]* lives in Layer 2,
-but its link to Angular/React/Astro points into Layer 1 — so the agent
-understands both the personal context and the technical depth behind it.
+An agent's memory should work like a well-run library: knowledge organized by subject, filed in the right place, and retrieved by a librarian who knows exactly which shelf to go to — not by someone who reads every book from cover to cover every time you ask a question.
 
 ---
 
 ## Contributing
 
-Acervo is open source under Apache 2.0. Contributions are welcome — especially:
-
-- New entity types and relations for the base ontology
-- Community knowledge packs (Layer 1)
-- Parsers for new file types (`.xlsx`, `.docx`, `.pdf`)
-- Integrations with other agent frameworks
-
-See `CONTRIBUTING.md` to get started.
+Acervo is open source under Apache 2.0. See [CONTRIBUTING.md](./CONTRIBUTING.md) to get started.
 
 ---
 
@@ -235,8 +206,6 @@ See `CONTRIBUTING.md` to get started.
 Apache 2.0 — see [LICENSE](./LICENSE).
 
 Copyright 2026 Sandy Veliz
-
-You can use Acervo freely in personal and commercial projects. If you distribute software that includes Acervo, you must retain the copyright notice and indicate any changes you made.
 
 ---
 
