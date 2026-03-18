@@ -66,8 +66,11 @@ class TestExtractorTypeMapping:
     def test_map_actividad(self):
         assert map_extractor_type("actividad") == "Proyecto"
 
-    def test_map_unknown(self):
-        assert map_extractor_type("xyz") == "Unknown"
+    def test_map_unknown_auto_registers(self):
+        """Unknown types get auto-registered by the LLM."""
+        result = map_extractor_type("superhero")
+        assert result == "Superhero"
+        assert is_known_type("Superhero")
 
     def test_map_case_insensitive(self):
         assert map_extractor_type("LUGAR") == "Lugar"

@@ -300,17 +300,22 @@ class Acervo:
         is_no_data_response = any(p in assistant_lower for p in _SKIP_PHRASES)
 
         if is_no_data_response and not web_results:
-            # Still extract entities from user message (as pending_verification)
-            # but don't extract facts from the "I don't know" response
+            # Only create the primary entity the user asked about (not hallucinated ones)
+            # The extractor tends to hallucinate related entities from training data
             result = await self._extractor.extract(user_text, "")
             if result.entities:
-                pairs = [(e.name, e.type) for e in result.entities]
-                self._graph.upsert_entities(pairs, owner=self._owner or None)
-                # Mark as pending_verification since we have no verified data
-                for name, _ in pairs:
-                    node = self._graph.get_node(_make_id(name))
-                    if node and not node.get("facts"):
-                        node["status"] = "pending_verification"
+                # Keep only the first entity (the one the user actually mentioned)
+                primary = result.entities[0]
+                self._graph.upsert_entities(
+                    [(primary.name, primary.type)],
+                    owner=self._owner or None,
+                )
+                node = self._graph.get_node(_make_id(primary.name))
+                if node and not node.get("facts"):
+                    node["status"] = "pending_verification"
+                result.entities = [primary]
+                result.relations = []
+                result.facts = []
             return result
 
         # Extract from conversation (only user facts stored)
@@ -404,20 +409,45 @@ class Acervo:
                 self._graph.set_node_status(nid, "hot")
 
     async def _persist_web_facts(self, query: str, web_content: str) -> None:
-        """Extract and persist facts from web search results."""
+        """Extract and persist entities, relations, and facts from web search results."""
         try:
-            web_facts = await self._search_extractor.extract(query, web_content)
-            if not web_facts:
-                return
-            fact_tuples = [(f.entity, f.fact, "web") for f in web_facts]
+            result = await self._search_extractor.extract(query, web_content)
+
+            # Build entity pairs from extracted entities + fact entities
             entity_pairs = []
-            for f in web_facts:
-                existing = self._graph.get_node(_make_id(f.entity))
-                etype = existing["type"] if existing else "Unknown"
-                entity_pairs.append((f.entity, etype))
+            seen = set()
+            for e in result.entities:
+                if e.name not in seen:
+                    entity_pairs.append((e.name, e.type))
+                    seen.add(e.name)
+            for f in result.facts:
+                if f.entity not in seen:
+                    existing = self._graph.get_node(_make_id(f.entity))
+                    etype = existing["type"] if existing else "Unknown"
+                    entity_pairs.append((f.entity, etype))
+                    seen.add(f.entity)
+
+            if not entity_pairs and not result.facts:
+                return
+
+            # Build relation tuples
+            relations = (
+                [(r.source, r.target, r.relation) for r in result.relations]
+                if result.relations else None
+            )
+
+            # Build fact tuples
+            fact_tuples = (
+                [(f.entity, f.fact, "web") for f in result.facts]
+                if result.facts else None
+            )
+
             self._graph.upsert_entities(
-                entity_pairs, facts=fact_tuples,
-                layer=Layer.UNIVERSAL, source="web",
+                entity_pairs,
+                relations=relations,
+                facts=fact_tuples,
+                layer=Layer.UNIVERSAL,
+                source="web",
             )
         except Exception as e:
             log.warning("Web fact persistence failed: %s", e)

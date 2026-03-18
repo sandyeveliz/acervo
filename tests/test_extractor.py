@@ -130,15 +130,15 @@ async def test_extract_filters_short_names():
 
 
 @pytest.mark.asyncio
-async def test_extract_invalid_relation_normalized():
-    """Invalid relation types get normalized to 'relacionado_con'."""
+async def test_extract_new_relation_auto_registered():
+    """New relation types from LLM get auto-registered, not normalized."""
     response = json.dumps({
         "entities": [
             {"name": "Sandy", "type": "persona"},
-            {"name": "River", "type": "entidad"},
+            {"name": "River", "type": "organizacion"},
         ],
         "relations": [
-            {"source": "Sandy", "target": "River", "relation": "invalid_rel"},
+            {"source": "Sandy", "target": "River", "relation": "fan_of"},
         ],
         "facts": [],
     })
@@ -146,4 +146,4 @@ async def test_extract_invalid_relation_normalized():
     extractor = ConversationExtractor(llm)
 
     result = await extractor.extract("test", "test")
-    assert result.relations[0].relation == "relacionado_con"
+    assert result.relations[0].relation == "fan_of"

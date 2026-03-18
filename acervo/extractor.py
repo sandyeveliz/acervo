@@ -51,36 +51,45 @@ class ExtractionResult:
 
 # ── Prompts ──
 
-_CONVERSATION_PROMPT = """Extraer entidades, relaciones y hechos concretos de esta conversación.
-Cada hecho debe ser una afirmación concreta SOBRE la entidad, no sobre la acción del usuario.
-INCORRECTO: "el usuario menciona que es su ciudad" — eso describe al usuario, no a la entidad.
-CORRECTO: "Sandy vive en Cipolletti" o "juega en el Torneo Federal A" — hechos sobre la entidad.
-Cada hecho lleva "speaker": "user" o "assistant" según quién lo dijo.
-NO agregar conocimiento general. Solo lo explícitamente dicho.
-Responder en JSON con "entities", "relations" y "facts". Responder siempre en español.
+_CONVERSATION_PROMPT = """Extraer entidades, relaciones semánticas y hechos de esta conversación.
 
-Tipos de entidad: lugar, persona, organizacion, tecnologia, obra, actividad
-"obra" es para libros, películas, series, sagas, videojuegos, etc.
-"organizacion" es para empresas, clubes, instituciones.
-"tecnologia" es para lenguajes, frameworks, herramientas.
-Tipos de relación: ubicado_en, tecnico_de, dirigido_por, parte_de, hincha_de, juega_en, jugó_contra, ganó_a, perdió_contra, pertenece_a, relacionado_con
-IMPORTANTE: "le ganó a X" es ganó_a, NO juega_en. "juega_en" es para torneos/ligas, no para partidos contra otro equipo.
+REGLAS:
+- Cada hecho debe ser una afirmación concreta SOBRE la entidad.
+- Cada hecho lleva "speaker": "user" o "assistant" según quién lo dijo.
+- NO agregar conocimiento general. Solo lo explícitamente dicho.
+- Extraer relaciones de categoría y jerarquía cuando apliquen.
+
+Tipos de entidad: lugar, persona, personaje, organizacion, universo, editorial, tecnologia, obra, actividad
+
+Tipos de relación:
+- is_a: clasificación (Batman is_a personaje, Gotham is_a lugar)
+- created_by: creador (Batman created_by Bill Finger)
+- alias_of: identidad alternativa (Batman alias_of Bruce Wayne)
+- part_of: pertenencia a universo/grupo (Batman part_of DC Universe)
+- set_in: ubicación narrativa (Batman set_in Gotham City)
+- debuted_in: primera aparición (Batman debuted_in Detective Comics)
+- published_by: editorial (Detective Comics published_by DC Comics)
+- ubicado_en, parte_de, pertenece_a, relacionado_con: relaciones generales
 
 Ejemplo:
-User: soy hincha de River y vivo en Cipolletti
-Assistant: Cipolletti queda en Rio Negro.
-JSON: {{"entities":[{{"name":"River Plate","type":"entidad"}},{{"name":"Cipolletti","type":"lugar"}},{{"name":"Rio Negro","type":"lugar"}}],"relations":[{{"source":"Cipolletti","target":"Rio Negro","relation":"ubicado_en"}}],"facts":[{{"entity":"River Plate","fact":"Sandy es hincha de River Plate","speaker":"user"}},{{"entity":"Cipolletti","fact":"Sandy vive en Cipolletti","speaker":"user"}},{{"entity":"Cipolletti","fact":"está en Rio Negro","speaker":"assistant"}}]}}
+User: Batman fue creado por Bill Finger en 1939
+Assistant: Batman es un personaje de DC Comics, su nombre real es Bruce Wayne.
+JSON: {{"entities":[{{"name":"Batman","type":"personaje"}},{{"name":"Bill Finger","type":"persona"}},{{"name":"DC Universe","type":"universo"}},{{"name":"Bruce Wayne","type":"persona"}},{{"name":"Gotham City","type":"lugar"}}],"relations":[{{"source":"Batman","target":"Bill Finger","relation":"created_by"}},{{"source":"Batman","target":"DC Universe","relation":"part_of"}},{{"source":"Batman","target":"Bruce Wayne","relation":"alias_of"}}],"facts":[{{"entity":"Batman","fact":"Fue creado en 1939","speaker":"user"}},{{"entity":"Batman","fact":"Es un personaje de DC Comics","speaker":"assistant"}}]}}
 
 User: {user_msg}
 Assistant: {assistant_msg}
 JSON:"""
 
-_SEARCH_PROMPT = """Extract verifiable facts from this search result about "{query}".
-Return a JSON array of objects with "entity" and "fact".
-Only include facts directly stated in the text. Do NOT infer or add knowledge.
-Responder siempre en español.
+_SEARCH_PROMPT = """Extraer entidades, relaciones y hechos verificables de estos resultados de búsqueda sobre "{query}".
 
-Search result:
+Responder en JSON con "entities", "relations" y "facts".
+- entities: lista de {{"name": "...", "type": "..."}} (tipos: lugar, persona, personaje, organizacion, universo, editorial, obra)
+- relations: lista de {{"source": "...", "target": "...", "relation": "..."}} (relaciones: is_a, created_by, alias_of, part_of, set_in, debuted_in, published_by, ubicado_en, parte_de)
+- facts: lista de {{"entity": "...", "fact": "..."}}
+
+Solo incluir datos explícitos del texto. NO inventar.
+
+Resultados:
 {text}
 
 JSON:"""
@@ -118,10 +127,15 @@ def _clean_response(content: str) -> str:
 # ── Extractors ──
 
 VALID_TYPES = frozenset((
-    "lugar", "persona", "entidad", "actividad",
+    "lugar", "persona", "personaje", "entidad", "actividad",
     "organizacion", "organización", "tecnologia", "tecnología", "obra",
+    "universo", "editorial", "comic",
 ))
 VALID_RELATIONS = frozenset((
+    # Universal semantic relations
+    "is_a", "created_by", "alias_of", "part_of", "set_in",
+    "debuted_in", "published_by",
+    # Domain relations
     "ubicado_en", "tecnico_de", "parte_de", "hincha_de",
     "juega_en", "pertenece_a", "relacionado_con", "co_mentioned",
     "jugó_contra", "dirigido_por", "ganó_a", "perdió_contra",
@@ -214,9 +228,10 @@ class ConversationExtractor:
             src = str(item.get("source", "")).strip()
             tgt = str(item.get("target", "")).strip()
             rel = str(item.get("relation", "")).strip().lower()
-            if src and tgt and rel:
+            if src and tgt and rel and len(rel) >= 3:
                 if rel not in VALID_RELATIONS:
-                    rel = "relacionado_con"
+                    from acervo.ontology import register_relation
+                    register_relation(rel)
                 result.relations.append(Relation(source=src, target=tgt, relation=rel))
 
         for item in obj.get("facts", []):
@@ -253,45 +268,94 @@ class ConversationExtractor:
 
 
 class SearchExtractor:
-    """Extracts facts from web search results. Source: web."""
+    """Extracts entities, relations, and facts from web search results."""
 
     def __init__(self, llm: LLMClient) -> None:
         self._llm = llm
 
-    async def extract(self, query: str, search_text: str) -> list[ExtractedFact]:
+    async def extract(self, query: str, search_text: str) -> ExtractionResult:
+        """Extract structured knowledge from web search results.
+
+        Returns ExtractionResult with entities, relations, and facts.
+        """
         try:
             return await self._call_llm(query, search_text)
         except Exception as e:
             log.warning("Search extraction failed: %s", e)
-            return []
+            return ExtractionResult()
 
-    async def _call_llm(self, query: str, search_text: str) -> list[ExtractedFact]:
+    async def _call_llm(self, query: str, search_text: str) -> ExtractionResult:
         prompt = _SEARCH_PROMPT.format(
             query=query,
-            text=search_text[:1500],
+            text=search_text[:2000],
         )
 
         raw_response = await self._llm.chat(
             [{"role": "user", "content": prompt}],
             temperature=0.0,
-            max_tokens=400,
+            max_tokens=600,
         )
 
         raw = _clean_response(raw_response)
-        arr = _parse_first_json(raw, "array")
-        if not isinstance(arr, list):
-            return []
 
-        facts = []
-        for item in arr:
+        # Try parsing as object first (new format with entities/relations/facts)
+        obj = _parse_first_json(raw, "object")
+        if isinstance(obj, dict) and ("entities" in obj or "facts" in obj):
+            return self._parse_object(obj)
+
+        # Fallback: parse as array (old format with just entity/fact pairs)
+        arr = _parse_first_json(raw, "array")
+        if isinstance(arr, list):
+            result = ExtractionResult()
+            for item in arr:
+                if not isinstance(item, dict):
+                    continue
+                entity = str(item.get("entity", "")).strip()
+                fact = str(item.get("fact", "")).strip()
+                if entity and fact and len(entity) > 3:
+                    name_clean = entity.lower().strip("!?.,;:\"'()[]")
+                    if name_clean not in _ENTITY_BLACKLIST:
+                        result.facts.append(ExtractedFact(
+                            entity=entity, fact=fact, source="web",
+                        ))
+            return result
+
+        return ExtractionResult()
+
+    def _parse_object(self, obj: dict) -> ExtractionResult:
+        """Parse structured JSON with entities, relations, and facts."""
+        result = ExtractionResult()
+
+        for item in obj.get("entities", []):
+            e = ConversationExtractor._parse_entity(item)
+            if e:
+                result.entities.append(e)
+
+        for item in obj.get("relations", []):
+            if not isinstance(item, dict):
+                continue
+            src = str(item.get("source", "")).strip()
+            tgt = str(item.get("target", "")).strip()
+            rel = str(item.get("relation", "")).strip().lower()
+            if src and tgt and rel and len(rel) >= 3:
+                if rel not in VALID_RELATIONS:
+                    from acervo.ontology import register_relation
+                    register_relation(rel)
+                result.relations.append(Relation(source=src, target=tgt, relation=rel))
+
+        for item in obj.get("facts", []):
             if not isinstance(item, dict):
                 continue
             entity = str(item.get("entity", "")).strip()
             fact = str(item.get("fact", "")).strip()
-            if entity and fact:
-                facts.append(ExtractedFact(entity=entity, fact=fact, source="web"))
+            if entity and fact and len(entity) > 3:
+                name_clean = entity.lower().strip("!?.,;:\"'()[]")
+                if name_clean not in _ENTITY_BLACKLIST:
+                    result.facts.append(ExtractedFact(
+                        entity=entity, fact=fact, source="web",
+                    ))
 
-        return facts
+        return result
 
 
 class RAGExtractor:

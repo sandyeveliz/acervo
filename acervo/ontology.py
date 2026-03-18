@@ -13,19 +13,32 @@ Usage:
 
 from __future__ import annotations
 
+import logging
+
 from acervo.layers import Layer
+
+log = logging.getLogger(__name__)
 
 # ── Built-in entity types ──────────────────────────────────────────────
 
 BUILTIN_ENTITY_TYPES: dict[str, list[str]] = {
+    # People and characters
     "Persona":       ["nombre", "edad", "rol", "relacion_con_owner"],
+    "Personaje":     ["nombre", "alias", "creador", "universo"],
+    # Organizations and universes
     "Organización":  ["nombre", "tipo", "industria", "ubicacion"],
+    "Universo":      ["nombre", "editorial", "personajes"],
+    "Editorial":     ["nombre", "fundacion", "pais"],
+    # Projects and works
     "Proyecto":      ["nombre", "stack", "scaffold", "arquitectura", "modulos", "estado"],
+    "Obra":          ["nombre", "tipo", "autor", "genero", "año"],
+    # Places
     "Lugar":         ["nombre", "tipo", "region", "pais"],
+    # Technology
     "Tecnología":    ["nombre", "tipo", "version"],
+    # Other
     "Documento":     ["nombre", "tipo", "path", "contenido_resumen"],
     "Regla":         ["descripcion", "aplica_a", "tecnologia", "severity"],
-    "Obra":          ["nombre", "tipo", "autor", "genero", "año"],
 }
 
 _entity_registry: dict[str, list[str]] = dict(BUILTIN_ENTITY_TYPES)
@@ -33,6 +46,15 @@ _entity_registry: dict[str, list[str]] = dict(BUILTIN_ENTITY_TYPES)
 # ── Built-in relations ────────────────────────────────────────────────────
 
 BUILTIN_RELATIONS: set[str] = {
+    # Universal semantic relations (knowledge graph standard)
+    "IS_A",           # Batman is_a Personaje
+    "CREATED_BY",     # Batman created_by Bill Finger
+    "ALIAS_OF",       # Batman alias_of Bruce Wayne
+    "PART_OF",        # Batman part_of DC Universe
+    "SET_IN",         # Batman set_in Gotham City
+    "DEBUTED_IN",     # Batman debuted_in Detective Comics
+    "PUBLISHED_BY",   # Detective Comics published_by DC Comics
+    # Domain relations
     "TRABAJA_EN",
     "VIVE_EN",
     "DUEÑO_DE",
@@ -43,6 +65,8 @@ BUILTIN_RELATIONS: set[str] = {
     "FAMILIAR_DE",
     "RELACIONADO_CON",
     # Legacy from conversation extractor (snake_case)
+    "is_a", "created_by", "alias_of", "part_of", "set_in",
+    "debuted_in", "published_by",
     "ubicado_en", "tecnico_de", "parte_de", "hincha_de",
     "juega_en", "pertenece_a", "relacionado_con", "co_mentioned",
     "jugó_contra", "dirigido_por", "ganó_a", "perdió_contra",
@@ -91,7 +115,8 @@ def is_known_type(name: str) -> bool:
 _EXTRACTOR_TYPE_MAP: dict[str, str] = {
     "lugar": "Lugar",
     "persona": "Persona",
-    "entidad": "Unknown",  # too broad — let incomplete resolution handle it
+    "personaje": "Personaje",
+    "entidad": "Unknown",
     "actividad": "Proyecto",
     "tecnologia": "Tecnología",
     "tecnología": "Tecnología",
@@ -101,21 +126,37 @@ _EXTRACTOR_TYPE_MAP: dict[str, str] = {
     "organización": "Organización",
     "proyecto": "Proyecto",
     "obra": "Obra",
+    "universo": "Universo",
+    "editorial": "Editorial",
+    "comic": "Obra",
 }
 
 
 def map_extractor_type(raw_type: str) -> str:
     """Map a raw extractor type (lowercase) to an ontology type.
 
-    Returns the ontology type name, or "Unknown" if no mapping exists.
+    If the type is not in the mapping, auto-registers it as a new type
+    with capitalized name. The LLM is allowed to create new types.
     """
-    return _EXTRACTOR_TYPE_MAP.get(raw_type.lower().strip(), "Unknown")
+    clean = raw_type.lower().strip()
+    mapped = _EXTRACTOR_TYPE_MAP.get(clean)
+    if mapped:
+        return mapped
+
+    # Auto-register new type from the LLM
+    new_type = clean.capitalize()
+    if len(new_type) >= 3 and new_type not in _entity_registry:
+        register_type(new_type, [])
+        _EXTRACTOR_TYPE_MAP[clean] = new_type
+        log.info("Auto-registered new entity type: %s", new_type)
+    return new_type if len(new_type) >= 3 else "Unknown"
 
 
 # ── Universal knowledge detection ──────────────────────────────────────────
 
-# Entity types that are typically universal (world knowledge)
-_UNIVERSAL_TYPES: frozenset[str] = frozenset({"Lugar", "Tecnología"})
+_UNIVERSAL_TYPES: frozenset[str] = frozenset({
+    "Lugar", "Tecnología", "Personaje", "Universo", "Editorial", "Obra",
+})
 
 
 def is_likely_universal(entity_type: str) -> bool:
