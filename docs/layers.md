@@ -2,6 +2,33 @@
 
 Acervo separates knowledge into two layers. This distinction is fundamental to how the memory graph works.
 
+```mermaid
+graph TD
+    subgraph PERSONAL["PERSONAL layer (user-specific)"]
+        sandy["Sandy (Persona)"]
+        avs["Altovallestudio (Organizacion)"]
+        butaco["Butaco (Proyecto)"]
+    end
+    subgraph UNIVERSAL["UNIVERSAL layer (world knowledge)"]
+        cipo["Cipolletti (Lugar)"]
+        rn["Rio Negro (Lugar)"]
+        angular["Angular (Tecnologia)"]
+    end
+
+    sandy -->|TRABAJA_EN| avs
+    sandy -->|VIVE_EN| cipo
+    cipo -->|ubicado_en| rn
+    sandy -->|DUEÑO_DE| butaco
+    butaco -->|USA_TECNOLOGIA| angular
+
+    classDef personal fill:#3a1f5c,stroke:#7c3aed
+    classDef universal fill:#1a3a5c,stroke:#3a7abd
+    class sandy,avs,butaco personal
+    class cipo,rn,angular universal
+```
+
+<sup>Purple = PERSONAL · Blue = UNIVERSAL · Edges can cross layers</sup>
+
 ---
 
 ## Layer 1 — Universal (UNIVERSAL)
@@ -9,7 +36,6 @@ Acervo separates knowledge into two layers. This distinction is fundamental to h
 Verifiable world knowledge. Cities, countries, programming languages, frameworks, historical facts.
 
 - **Source:** `"world"` — externally verifiable
-- **Shareable:** can be distributed as community knowledge packs
 - **Immutable:** once verified, it doesn't change per user
 - **Examples:** "Cipolletti is in Rio Negro", "React is a JavaScript framework"
 
@@ -49,6 +75,11 @@ graph.upsert_entities(
   ]
 }
 ```
+
+!!! info "Planned: Community knowledge packs"
+    Pre-built UNIVERSAL layer graphs for specific domains (programming languages,
+    geography, etc.) are planned for a future release. These will be installable
+    and shareable. See [Roadmap](roadmap.md).
 
 ---
 
@@ -148,8 +179,13 @@ Once the type is resolved, the node transitions to `"complete"`.
 
 Each turn, node statuses cycle to age out context:
 
-```
-hot  ->  warm  ->  cold
+```mermaid
+stateDiagram-v2
+    [*] --> hot: Node created or mentioned
+    hot --> warm: cycle_status()
+    warm --> cold: cycle_status()
+    cold --> hot: User mentions entity
+    warm --> hot: User mentions entity
 ```
 
 - **hot** — actively being discussed. Always included in materialized context.
@@ -162,25 +198,33 @@ New or mentioned nodes are set to `"hot"`. Call `memory.cycle_status()` at the s
 
 ## Ontology
 
-Acervo ships with built-in entity types and relations. You can register your own.
+Acervo ships with built-in entity types and relations. The LLM can also create new ones on the fly.
 
 ### Built-in entity types
 
 | Type | Attributes |
 |------|-----------|
 | Persona | nombre, edad, rol, relacion_con_owner |
+| Personaje | nombre, universo, creador |
 | Organizacion | nombre, tipo, industria, ubicacion |
 | Proyecto | nombre, stack, scaffold, arquitectura, modulos, estado |
 | Lugar | nombre, tipo, region, pais |
 | Tecnologia | nombre, tipo, version |
+| Obra | nombre, autor, fecha |
+| Universo | nombre, editorial |
+| Editorial | nombre, pais |
 | Documento | nombre, tipo, path, contenido_resumen |
 | Regla | descripcion, aplica_a, tecnologia, severity |
 
 ### Built-in relations
 
-`TRABAJA_EN`, `VIVE_EN`, `DUEÑO_DE`, `PERTENECE_A`, `USA_TECNOLOGIA`, `TIENE_MODULO`, `GUSTA_DE`, `FAMILIAR_DE`, `RELACIONADO_CON`
+`IS_A`, `CREATED_BY`, `ALIAS_OF`, `PART_OF`, `SET_IN`, `DEBUTED_IN`, `PUBLISHED_BY`, `TRABAJA_EN`, `VIVE_EN`, `DUEÑO_DE`, `PERTENECE_A`, `USA_TECNOLOGIA`, `TIENE_MODULO`, `GUSTA_DE`, `FAMILIAR_DE`, `RELACIONADO_CON`
 
-### Registering custom types
+### Auto-registration
+
+When the LLM extracts a type or relation that doesn't exist in the ontology, Acervo registers it automatically. For example, if the LLM returns `{"type": "Superhero"}`, Acervo creates a new `Superhero` type on the fly instead of mapping it to `Unknown`.
+
+### Registering custom types manually
 
 ```python
 from acervo.ontology import register_type, register_relation

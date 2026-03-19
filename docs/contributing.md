@@ -43,14 +43,16 @@ Acervo's ontology is extensible. To propose a new built-in entity type:
 
 ### Creating community knowledge packs (Layer 1)
 
-Community knowledge packs provide pre-built universal knowledge for Layer 1. To create one:
+!!! info "Planned"
+    Community knowledge packs are a planned feature. The format described below
+    is provisional and may change. See [Roadmap](roadmap.md) for status.
+
+Community knowledge packs will provide pre-built universal knowledge for Layer 1. The planned workflow:
 
 1. Create a directory under `packs/` with a descriptive name (e.g., `packs/python/`).
 2. Include a `manifest.json` with metadata: name, version, description, and author.
 3. Include the knowledge data as JSON files following the node/edge schema.
 4. Submit a PR with the pack and a brief description of what it covers.
-
-Pack format details will be documented in `docs/packs.md` as the format stabilizes.
 
 ### Submitting a pull request
 

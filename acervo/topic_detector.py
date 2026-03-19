@@ -195,6 +195,16 @@ class TopicDetector:
         """Run the 3-level detection cascade."""
         clean_msg = strip_think_blocks(message)
 
+        # Short messages (< 5 words) like "si", "sus peliculas", "cuantas tiene?"
+        # are almost always follow-ups, not topic changes
+        words = clean_msg.split()
+        if len(words) < 5 and self._current_topic != "none":
+            return DetectionResult(
+                verdict=TopicVerdict.SAME, level=1, confidence=0.9,
+                current_topic=self._current_topic, detected_topic=None,
+                detail="short_message_followup",
+            )
+
         # Level 1: keywords
         result = self._level1_keywords(clean_msg)
         if result is not None:

@@ -4,7 +4,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/sandyeveliz/acervo/releases"><img src="https://img.shields.io/github/v/tag/sandyeveliz/acervo?label=version" alt="Version"></a>
+  <a href="https://pypi.org/project/acervo/"><img src="https://img.shields.io/pypi/v/acervo" alt="PyPI"></a>
   <a href="https://github.com/sandyeveliz/acervo/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-green" alt="Python">
   <a href="https://sandyeveliz.github.io/acervo"><img src="https://img.shields.io/badge/docs-GitHub%20Pages-blue" alt="Docs"></a>
@@ -18,36 +18,62 @@ Acervo fixes that. It sits between the user and the LLM as a **context proxy** �
 
 ## How it works
 
-```
-User message
-    │
-    ▼
-acervo.prepare(message, history)     ← Acervo enriches context from graph
-    │  topic detection → query planning → context assembly
-    │  returns: context_stack (ready for LLM) + plan (GRAPH / WEB_SEARCH / READY)
-    │
-    ▼
-Your app calls the LLM              ← You control the LLM, streaming, tools
-    │
-    ▼
-acervo.process(message, response)    ← Acervo extracts knowledge from response
-    │  entity extraction → relation detection → fact persistence
-    │
-    ▼
-Knowledge accumulates. Token usage stays flat.
+```mermaid
+flowchart LR
+    A["User message"] --> B["acervo.prepare()"]
+    B --> B1["Topic Detector"]
+    B1 --> B2["Query Planner\n(LLM)"]
+    B2 --> B3["Context Index"]
+    B3 --> C["context_stack\n+ plan"]
+    C --> D["Your app\ncalls LLM"]
+    D --> E["acervo.process()"]
+    E --> E1["Extractor\n(LLM)"]
+    E1 --> E2["Graph persist"]
+
+    style B fill:#2d5016,stroke:#4a8c1c
+    style E fill:#2d5016,stroke:#4a8c1c
+    style D fill:#1a3a5c,stroke:#3a7abd
 ```
 
-Acervo does **not** call the LLM itself. Your app controls the model, streaming, and tool execution. Acervo only enriches context and extracts knowledge.
+Acervo does **not** call the LLM itself. Your app controls the model, streaming, and tools. Acervo only enriches context and extracts knowledge.
+
+## The knowledge graph
+
+As conversations happen, Acervo builds a persistent graph of entities, relations, and facts:
+
+```mermaid
+graph TD
+    sandy["Sandy\n(Persona)"]
+    avs["Altovallestudio\n(Organizacion)"]
+    cipo["Cipolletti\n(Lugar)"]
+    rn["Rio Negro\n(Lugar)"]
+    butaco["Butaco\n(Proyecto)"]
+    angular["Angular\n(Tecnologia)"]
+    batman["Batman\n(Personaje)"]
+    dc["DC Universe\n(Universo)"]
+
+    sandy -->|TRABAJA_EN| avs
+    sandy -->|VIVE_EN| cipo
+    cipo -->|ubicado_en| rn
+    sandy -->|DUEÑO_DE| butaco
+    butaco -->|USA_TECNOLOGIA| angular
+    batman -->|PART_OF| dc
+
+    classDef personal fill:#3a1f5c,stroke:#7c3aed
+    classDef universal fill:#1a3a5c,stroke:#3a7abd
+    class sandy,avs,butaco personal
+    class cipo,rn,angular,batman,dc universal
+```
+
+<sup>Purple = PERSONAL (user-specific) · Blue = UNIVERSAL (world knowledge)</sup>
 
 ## Installation
 
-Acervo is not yet on PyPI. Install directly from GitHub:
-
 ```bash
-pip install git+https://github.com/sandyeveliz/acervo.git
+pip install acervo
 ```
 
-Or clone for development:
+Or install from source:
 
 ```bash
 git clone https://github.com/sandyeveliz/acervo.git
@@ -90,14 +116,13 @@ async def main():
     memory = Acervo(llm=llm, owner="Sandy")
     history = [{"role": "system", "content": "You are a helpful assistant."}]
 
-    # --- Turn 1: user asks something ---
+    # --- Turn 1: user tells the agent something ---
     user_msg = "I work at Altovallestudio, we build software"
     history.append({"role": "user", "content": user_msg})
 
     # Acervo prepares context from graph
     prep = await memory.prepare(user_msg, history)
     # prep.context_stack → messages with injected graph context
-    # prep.plan.tool → "READY" (no search needed)
     # prep.has_context → False (first time, nothing in graph yet)
 
     # Your app calls the LLM (use your own client, streaming, etc.)
@@ -106,7 +131,7 @@ async def main():
 
     # Acervo extracts knowledge from the conversation
     await memory.process(user_msg, assistant_msg)
-    # Graph now has: Altovallestudio (Organización), Sandy (Persona)
+    # Graph now has: Altovallestudio (Organizacion), Sandy (Persona)
 
     # --- Turn 2: ask about something stored ---
     user_msg2 = "What do you know about my company?"
@@ -114,7 +139,7 @@ async def main():
 
     prep2 = await memory.prepare(user_msg2, history)
     # prep2.has_context → True!
-    # prep2.context_stack includes: "Altovallestudio (Organización) - Sandy works here"
+    # prep2.context_stack includes graph data about Altovallestudio
 
     print("Context for LLM:", prep2.context_stack)
 
@@ -169,7 +194,7 @@ class LLMClient(Protocol):
 
 ### Auto-registering ontology
 
-Built-in types: `Persona`, `Personaje`, `Organización`, `Lugar`, `Tecnología`, `Obra`, `Universo`, `Editorial`
+Built-in types: `Persona`, `Personaje`, `Organizacion`, `Lugar`, `Tecnologia`, `Obra`, `Universo`, `Editorial`
 
 Built-in relations: `IS_A`, `CREATED_BY`, `ALIAS_OF`, `PART_OF`, `SET_IN`, `DEBUTED_IN`, `PUBLISHED_BY`
 
@@ -196,33 +221,35 @@ With Acervo:      turn 1 → 200tk  |  turn 50 → 400tk   |  turn 100 → 420tk
 
 ## Project status
 
-v0.1.0 — first public release.
+v0.1.2 — [Changelog](./CHANGELOG.md)
 
 | Feature | Status |
 |---------|--------|
-| Knowledge graph (JSON persistence) | ✅ Working |
-| Two-layer architecture (UNIVERSAL / PERSONAL) | ✅ Working |
-| prepare() / process() context proxy API | ✅ Working |
-| Auto-registering ontology | ✅ Working |
-| Semantic relations (IS_A, CREATED_BY, ALIAS_OF, etc.) | ✅ Working |
-| Topic detector (keywords → embeddings → LLM) | ✅ Working |
-| Query planner (GRAPH_ALL / WEB_SEARCH / READY) | ✅ Working |
-| Context index with token budgeting | ✅ Working |
-| Built-in OpenAIClient (zero external deps) | ✅ Working |
-| LLMClient + Embedder protocols | ✅ Working |
-| Unit tests (56 passing) | ✅ Working |
-| MCP server | 📋 Planned |
-| REST API (`acervo serve`) | 📋 Planned |
-| PyPI package (`pip install acervo`) | 📋 Planned |
-| `acervo init` directory indexer | 📋 Planned |
-| Community knowledge packs | 📋 Planned |
-| Vector search | 📋 Planned |
+| Knowledge graph (JSON persistence) | Working |
+| Two-layer architecture (UNIVERSAL / PERSONAL) | Working |
+| prepare() / process() context proxy API | Working |
+| Auto-registering ontology | Working |
+| Semantic relations (IS_A, CREATED_BY, ALIAS_OF, etc.) | Working |
+| Topic detector (keywords → embeddings → LLM) | Working |
+| Query planner (GRAPH_ALL / WEB_SEARCH / READY) | Working |
+| Context index with token budgeting | Working |
+| Built-in OpenAIClient (zero external deps) | Working |
+| LLMClient + Embedder protocols | Working |
+| PyPI package (`pip install acervo`) | Working |
+| Unit tests (56 passing) | Working |
+| REST API (`acervo serve`) | [Planned](https://sandyeveliz.github.io/acervo/roadmap/) |
+| MCP server | [Planned](https://sandyeveliz.github.io/acervo/roadmap/) |
+| `acervo init` directory indexer | [Planned](https://sandyeveliz.github.io/acervo/roadmap/) |
+| Community knowledge packs | [Planned](https://sandyeveliz.github.io/acervo/roadmap/) |
+| Vector search | [Planned](https://sandyeveliz.github.io/acervo/roadmap/) |
 
 ## Documentation
 
+- **[Tutorial](https://sandyeveliz.github.io/acervo/tutorial/)** — build a chat with persistent memory in 5 minutes
 - **[Getting Started](https://sandyeveliz.github.io/acervo/getting-started/)** — installation, quickstart, LLMClient protocol
-- **[Configuration](https://sandyeveliz.github.io/acervo/configuration/)** — SDK parameters, standalone mode, environment variables
+- **[Configuration](https://sandyeveliz.github.io/acervo/configuration/)** — SDK parameters, environment variables
 - **[Knowledge Layers](https://sandyeveliz.github.io/acervo/layers/)** — UNIVERSAL vs PERSONAL, node lifecycle, ontology
+- **[Roadmap](https://sandyeveliz.github.io/acervo/roadmap/)** — planned features and their status
 
 ## Why "Acervo"?
 

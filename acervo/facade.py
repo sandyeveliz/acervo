@@ -409,23 +409,52 @@ class Acervo:
                 self._graph.set_node_status(nid, "hot")
 
     async def _persist_web_facts(self, query: str, web_content: str) -> None:
-        """Extract and persist entities, relations, and facts from web search results."""
+        """Extract and persist entities, relations, and facts from web search results.
+
+        Filters out entities unrelated to the search query to prevent
+        garbage nodes from irrelevant search results.
+        """
         try:
             result = await self._search_extractor.extract(query, web_content)
+
+            # Filter: only keep entities related to the query or existing graph nodes
+            query_lower = query.lower()
+            def _is_relevant(name: str) -> bool:
+                name_lower = name.lower()
+                # Entity name appears in query or query appears in entity name
+                if name_lower in query_lower or query_lower in name_lower:
+                    return True
+                # Entity already exists in graph
+                if self._graph.get_node(_make_id(name)):
+                    return True
+                # Entity is mentioned in a relation with a relevant entity
+                for r in result.relations:
+                    if r.source.lower() == name_lower or r.target.lower() == name_lower:
+                        other = r.target if r.source.lower() == name_lower else r.source
+                        if other.lower() in query_lower or self._graph.get_node(_make_id(other)):
+                            return True
+                return False
 
             # Build entity pairs from extracted entities + fact entities
             entity_pairs = []
             seen = set()
             for e in result.entities:
-                if e.name not in seen:
+                if e.name not in seen and _is_relevant(e.name):
                     entity_pairs.append((e.name, e.type))
                     seen.add(e.name)
             for f in result.facts:
-                if f.entity not in seen:
+                if f.entity not in seen and _is_relevant(f.entity):
                     existing = self._graph.get_node(_make_id(f.entity))
                     etype = existing["type"] if existing else "Unknown"
                     entity_pairs.append((f.entity, etype))
                     seen.add(f.entity)
+
+            # Filter relations to only include relevant entities
+            if result.relations:
+                result.relations = [
+                    r for r in result.relations
+                    if r.source in seen or r.target in seen
+                ]
 
             if not entity_pairs and not result.facts:
                 return

@@ -1,22 +1,25 @@
 # Configuration
 
-Acervo has two modes of operation, each with its own configuration approach.
+Acervo is currently available as a Python SDK. You control the LLM — Acervo does not make its own model decisions.
 
 ---
 
-## SDK directo (import Python)
-
-When you use Acervo as a library inside your own agent, **you** control the LLM. Acervo does not read any environment variables related to models — the caller configures and passes its own client.
-
-### `Acervo()` constructor parameters
+## `Acervo()` constructor parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `llm` | `LLMClient` | required | LLM client for extraction tasks. Must implement the `LLMClient` protocol (async `chat()` method). |
-| `owner` | `str` | `""` | Identifier for the user whose memory this is. Used for future multi-user support. |
+| `owner` | `str` | `""` | Identifier for the user whose memory this is. Used for multi-user support. |
 | `persist_path` | `str \| Path` | `"data/graph"` | Directory where graph data (nodes.json, edges.json) is persisted. |
+| `embedder` | `Embedder \| None` | `None` | Optional embedder for topic detection L2 (embedding similarity). If not provided, topic detection uses only keywords and LLM classification. |
+| `embed_threshold` | `float` | `0.65` | Cosine similarity threshold for embedding-based topic matching. Only used if `embedder` is provided. |
+| `hot_layer_max_messages` | `int` | `2` | Maximum number of recent turn pairs to include in the hot layer of the context stack. |
+| `hot_layer_max_tokens` | `int` | `500` | Maximum tokens for the hot layer (recent conversation history). |
+| `compaction_trigger_tokens` | `int` | `2000` | Token budget target for the warm context layer. |
 
-### `LLMClient` protocol
+---
+
+## `LLMClient` protocol
 
 Any object that implements this async method:
 
@@ -32,7 +35,9 @@ async def chat(
 
 Messages use the standard `{"role": "...", "content": "..."}` format. Returns the response content as a plain string.
 
-### Built-in `OpenAIClient`
+---
+
+## Built-in `OpenAIClient`
 
 Acervo includes a zero-dependency client for any OpenAI-compatible API:
 
@@ -50,7 +55,9 @@ memory = Acervo(llm=llm, owner="Sandy")
 
 Works with LM Studio, Ollama, OpenAI, or any compatible endpoint.
 
-### Example: custom adapter
+---
+
+## Example: custom adapter
 
 When your app already has an LLM client, wrap it:
 
@@ -66,63 +73,11 @@ class MyAdapter:
 memory = Acervo(llm=MyAdapter(my_router), owner="Sandy")
 ```
 
-!!! note "Acervo never reads LLM env vars in SDK mode"
-    When using the SDK directly, all LLM configuration is the responsibility of the caller. The environment variables documented below are **only** for standalone mode (`acervo serve` / `acervo mcp` / `Acervo.from_env()`).
-
 ---
 
-## Standalone mode (`acervo serve` / `acervo mcp`)
+## `Acervo.from_env()`
 
-When Acervo runs as an independent server, it needs its own LLM configuration. This is read from environment variables (or a `.env` file in the working directory).
-
-### Environment variables
-
-#### LLM models
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ACERVO_LIGHT_MODEL_URL` | `http://localhost:1234/v1` | Base URL for the extraction model (OpenAI-compatible endpoint). |
-| `ACERVO_LIGHT_MODEL` | `qwen2.5-3b-instruct` | Model name for extraction and background tasks. A small, fast model is ideal. |
-| `ACERVO_LIGHT_API_KEY` | `lm-studio` | API key for the light model endpoint. |
-| `ACERVO_MAIN_MODEL_URL` | `http://localhost:1234/v1` | Base URL for the main reasoning model (reserved for future use). |
-| `ACERVO_MAIN_MODEL` | `unsloth/qwen3.5-9b` | Model name for reasoning and context assembly (reserved for future use). |
-| `ACERVO_MAIN_API_KEY` | `lm-studio` | API key for the main model endpoint (reserved for future use). |
-
-!!! info "Light vs Main model"
-    The **light model** is used for extraction (converting text into entities/facts). It should be small and fast — 3B parameters is enough.
-
-    The **main model** is reserved for future features (query planning, reasoning). Currently unused in standalone mode.
-
-#### Storage and logging
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ACERVO_OWNER` | `"default"` | Default owner identifier for memory isolation. |
-| `ACERVO_DATA_DIR` | `"./data"` | Root directory for graph persistence. |
-| `ACERVO_LOG_LEVEL` | `"INFO"` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
-
-### Example `.env` file
-
-```bash
-# Modelo liviano — extraccion, topic detection, summarizer
-ACERVO_LIGHT_MODEL_URL=http://localhost:1234/v1
-ACERVO_LIGHT_MODEL=qwen2.5-3b-instruct
-ACERVO_LIGHT_API_KEY=lm-studio
-
-# Modelo principal — razonamiento (reservado para uso futuro)
-ACERVO_MAIN_MODEL_URL=http://localhost:1234/v1
-ACERVO_MAIN_MODEL=unsloth/qwen3.5-9b
-ACERVO_MAIN_API_KEY=lm-studio
-
-# Memoria
-ACERVO_OWNER=Sandy
-ACERVO_DATA_DIR=./data
-ACERVO_LOG_LEVEL=INFO
-```
-
-### Using `Acervo.from_env()`
-
-The `from_env()` classmethod reads the `.env` file and creates a fully configured instance:
+The `from_env()` classmethod reads a `.env` file and creates a fully configured instance. Useful for quick prototyping or when you want config outside code.
 
 ```python
 from acervo import Acervo
@@ -136,6 +91,43 @@ memory = Acervo.from_env(env_file="/path/to/.env", owner="Sandy")
 # Or skip .env and rely on existing environment variables
 memory = Acervo.from_env(env_file=None, owner="Sandy")
 ```
+
+### Environment variables
+
+#### LLM model (extraction)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ACERVO_LIGHT_MODEL_URL` | `http://localhost:1234/v1` | Base URL for the extraction model (OpenAI-compatible endpoint). |
+| `ACERVO_LIGHT_MODEL` | `qwen2.5-3b-instruct` | Model name for extraction and background tasks. A small, fast model is ideal. |
+| `ACERVO_LIGHT_API_KEY` | `lm-studio` | API key for the light model endpoint. |
+
+!!! info "Main model variables"
+    `ACERVO_MAIN_MODEL_URL`, `ACERVO_MAIN_MODEL`, and `ACERVO_MAIN_API_KEY` are reserved for future use. Currently only the light model is used.
+
+#### Storage and logging
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ACERVO_OWNER` | `"default"` | Default owner identifier for memory isolation. |
+| `ACERVO_DATA_DIR` | `"./data"` | Root directory for graph persistence. |
+| `ACERVO_LOG_LEVEL` | `"INFO"` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
+
+### Example `.env` file
+
+```bash
+ACERVO_LIGHT_MODEL_URL=http://localhost:1234/v1
+ACERVO_LIGHT_MODEL=qwen2.5-3b-instruct
+ACERVO_LIGHT_API_KEY=lm-studio
+ACERVO_OWNER=Sandy
+ACERVO_DATA_DIR=./data
+ACERVO_LOG_LEVEL=INFO
+```
+
+!!! info "Planned: Standalone server configuration"
+    When `acervo serve` and `acervo mcp` are implemented, they will use these same
+    environment variables to run Acervo as an independent service.
+    See [Roadmap](roadmap.md).
 
 ---
 

@@ -285,6 +285,109 @@ class TopicGraph:
             log.info("Removed edge: %s -[%s]-> %s", src_name, relation, tgt_name)
         return removed
 
+    def remove_node(self, node_id: str) -> bool:
+        """Remove a node and all its edges. Returns True if found and removed."""
+        nid = _make_id(node_id) if node_id not in self._nodes else node_id
+        if nid not in self._nodes:
+            return False
+        del self._nodes[nid]
+        self._edges = [
+            e for e in self._edges
+            if e["source"] != nid and e["target"] != nid
+        ]
+        log.info("Removed node: %s (and its edges)", nid)
+        return True
+
+    def update_node(self, node_id: str, **fields: object) -> bool:
+        """Update fields on an existing node. Returns True if node was found."""
+        nid = _make_id(node_id) if node_id not in self._nodes else node_id
+        node = self._nodes.get(nid)
+        if not node:
+            return False
+        allowed = {"label", "type", "attributes", "status"}
+        for key, value in fields.items():
+            if key in allowed:
+                node[key] = value
+        log.info("Updated node %s: %s", nid, list(fields.keys()))
+        return True
+
+    def merge_nodes(self, keep_id: str, absorb_id: str, alias: str | None = None) -> bool:
+        """Merge two nodes: keep one, absorb the other's facts and edges.
+
+        Args:
+            keep_id: Node ID to keep (primary).
+            absorb_id: Node ID to absorb (will be deleted).
+            alias: Optional alias label (e.g. "Man of Steel") stored as a fact.
+
+        Returns True if both nodes existed and merge succeeded.
+        """
+        kid = _make_id(keep_id) if keep_id not in self._nodes else keep_id
+        aid = _make_id(absorb_id) if absorb_id not in self._nodes else absorb_id
+
+        keep = self._nodes.get(kid)
+        absorb = self._nodes.get(aid)
+        if not keep or not absorb:
+            return False
+
+        # Merge facts (deduplicate by normalized text)
+        existing_facts = {_normalize_for_dedup(f.get("fact", "")) for f in keep.get("facts", [])}
+        for fact in absorb.get("facts", []):
+            norm = _normalize_for_dedup(fact.get("fact", ""))
+            if norm and norm not in existing_facts:
+                keep["facts"].append(fact)
+                existing_facts.add(norm)
+
+        # Add alias as a fact if provided
+        if alias:
+            alias_fact = f"Also known as: {alias}"
+            alias_norm = _normalize_for_dedup(alias_fact)
+            if alias_norm not in existing_facts:
+                keep["facts"].append({
+                    "fact": alias_fact,
+                    "date": datetime.now().isoformat(timespec="seconds"),
+                    "session": self._session_id,
+                    "source": "merge",
+                })
+
+        # Merge attributes
+        absorb_attrs = absorb.get("attributes", {})
+        keep_attrs = keep.setdefault("attributes", {})
+        for k, v in absorb_attrs.items():
+            if k not in keep_attrs:
+                keep_attrs[k] = v
+
+        # Aggregate session count
+        keep["session_count"] = keep.get("session_count", 1) + absorb.get("session_count", 1)
+
+        # Re-point edges from absorbed node to keep node
+        for edge in self._edges:
+            if edge["source"] == aid:
+                edge["source"] = kid
+            if edge["target"] == aid:
+                edge["target"] = kid
+
+        # Remove self-loops created by merge
+        self._edges = [
+            e for e in self._edges
+            if not (e["source"] == kid and e["target"] == kid)
+        ]
+
+        # Remove duplicate edges (same source, target, relation)
+        seen_edges: set[tuple[str, str, str]] = set()
+        deduped: list[dict] = []
+        for edge in self._edges:
+            key = (edge["source"], edge["target"], edge.get("relation", ""))
+            if key not in seen_edges:
+                seen_edges.add(key)
+                deduped.append(edge)
+        self._edges = deduped
+
+        # Delete absorbed node
+        del self._nodes[aid]
+
+        log.info("Merged node %s into %s", aid, kid)
+        return True
+
     def remove_fact(self, entity_name: str, fact_text: str) -> bool:
         """Remove a fact from a node. Returns True if found and removed."""
         nid = _make_id(entity_name)
