@@ -162,6 +162,78 @@ context = memory.materialize("Batman")
 # Returns: "# Batman (Personaje)\nEl usuario mencionó:\n- was created by Bill Finger..."
 ```
 
+## Indexing a project
+
+Acervo can index an entire project directory — parsing source code with tree-sitter, resolving import dependencies, and optionally generating embeddings and semantic summaries with a local LLM.
+
+### Initialize and index
+
+```bash
+# Create .acervo/ in your project (instant, no model needed)
+acervo init /path/to/project
+
+# Index all files (structural only — no LLM required)
+acervo index /path/to/project
+
+# See what would be indexed without doing it
+acervo index --dry-run
+
+# Per-file progress
+acervo index --verbose
+```
+
+### What it does
+
+**Phase 1 — Structural analysis** (tree-sitter, fast, no LLM):
+- Parses `.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.html`, `.css` files
+- Extracts functions, classes, interfaces, types, methods, sections
+- Extracts imports and exports, resolves relative/alias imports
+- Builds a dependency graph (file → file edges)
+- Markdown files are split by heading hierarchy
+
+**Phase 2 — Semantic enrichment** (optional, needs running models):
+- Generates embeddings for each code entity / markdown section
+- LLM (3B) generates a summary, topic tags, and implicit relations per chunk
+- Creates semantic `related_to` edges between nodes sharing topics
+
+### With embeddings and summaries
+
+```bash
+acervo index /path/to/project \
+  --embedding-model nomic-embed-text \
+  --embedding-endpoint http://localhost:11434 \
+  --llm-model qwen2.5-3b-instruct \
+  --llm-endpoint http://localhost:1234/v1
+```
+
+### Check status and re-index
+
+```bash
+# Show graph stats (nodes by kind, stale files)
+acervo status
+
+# Re-index only files that changed on disk
+acervo reindex
+```
+
+### Supported file types
+
+| Extension | Parser | Extracts |
+|-----------|--------|----------|
+| `.py` | tree-sitter | functions, classes, methods, imports, decorators |
+| `.ts`, `.tsx` | tree-sitter | functions, classes, interfaces, types, imports, exports |
+| `.js`, `.jsx` | tree-sitter | functions, classes, imports, exports |
+| `.html` | regex | component references, element IDs |
+| `.css` | regex | selectors, custom properties |
+| `.md` | pure Python | heading sections with parent hierarchy |
+
+### Performance
+
+For a typical 50-file project (structural only): **under 2 seconds**.
+With embeddings + LLM summaries: depends on model speed, typically under 2 minutes.
+
+Each file node stores a SHA-256 content hash — unchanged files are skipped on re-index.
+
 ## Tested setup
 
 This is the stack we use daily for development and testing:
@@ -239,9 +311,9 @@ v0.1.2 — [Changelog](./CHANGELOG.md)
 | Unit tests (56 passing) | Working |
 | REST API (`acervo serve`) | [Planned](https://sandyeveliz.github.io/acervo/roadmap/) |
 | MCP server | [Planned](https://sandyeveliz.github.io/acervo/roadmap/) |
-| `acervo init` directory indexer | [Planned](https://sandyeveliz.github.io/acervo/roadmap/) |
+| `acervo index` — structural parsing + dependency graph | Working |
+| `acervo index` — semantic enrichment (embeddings + LLM summaries) | Working |
 | Community knowledge packs | [Planned](https://sandyeveliz.github.io/acervo/roadmap/) |
-| Vector search | [Planned](https://sandyeveliz.github.io/acervo/roadmap/) |
 
 ## Documentation
 

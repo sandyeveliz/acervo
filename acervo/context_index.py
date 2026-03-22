@@ -27,16 +27,15 @@ log = logging.getLogger(__name__)
 
 _TOPICS_DIR = Path("data/topics")
 
-_SUMMARIZE_PROMPT = """Resumí los hechos clave de estos mensajes en viñetas.
-Solo incluir hechos explícitos dichos por el usuario o confirmados en la conversación.
-NO incluir saludos, preguntas ni especulación.
-Responder siempre en español.
-Output SOLO las viñetas, una por línea, empezando con "- ".
+_SUMMARIZE_PROMPT = """Summarize the key facts from these messages as bullet points.
+Only include explicit facts stated by the user or confirmed in the conversation.
+Do NOT include greetings, questions, or speculation.
+Output ONLY the bullet points, one per line, starting with "- ".
 
-Mensajes:
+Messages:
 {messages}
 
-Resumen:"""
+Summary:"""
 
 
 class ContextIndex:
@@ -50,6 +49,7 @@ class ContextIndex:
         hot_layer_max_tokens: int = 500,
         compaction_trigger_tokens: int = 2000,
         topics_dir: str | Path = "data/topics",
+        summarize_prompt: str | None = None,
     ) -> None:
         self._graph = graph
         self._llm = llm
@@ -58,6 +58,7 @@ class ContextIndex:
         self._compaction_trigger = compaction_trigger_tokens
         self._topics_dir = Path(topics_dir)
         self._topics_dir.mkdir(parents=True, exist_ok=True)
+        self._summarize_prompt = summarize_prompt or _SUMMARIZE_PROMPT
         # Track sliding window for eviction detection
         self._last_included_pairs: int = 0
         self._last_total_pairs: int = 0
@@ -140,15 +141,15 @@ class ContextIndex:
         if warm_content:
             if warm_source == "web":
                 ctx_block = (
-                    "[RESULTADOS DE BÚSQUEDA WEB — datos reales y actualizados]\n"
+                    "[WEB SEARCH RESULTS — real and up-to-date data]\n"
                     f"{warm_content}\n"
-                    "[FIN RESULTADOS]\n"
-                    "Usá estos resultados para responder al usuario. Podés citar las fuentes."
+                    "[END RESULTS]\n"
+                    "Use these results to answer the user. You may cite the sources."
                 )
             else:
-                ctx_block = f"[CONTEXTO VERIFICADO]\n{warm_content}\n[FIN CONTEXTO]"
+                ctx_block = f"[VERIFIED CONTEXT]\n{warm_content}\n[END CONTEXT]"
             stack.append({"role": "user", "content": ctx_block})
-            stack.append({"role": "assistant", "content": "Entendido."})
+            stack.append({"role": "assistant", "content": "Understood."})
 
         stack.extend(hot_messages)
 
@@ -158,7 +159,7 @@ class ContextIndex:
         total_tokens = (
             system_tk + warm_tokens + hot_tokens
             + (count_tokens(user_text) if current_user_msg else 0)
-            + (count_tokens("Entendido.") if warm_content else 0)
+            + (count_tokens("Understood.") if warm_content else 0)
         )
 
         return stack, hot_tokens, warm_tokens, total_tokens
@@ -201,7 +202,7 @@ class ContextIndex:
 
     async def _summarize_messages(self, messages: list[dict]) -> str:
         text = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
-        prompt = _SUMMARIZE_PROMPT.format(messages=text[:2000])
+        prompt = self._summarize_prompt.format(messages=text[:2000])
         try:
             raw = await self._llm.chat(
                 [{"role": "user", "content": prompt}],
@@ -222,7 +223,7 @@ class ContextIndex:
 
         if md_path.exists():
             existing = md_path.read_text(encoding="utf-8")
-            if "## Hechos conocidos" in existing:
+            if "## Known facts" in existing or "## Hechos conocidos" in existing:
                 dated_facts = "\n".join(
                     f"{line} [{now}]" if not line.endswith("]") else line
                     for line in summary.split("\n")
@@ -232,10 +233,10 @@ class ContextIndex:
                     existing = existing.rstrip() + "\n" + dated_facts + "\n"
                 md_path.write_text(existing, encoding="utf-8")
             else:
-                existing = existing.rstrip() + f"\n\n## Hechos conocidos\n{summary}\n"
+                existing = existing.rstrip() + f"\n\n## Known facts\n{summary}\n"
                 md_path.write_text(existing, encoding="utf-8")
         else:
-            content = f"# {topic_label}\n\n**Última actividad:** {now}\n\n## Hechos conocidos\n{summary}\n"
+            content = f"# {topic_label}\n\n**Last activity:** {now}\n\n## Known facts\n{summary}\n"
             md_path.write_text(content, encoding="utf-8")
 
 

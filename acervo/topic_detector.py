@@ -60,17 +60,17 @@ _CHANGE_RE = re.compile(
 
 # --- Level 3: classification prompt ---
 
-_CLASSIFY_PROMPT = """Dado el topic actual y un nuevo mensaje, clasificá la relación.
+_CLASSIFY_PROMPT = """Given the current topic and a new message, classify the relationship.
 
-Topic actual: {topic}
-Nuevo mensaje: {message}
+Current topic: {topic}
+New message: {message}
 
-Respondé SOLO con una letra:
-a) Mismo tema
-b) Sub-tema nuevo
-c) Tema diferente
+Respond ONLY with a single letter:
+a) Same topic
+b) New subtopic
+c) Different topic
 
-Respuesta:"""
+Answer:"""
 
 # --- Stopwords for keyword extraction ---
 
@@ -110,10 +110,12 @@ class TopicDetector:
         llm: LLMClient,
         embedder: Embedder | None = None,
         embed_threshold: float = 0.65,
+        classify_prompt: str | None = None,
     ) -> None:
         self._llm = llm
         self._embedder = embedder
         self._embed_threshold = embed_threshold
+        self._classify_prompt = classify_prompt or _CLASSIFY_PROMPT
         self._current_topic: str = "none"
         self._current_topic_embedding: list[float] | None = None
         self._known_topics: list[_KnownTopic] = []
@@ -126,6 +128,11 @@ class TopicDetector:
     def current_topic(self, label: str) -> None:
         self._current_topic = label
         self._current_topic_embedding = None
+
+    @property
+    def known_topics(self) -> list[str]:
+        """Return labels of all topics seen so far."""
+        return [kt.label for kt in self._known_topics]
 
     async def extract_topic_label(self, message: str) -> str:
         """Extract a topic label from a message."""
@@ -159,9 +166,9 @@ class TopicDetector:
 
     async def _extract_label_via_llm(self, message: str) -> str:
         prompt = (
-            "Extraé el tema principal de este mensaje en 2-5 palabras en español. "
-            "Respondé SOLO con el nombre del tema, nada más.\n\n"
-            f"Mensaje: {message[:300]}\n\nTema:"
+            "Extract the main topic of this message in 2-5 words. "
+            "Respond ONLY with the topic name, nothing else.\n\n"
+            f"Message: {message[:300]}\n\nTopic:"
         )
         raw = await self._llm.chat(
             [{"role": "user", "content": prompt}],
@@ -270,7 +277,7 @@ class TopicDetector:
         return None  # ambiguous → fall through to L3
 
     async def _level3_llm(self, message: str) -> DetectionResult:
-        prompt = _CLASSIFY_PROMPT.format(
+        prompt = self._classify_prompt.format(
             topic=self._current_topic,
             message=message[:500],
         )

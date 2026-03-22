@@ -15,33 +15,33 @@ from acervo._text import strip_think_blocks
 
 log = logging.getLogger(__name__)
 
-_PLANNER_PROMPT = """Sos un planificador de búsqueda. Analizá la pregunta y decidí qué herramienta usar.
+_PLANNER_PROMPT = """You are a search planner. Analyze the question and decide which tool to use.
 
-Pregunta: {user_message}
-Entidad principal: {entity_name} ({entity_type})
-Hechos disponibles: {facts_summary}
+Question: {user_message}
+Main entity: {entity_name} ({entity_type})
+Available facts: {facts_summary}
 
-Herramientas:
-- GRAPH_ALL: traer todos los hechos y conexiones de una entidad del grafo local
-- GRAPH_SEARCH: buscar nodos relacionados por tipo o keyword
-- WEB_SEARCH: buscar en internet
-- READY: no necesita buscar nada
+Tools:
+- GRAPH_ALL: retrieve all facts and connections for an entity from the local graph
+- GRAPH_SEARCH: search related nodes by type or keyword
+- WEB_SEARCH: search the internet
+- READY: no search needed
 
-REGLAS DE PRIORIDAD (seguir en orden):
-1. Si "Hechos disponibles" tiene datos sobre la entidad → usá GRAPH_ALL
-2. Si el usuario dice "buscá", "googleá", "internet" → usá WEB_SEARCH
-3. Si no hay hechos disponibles y el usuario pregunta sobre algo → usá WEB_SEARCH
-4. Si es saludo o pregunta sin tema ("hola", "cómo estás") → usá READY
+PRIORITY RULES (follow in order):
+1. If "Available facts" has data about the entity → use GRAPH_ALL
+2. If the user says "search", "google", "look up", "internet" → use WEB_SEARCH
+3. If no facts are available and the user asks about something → use WEB_SEARCH
+4. If it's a greeting or question without a topic ("hello", "how are you") → use READY
 
-Respondé SOLO con un JSON, sin explicación:
-{{"tool": "NOMBRE", "entity": "nombre_entidad", "query": "texto de búsqueda"}}
+Respond ONLY with a JSON, no explanation:
+{{"tool": "NAME", "entity": "entity_name", "query": "search text"}}
 
-Ejemplos:
-- "qué sabés de Batman?" (hechos: "es un superhéroe de DC") → {{"tool": "GRAPH_ALL", "entity": "Batman", "query": ""}}
-- "qué sabés de Cipolletti?" (hechos: "Sandy vive en Cipolletti") → {{"tool": "GRAPH_ALL", "entity": "Cipolletti", "query": ""}}
-- "qué es X?" (hechos: ninguno) → {{"tool": "WEB_SEARCH", "entity": "X", "query": "X"}}
-- "buscá en internet sobre X" → {{"tool": "WEB_SEARCH", "entity": "X", "query": "X"}}
-- "hola" → {{"tool": "READY", "entity": "", "query": ""}}
+Examples:
+- "what do you know about Batman?" (facts: "is a DC superhero") → {{"tool": "GRAPH_ALL", "entity": "Batman", "query": ""}}
+- "what do you know about Cipolletti?" (facts: "Sandy lives in Cipolletti") → {{"tool": "GRAPH_ALL", "entity": "Cipolletti", "query": ""}}
+- "what is X?" (facts: none) → {{"tool": "WEB_SEARCH", "entity": "X", "query": "X"}}
+- "search the internet for X" → {{"tool": "WEB_SEARCH", "entity": "X", "query": "X"}}
+- "hello" → {{"tool": "READY", "entity": "", "query": ""}}
 JSON:"""
 
 
@@ -57,8 +57,9 @@ class PlanResult:
 class QueryPlanner:
     """Uses LLM to plan what information to retrieve before responding."""
 
-    def __init__(self, llm: LLMClient) -> None:
+    def __init__(self, llm: LLMClient, prompt_template: str | None = None) -> None:
         self._llm = llm
+        self._prompt = prompt_template or _PLANNER_PROMPT
 
     async def plan(
         self,
@@ -87,11 +88,11 @@ class QueryPlanner:
         entity_type: str,
         facts_summary: str,
     ) -> PlanResult:
-        prompt = _PLANNER_PROMPT.format(
+        prompt = self._prompt.format(
             user_message=user_message[:300],
-            entity_name=entity_name or "ninguna",
-            entity_type=entity_type or "desconocido",
-            facts_summary=facts_summary[:500] if facts_summary else "ninguno",
+            entity_name=entity_name or "none",
+            entity_type=entity_type or "unknown",
+            facts_summary=facts_summary[:500] if facts_summary else "none",
         )
 
         raw_response = await self._llm.chat(

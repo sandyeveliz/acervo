@@ -51,45 +51,39 @@ class ExtractionResult:
 
 # ── Prompts ──
 
-_CONVERSATION_PROMPT = """Extraer entidades, relaciones semánticas y hechos de esta conversación.
+_CONVERSATION_PROMPT = """You are an entity extractor. Analyze ONLY the conversation below.
 
-REGLAS:
-- Cada hecho debe ser una afirmación concreta SOBRE la entidad.
-- Cada hecho lleva "speaker": "user" o "assistant" según quién lo dijo.
-- NO agregar conocimiento general. Solo lo explícitamente dicho.
-- Extraer relaciones de categoría y jerarquía cuando apliquen.
+CRITICAL RULES:
+- Extract ONLY entities that appear in the CONVERSATION below.
+- Do NOT invent entities. If a name does not appear in the text, do NOT include it.
+- Each fact must be explicitly stated in the conversation.
+- Each fact has "speaker": "user" or "assistant".
+- The conversation may be in any language. Keep entity names in their original language.
+- Common words, greetings, and verbs are NOT entities. Only extract proper nouns.
+- If the conversation has no extractable entities, return {{"entities":[],"relations":[],"facts":[]}}
 
-Tipos de entidad: lugar, persona, personaje, organizacion, universo, editorial, tecnologia, obra, actividad
+Entity types: place, person, character, organization, technology, work, project, document
 
-Tipos de relación:
-- is_a: clasificación (Batman is_a personaje, Gotham is_a lugar)
-- created_by: creador (Batman created_by Bill Finger)
-- alias_of: identidad alternativa (Batman alias_of Bruce Wayne)
-- part_of: pertenencia a universo/grupo (Batman part_of DC Universe)
-- set_in: ubicación narrativa (Batman set_in Gotham City)
-- debuted_in: primera aparición (Batman debuted_in Detective Comics)
-- published_by: editorial (Detective Comics published_by DC Comics)
-- ubicado_en, parte_de, pertenece_a, relacionado_con: relaciones generales
+Relation types: is_a, created_by, alias_of, part_of, located_in, belongs_to, related_to, works_at, lives_in, uses_technology, has_module, published_by
 
-Ejemplo:
-User: Batman fue creado por Bill Finger en 1939
-Assistant: Batman es un personaje de DC Comics, su nombre real es Bruce Wayne.
-JSON: {{"entities":[{{"name":"Batman","type":"personaje"}},{{"name":"Bill Finger","type":"persona"}},{{"name":"DC Universe","type":"universo"}},{{"name":"Bruce Wayne","type":"persona"}},{{"name":"Gotham City","type":"lugar"}}],"relations":[{{"source":"Batman","target":"Bill Finger","relation":"created_by"}},{{"source":"Batman","target":"DC Universe","relation":"part_of"}},{{"source":"Batman","target":"Bruce Wayne","relation":"alias_of"}}],"facts":[{{"entity":"Batman","fact":"Fue creado en 1939","speaker":"user"}},{{"entity":"Batman","fact":"Es un personaje de DC Comics","speaker":"assistant"}}]}}
+Output valid JSON only. No explanation.
 
+CONVERSATION TO ANALYZE:
 User: {user_msg}
 Assistant: {assistant_msg}
+
 JSON:"""
 
-_SEARCH_PROMPT = """Extraer entidades, relaciones y hechos verificables de estos resultados de búsqueda sobre "{query}".
+_SEARCH_PROMPT = """Extract entities, relations, and verifiable facts from these search results about "{query}".
 
-Responder en JSON con "entities", "relations" y "facts".
-- entities: lista de {{"name": "...", "type": "..."}} (tipos: lugar, persona, personaje, organizacion, universo, editorial, obra)
-- relations: lista de {{"source": "...", "target": "...", "relation": "..."}} (relaciones: is_a, created_by, alias_of, part_of, set_in, debuted_in, published_by, ubicado_en, parte_de)
-- facts: lista de {{"entity": "...", "fact": "..."}}
+Respond in JSON with "entities", "relations", and "facts".
+- entities: list of {{"name": "...", "type": "..."}} (types: place, person, character, organization, universe, publisher, work, technology)
+- relations: list of {{"source": "...", "target": "...", "relation": "..."}} (relations: is_a, created_by, alias_of, part_of, set_in, debuted_in, published_by, located_in, belongs_to)
+- facts: list of {{"entity": "...", "fact": "..."}}
 
-Solo incluir datos explícitos del texto. NO inventar.
+Only include data explicitly stated in the text. Do NOT invent.
 
-Resultados:
+Results:
 {text}
 
 JSON:"""
@@ -127,48 +121,59 @@ def _clean_response(content: str) -> str:
 # ── Extractors ──
 
 VALID_TYPES = frozenset((
+    # English types
+    "place", "person", "character", "entity", "activity",
+    "organization", "technology", "work", "project",
+    "universe", "publisher", "comic", "document", "rule",
+    # Legacy Spanish types (accepted for backward compatibility)
     "lugar", "persona", "personaje", "entidad", "actividad",
     "organizacion", "organización", "tecnologia", "tecnología", "obra",
-    "universo", "editorial", "comic",
+    "universo", "editorial",
 ))
 VALID_RELATIONS = frozenset((
     # Universal semantic relations
     "is_a", "created_by", "alias_of", "part_of", "set_in",
     "debuted_in", "published_by",
-    # Domain relations
+    # English domain relations
+    "works_at", "lives_in", "owns", "belongs_to",
+    "uses_technology", "has_module", "likes", "related_to",
+    "located_in", "managed_by", "played_for", "played_against",
+    "directed_by", "won_against", "lost_to", "co_mentioned",
+    # Legacy Spanish relations (accepted for backward compatibility)
     "ubicado_en", "tecnico_de", "parte_de", "hincha_de",
-    "juega_en", "pertenece_a", "relacionado_con", "co_mentioned",
+    "juega_en", "pertenece_a", "relacionado_con",
     "jugó_contra", "dirigido_por", "ganó_a", "perdió_contra",
 ))
 
 # Entities that are noise — roles, pronouns, generic terms, common nouns
 _ENTITY_BLACKLIST = frozenset({
     # Roles and pronouns
-    "user", "usuario", "assistant", "asistente", "bot", "ia", "ai",
-    "yo", "tu", "el", "ella", "nosotros", "ustedes",
+    "user", "assistant", "bot", "ai",
+    "i", "you", "he", "she", "we", "they", "me", "him", "her",
     # Temporal
-    "hoy", "ayer", "mañana", "ahora", "antes", "después",
+    "today", "yesterday", "tomorrow", "now", "before", "after",
     # Meta terms
-    "persona", "lugar", "entidad", "actividad", "obra",
-    "conversación", "conversacion", "chat", "sesión", "sesion",
-    "mensaje", "pregunta", "respuesta", "tema", "topic",
-    "información", "informacion", "dato", "datos",
-    # Greetings
-    "hola", "chau", "adiós", "adios", "gracias", "por favor",
-    "buenos días", "buenas tardes", "buenas noches",
+    "person", "place", "entity", "activity", "work",
+    "conversation", "chat", "session", "message",
+    "question", "answer", "topic", "information", "data",
+    # Greetings (EN + ES)
+    "hello", "hi", "bye", "goodbye", "thanks", "please",
+    "hola", "chau", "gracias", "por favor", "buenas",
+    # Spanish common words that are NOT entities
+    "necesito", "neecsito", "quiero", "puedo", "tengo",
+    "como", "cuando", "donde", "porque", "sobre",
     # Geographic generics
-    "provincia", "ciudad", "país", "pais", "club", "equipo",
+    "province", "city", "country", "state", "club", "team",
     # Common nouns that should never be entities
-    "libro", "libros", "película", "películas", "pelicula", "peliculas",
-    "novela", "novelas", "serie", "series", "historia", "historias",
-    "personaje", "personajes", "autor", "autora", "escritor", "escritora",
-    "mundo", "vida", "muerte", "año", "años", "tiempo", "parte", "partes",
-    "tipo", "tipos", "forma", "formas", "cosa", "cosas", "gente",
-    "rata", "cueva", "bat", "pino", "casa", "familia",
-    "cultura", "popular", "memoria", "internet", "web",
+    "book", "books", "movie", "movies", "film", "films",
+    "novel", "novels", "series", "story", "stories",
+    "character", "characters", "author", "writer",
+    "world", "life", "death", "year", "years", "time", "part", "parts",
+    "type", "types", "form", "forms", "thing", "things", "people",
+    "culture", "popular", "memory", "internet", "web",
     # Numbers as words
-    "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho",
-    "nueve", "diez", "cien", "mil",
+    "one", "two", "three", "four", "five", "six", "seven", "eight",
+    "nine", "ten", "hundred", "thousand",
 })
 
 
@@ -179,18 +184,56 @@ class ConversationExtractor:
     it doesn't get recorded. Empty facts is the correct result for most turns.
     """
 
-    def __init__(self, llm: LLMClient) -> None:
+    def __init__(self, llm: LLMClient, prompt_template: str | None = None) -> None:
         self._llm = llm
+        self._prompt = prompt_template or _CONVERSATION_PROMPT
 
     async def extract(self, user_msg: str, assistant_msg: str) -> ExtractionResult:
         try:
-            return await self._call_llm(user_msg, assistant_msg)
+            result = await self._call_llm(user_msg, assistant_msg)
+            return self._validate(result, user_msg, assistant_msg)
         except Exception as e:
             log.warning("Conversation extraction failed: %s", e)
             return ExtractionResult()
 
+    @staticmethod
+    def _validate(
+        result: "ExtractionResult",
+        user_msg: str,
+        assistant_msg: str,
+    ) -> "ExtractionResult":
+        """Post-extraction validation: reject entities not in the conversation."""
+        conversation = f"{user_msg} {assistant_msg}".lower()
+
+        valid_entities: list[Entity] = []
+        valid_names: set[str] = set()
+        for e in result.entities:
+            name_lower = e.name.lower()
+            # Entity name must appear in the actual conversation text
+            if name_lower not in conversation:
+                log.info("Rejected hallucinated entity: %s", e.name)
+                continue
+            valid_entities.append(e)
+            valid_names.add(e.name)
+
+        # Filter relations and facts to only reference valid entities
+        valid_relations = [
+            r for r in result.relations
+            if r.source in valid_names or r.target in valid_names
+        ]
+        valid_facts = [
+            f for f in result.facts
+            if f.entity in valid_names
+        ]
+
+        return ExtractionResult(
+            entities=valid_entities,
+            relations=valid_relations,
+            facts=valid_facts,
+        )
+
     async def _call_llm(self, user_msg: str, assistant_msg: str) -> ExtractionResult:
-        prompt = _CONVERSATION_PROMPT.format(
+        prompt = self._prompt.format(
             user_msg=user_msg[:500],
             assistant_msg=assistant_msg[:500],
         )
@@ -267,11 +310,47 @@ class ConversationExtractor:
         return Entity(name=name, type=ontology_type)
 
 
+class TextExtractor:
+    """Extracts entities, relations, and facts from arbitrary text (files, documents).
+
+    Uses the same prompt as SearchExtractor but with a neutral query.
+    """
+
+    def __init__(self, llm: LLMClient, prompt_template: str | None = None) -> None:
+        self._llm = llm
+        self._prompt = prompt_template or _SEARCH_PROMPT
+
+    async def extract(self, text: str, query: str = "document content") -> ExtractionResult:
+        """Extract structured knowledge from a text document."""
+        try:
+            return await self._call_llm(query, text)
+        except Exception as e:
+            log.warning("Text extraction failed: %s", e)
+            return ExtractionResult()
+
+    async def _call_llm(self, query: str, text: str) -> ExtractionResult:
+        prompt = self._prompt.format(
+            query=query,
+            text=text[:3000],
+        )
+        raw_response = await self._llm.chat(
+            [{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=800,
+        )
+        raw = _clean_response(raw_response)
+        obj = _parse_first_json(raw, "object")
+        if isinstance(obj, dict):
+            return SearchExtractor._parse_object_static(obj)
+        return ExtractionResult()
+
+
 class SearchExtractor:
     """Extracts entities, relations, and facts from web search results."""
 
-    def __init__(self, llm: LLMClient) -> None:
+    def __init__(self, llm: LLMClient, prompt_template: str | None = None) -> None:
         self._llm = llm
+        self._prompt = prompt_template or _SEARCH_PROMPT
 
     async def extract(self, query: str, search_text: str) -> ExtractionResult:
         """Extract structured knowledge from web search results.
@@ -285,7 +364,7 @@ class SearchExtractor:
             return ExtractionResult()
 
     async def _call_llm(self, query: str, search_text: str) -> ExtractionResult:
-        prompt = _SEARCH_PROMPT.format(
+        prompt = self._prompt.format(
             query=query,
             text=search_text[:2000],
         )
@@ -301,7 +380,7 @@ class SearchExtractor:
         # Try parsing as object first (new format with entities/relations/facts)
         obj = _parse_first_json(raw, "object")
         if isinstance(obj, dict) and ("entities" in obj or "facts" in obj):
-            return self._parse_object(obj)
+            return self._parse_object_static(obj)
 
         # Fallback: parse as array (old format with just entity/fact pairs)
         arr = _parse_first_json(raw, "array")
@@ -322,7 +401,8 @@ class SearchExtractor:
 
         return ExtractionResult()
 
-    def _parse_object(self, obj: dict) -> ExtractionResult:
+    @staticmethod
+    def _parse_object_static(obj: dict) -> ExtractionResult:
         """Parse structured JSON with entities, relations, and facts."""
         result = ExtractionResult()
 
@@ -361,8 +441,9 @@ class SearchExtractor:
 class RAGExtractor:
     """Extracts facts from RAG retrieval results. Source: rag."""
 
-    def __init__(self, llm: LLMClient) -> None:
+    def __init__(self, llm: LLMClient, prompt_template: str | None = None) -> None:
         self._llm = llm
+        self._prompt = prompt_template or _SEARCH_PROMPT
 
     async def extract(self, query: str, rag_text: str) -> list[ExtractedFact]:
         try:
@@ -372,7 +453,7 @@ class RAGExtractor:
             return []
 
     async def _call_llm(self, query: str, rag_text: str) -> list[ExtractedFact]:
-        prompt = _SEARCH_PROMPT.format(
+        prompt = self._prompt.format(
             query=query,
             text=rag_text[:1500],
         )

@@ -1,6 +1,6 @@
 [project]
 name = "acervo"
-version = "0.1.2"
+version = "0.2.0"
 description = "Context proxy for AI agents. Enriches LLM context from a knowledge graph, extracts knowledge from responses."
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -29,8 +29,25 @@ Issues = "https://github.com/sandyeveliz/acervo/issues"
 Changelog = "https://github.com/sandyeveliz/acervo/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
+proxy = ["aiohttp>=3.9"]
+tree-sitter = [
+    "tree-sitter>=0.23",
+    "tree-sitter-python>=0.23",
+    "tree-sitter-javascript>=0.23",
+    "tree-sitter-typescript>=0.23",
+    "tree-sitter-html>=0.23",
+    "tree-sitter-css>=0.23",
+]
 docs = ["mkdocs-material"]
-dev = ["pytest", "pytest-asyncio", "mkdocs-material"]
+dev = [
+    "pytest", "pytest-asyncio", "mkdocs-material", "aiohttp>=3.9",
+    "tree-sitter>=0.23", "tree-sitter-python>=0.23",
+    "tree-sitter-javascript>=0.23", "tree-sitter-typescript>=0.23",
+    "tree-sitter-html>=0.23", "tree-sitter-css>=0.23",
+]
+
+[project.scripts]
+acervo = "acervo.cli:main"
 
 [build-system]
 requires = ["hatchling"]

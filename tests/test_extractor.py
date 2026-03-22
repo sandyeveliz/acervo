@@ -40,7 +40,7 @@ async def test_extract_entities_from_json():
 
 @pytest.mark.asyncio
 async def test_extract_maps_types_to_ontology():
-    """Extractor maps raw types to ontology: 'lugar' -> 'Lugar', 'persona' -> 'Persona'."""
+    """Extractor maps raw types to ontology: 'lugar' -> 'Place', 'persona' -> 'Person'."""
     response = json.dumps({
         "entities": [
             {"name": "Cipolletti", "type": "lugar"},
@@ -56,20 +56,20 @@ async def test_extract_maps_types_to_ontology():
 
     result = await extractor.extract("test", "test")
     types = {e.name: e.type for e in result.entities}
-    assert types["Cipolletti"] == "Lugar"
-    assert types["Sandy"] == "Persona"
-    assert types["Altovallestudio"] == "Organización"
-    assert types["Harry Potter"] == "Obra"
+    assert types["Cipolletti"] == "Place"
+    assert types["Sandy"] == "Person"
+    assert types["Altovallestudio"] == "Organization"
+    assert types["Harry Potter"] == "Work"
 
 
 @pytest.mark.asyncio
 async def test_extract_filters_blacklisted_entities():
-    """Blacklisted names like 'usuario', 'hoy' are filtered out."""
+    """Blacklisted names like 'user', 'today' are filtered out."""
     response = json.dumps({
         "entities": [
-            {"name": "usuario", "type": "persona"},
-            {"name": "hoy", "type": "actividad"},
-            {"name": "Sandy", "type": "persona"},
+            {"name": "user", "type": "person"},
+            {"name": "today", "type": "activity"},
+            {"name": "Sandy", "type": "person"},
         ],
         "relations": [],
         "facts": [],
@@ -79,8 +79,8 @@ async def test_extract_filters_blacklisted_entities():
 
     result = await extractor.extract("test", "test")
     names = [e.name for e in result.entities]
-    assert "usuario" not in names
-    assert "hoy" not in names
+    assert "user" not in names
+    assert "today" not in names
     assert "Sandy" in names
 
 

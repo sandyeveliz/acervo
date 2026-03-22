@@ -4,6 +4,25 @@ All notable changes to this project will be documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-03-19
+
+### Added
+- **Session metrics**: `Acervo.metrics` property with per-turn tracking (tokens, graph size, extraction counts, context hit rate) and aggregate stats. `metrics.export_json()` for serialization, `metrics.summary()` for human-readable output.
+- **Graph import/export**: `TopicGraph.export_json()` and `TopicGraph.import_json(data, mode="merge"|"replace")` for graph portability and backup.
+- **Edge validation**: Self-referential edges rejected, `co_mentioned` weight capped at 10.0, `last_active` timestamp added to edges.
+- 14 new tests (70 total): metrics, import/export roundtrip, edge validation, weight capping.
+
+### Changed
+- **All prompts switched to English**: extractor, planner, topic detector, summarizer, synthesizer — Acervo is now an English-first library.
+- **Entity types renamed to English**: Person, Character, Organization, Place, Technology, Work, Project, Universe, Publisher, Document, Rule. Legacy Spanish type names still accepted via extractor mapping.
+- **Relations renamed to English**: works_at, lives_in, owns, belongs_to, etc. Legacy Spanish relations still accepted.
+- Entity blacklist updated to English stopwords.
+- Context markers: `[VERIFIED CONTEXT]`/`[END CONTEXT]`, `[WEB SEARCH RESULTS]`/`[END RESULTS]`.
+
+### Migration notes
+- Existing graphs with Spanish type names (Persona, Lugar, etc.) are still accepted by the extractor's type mapping. New extractions will use English types.
+- If you need to update existing graph data, use `export_json()` → modify types → `import_json(data, mode="replace")`.
+
 ## [0.1.2] - 2026-03-18
 
 ### Changed
