@@ -4,6 +4,15 @@ All notable changes to this project will be documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] - 2026-03-25
+
+### Fixed
+- **History windowing always applies** — Fixed critical bug where conversation history grew unbounded when no graph context was found. Previously, `_window_history_openai()` skipped windowing when `has_context=False`, sending the full history to the LLM. Now windowing applies regardless — tokens stay constant at any conversation length.
+- **Anthropic history windowing** — Added `_window_history_anthropic()` so both API formats enforce the history window.
+
+### Changed
+- README rewrite with updated architecture, features, and clearer getting started guide.
+
 ## [0.2.1] - 2026-03-25
 
 ### Changed

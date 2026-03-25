@@ -171,6 +171,7 @@ class AcervoProxy:
 
         if self._is_new_user_turn_anthropic(body):
             body = await self._enrich_anthropic(body)
+            body = self._window_history_anthropic(body)
             self._turn_count += 1
 
         # Capture what we're actually sending to the LLM (for trace/debug)
@@ -225,9 +226,7 @@ class AcervoProxy:
                 "facts_extracted": 0,
             }
             body = await self._enrich_openai(body)
-            # Window history: graph context replaces older messages
-            has_context = self._last_enrichment.get("enriched", False)
-            body = self._window_history_openai(body, has_context)
+            body = self._window_history_openai(body)
             self._turn_count += 1
         elif self._pending_context_msgs:
             # Tool continuation — re-inject context from the initial enrichment
@@ -587,12 +586,12 @@ class AcervoProxy:
 
         return body
 
-    def _window_history_openai(self, body: dict, has_context: bool) -> dict:
+    def _window_history_openai(self, body: dict) -> dict:
         """Trim conversation history, keeping only the last N messages.
 
-        When the graph has context, older turns are already covered by the
-        enriched [VERIFIED CONTEXT] / [CONVERSATION CONTEXT] blocks.
-        The LLM only needs the most recent messages for conversational flow.
+        Windowing applies ALWAYS — with graph context, older turns are covered
+        by the enriched context blocks. Without graph context, older turns
+        aren't useful anyway; the last N messages provide conversational flow.
 
         Message layout after enrichment:
           [system, context_user, context_ack, ...old_conv..., current_user]
@@ -602,9 +601,6 @@ class AcervoProxy:
         window = self._config.context.history_window
         if window <= 0:
             return body  # 0 = disabled
-
-        if not has_context:
-            return body  # No graph context — keep full history as fallback
 
         messages = body.get("messages", [])
 
@@ -622,6 +618,30 @@ class AcervoProxy:
         body["messages"] = messages[:prefix_len] + conversation[-window:]
         log.info(
             "History windowed: %d → %d messages (trimmed %d, window=%d)",
+            len(messages), len(body["messages"]), trimmed_count, window,
+        )
+        return body
+
+    def _window_history_anthropic(self, body: dict) -> dict:
+        """Trim Anthropic conversation history, keeping only the last N messages.
+
+        Anthropic format: system is a top-level string, messages is pure
+        conversation (no system message in the array). Just keep the last
+        `window` messages.
+        """
+        window = self._config.context.history_window
+        if window <= 0:
+            return body  # 0 = disabled
+
+        messages = body.get("messages", [])
+        if len(messages) <= window:
+            return body  # Already within window
+
+        trimmed_count = len(messages) - window
+        body = dict(body)
+        body["messages"] = messages[-window:]
+        log.info(
+            "History windowed (Anthropic): %d → %d messages (trimmed %d, window=%d)",
             len(messages), len(body["messages"]), trimmed_count, window,
         )
         return body

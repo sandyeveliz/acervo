@@ -74,6 +74,9 @@ site/
 *.swo
 *~
 
+# Plans (local roadmap tracking)
+plans/
+
 # Claude Code
 .claude/
 CLAUDE.md
