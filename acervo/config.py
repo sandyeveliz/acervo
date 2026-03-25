@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 class ModelConfig:
     """Configuration for the utility model used by Acervo's pipeline."""
 
-    name: str = "qwen2.5-3b-instruct"
+    name: str = "qwen3.5-9b"
     url: str = "http://localhost:1234/v1"
     api_key: str = ""
 
@@ -77,6 +77,7 @@ class ProxyConfig:
 
     port: int = 9470
     target: str = ""
+    provider_name: str = ""  # human-readable name, e.g. "LM Studio"
 
 
 @dataclass
@@ -101,6 +102,63 @@ class ContextConfig:
     max_tokens: int = 32000
     injection: str = "system"  # "system" | "first_user"
     plan_mode: bool = False
+    history_window: int = 2  # messages to keep when graph has context (0 = no windowing)
+
+
+@dataclass
+class PromptsConfig:
+    """Prompt templates for Acervo's pipeline.
+
+    Prompts live in .acervo/prompts/ as plain .txt files.
+    The config only stores the directory path.
+    """
+
+    prompts_dir: str = ".acervo/prompts"  # relative to project root
+
+    # Known prompt file names → facade key mapping
+    _FILE_MAP: dict[str, str] = field(default=False, repr=False, init=False)
+
+    def __post_init__(self):
+        # Only Acervo pipeline prompts — agent.txt is for AVS, not loaded here
+        self._FILE_MAP = {
+            "s1_unified.txt": "s1_unified",
+            "s1_5_graph_update.txt": "s1_5_graph_update",
+            "extractor_search.txt": "extractor_search",
+            "summarizer.txt": "summarizer",
+        }
+
+    def load_prompts(self, project_root: Path) -> dict[str, str]:
+        """Load all .txt files from prompts_dir. Returns non-empty prompts as dict."""
+        prompts_path = (project_root / self.prompts_dir).resolve()
+        if not prompts_path.is_dir():
+            return {}
+        result: dict[str, str] = {}
+        for filename, key in self._FILE_MAP.items():
+            filepath = prompts_path / filename
+            if filepath.is_file():
+                content = filepath.read_text(encoding="utf-8").strip()
+                if content:
+                    result[key] = content
+        return result
+
+
+@dataclass
+class ModelsConfig:
+    """Per-role model assignments.
+
+    Each role can override the default [acervo.model].
+    Empty name = use default model.
+    """
+
+    extractor: ModelConfig = field(default_factory=ModelConfig)    # S1 Unified (fine-tuned extractor)
+    summarizer: ModelConfig = field(default_factory=ModelConfig)   # hot layer compaction
+
+    def resolve_for_role(self, role: str, default: ModelConfig) -> ModelConfig:
+        """Return the model config for a role, falling back to default if not set."""
+        role_config = getattr(self, role, None)
+        if role_config and role_config.name:
+            return role_config
+        return default
 
 
 @dataclass
@@ -111,11 +169,13 @@ class AcervoConfig:
     data_dir: str = ".acervo/data"
     owner: str = ""
     model: ModelConfig = field(default_factory=ModelConfig)
+    models: ModelsConfig = field(default_factory=ModelsConfig)
     embeddings: EmbeddingsConfig = field(default_factory=EmbeddingsConfig)
     proxy: ProxyConfig = field(default_factory=ProxyConfig)
     changelog: ChangelogConfig = field(default_factory=ChangelogConfig)
     indexing: IndexingConfig = field(default_factory=IndexingConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
+    prompts: PromptsConfig = field(default_factory=PromptsConfig)
 
     @staticmethod
     def find_config(start_path: Path | None = None) -> Path | None:
@@ -154,6 +214,20 @@ class AcervoConfig:
             api_key=model_raw.get("api_key", config.model.api_key),
         )
 
+        # Per-role model overrides (empty name = use default [acervo.model])
+        models_raw = acervo.get("models", {})
+        if models_raw:
+            def _parse_role_model(role_raw: dict) -> ModelConfig:
+                return ModelConfig(
+                    name=role_raw.get("name", ""),
+                    url=role_raw.get("url", config.model.url),
+                    api_key=role_raw.get("api_key", config.model.api_key),
+                )
+            config.models = ModelsConfig(
+                extractor=_parse_role_model(models_raw.get("extractor", {})),
+                summarizer=_parse_role_model(models_raw.get("summarizer", {})),
+            )
+
         embed_raw = acervo.get("embeddings", {})
         config.embeddings = EmbeddingsConfig(
             url=embed_raw.get("url", config.embeddings.url),
@@ -165,6 +239,7 @@ class AcervoConfig:
         config.proxy = ProxyConfig(
             port=proxy_raw.get("port", config.proxy.port),
             target=proxy_raw.get("target", config.proxy.target),
+            provider_name=proxy_raw.get("provider_name", config.proxy.provider_name),
         )
 
         indexing_raw = acervo.get("indexing", {})
@@ -188,7 +263,14 @@ class AcervoConfig:
             max_tokens=context_raw.get("max_tokens", config.context.max_tokens),
             injection=context_raw.get("injection", config.context.injection),
             plan_mode=context_raw.get("plan_mode", config.context.plan_mode),
+            history_window=context_raw.get("history_window", config.context.history_window),
         )
+
+        prompts_raw = acervo.get("prompts", {})
+        if prompts_raw:
+            config.prompts = PromptsConfig(
+                prompts_dir=prompts_raw.get("dir", config.prompts.prompts_dir),
+            )
 
         # Legacy format support: [project] + [llm] sections
         if "project" in raw and "acervo" not in raw:
@@ -228,6 +310,15 @@ name = "{self.model.name}"
 url = "{self.model.url}"
 # api_key = "{self.model.api_key}"
 
+[acervo.models]
+# Per-role model overrides. Empty name = use [acervo.model] as fallback.
+[acervo.models.extractor]
+# Fine-tuned extractor for S1 Unified (topic + entity extraction)
+name = "{self.models.extractor.name}"
+# url = "{self.models.extractor.url}"
+[acervo.models.summarizer]
+name = "{self.models.summarizer.name}"
+
 [acervo.embeddings]
 # Embeddings model for topic detection L2 (optional — leave empty to skip)
 url = "{self.embeddings.url}"
@@ -238,6 +329,7 @@ api_key = "{self.embeddings.api_key}"
 port = {self.proxy.port}
 # target is optional — clients can send X-Forward-To header instead
 # target = "{self.proxy.target}"
+provider_name = "{self.proxy.provider_name}"
 
 [acervo.changelog]
 # Tool names that indicate file modifications (for changelog tracking in proxy mode)
@@ -252,6 +344,13 @@ ignore = [{ignore}]
 max_tokens = {self.context.max_tokens}
 injection = "{self.context.injection}"
 plan_mode = {"true" if self.context.plan_mode else "false"}
+history_window = {self.context.history_window}
+
+
+[acervo.prompts]
+# Prompts live as .txt files in this directory (relative to project root).
+# Each file overrides the built-in default. Delete a file to use the default.
+dir = "{self.prompts.prompts_dir}"
 """
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(content, encoding="utf-8")

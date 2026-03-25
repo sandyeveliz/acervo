@@ -28,6 +28,8 @@ log = logging.getLogger(__name__)
 class Entity:
     name: str
     type: str
+    layer: str = ""  # "PERSONAL" or "UNIVERSAL" (from LLM), empty = unset
+    attributes: dict = field(default_factory=dict)  # optional structured properties
 
 @dataclass
 class Relation:
@@ -54,17 +56,26 @@ class ExtractionResult:
 _CONVERSATION_PROMPT = """You are an entity extractor. Analyze ONLY the conversation below.
 
 CRITICAL RULES:
-- Extract ONLY entities that appear in the CONVERSATION below.
+- Extract ONLY entities explicitly named in the CONVERSATION below.
 - Do NOT invent entities. If a name does not appear in the text, do NOT include it.
-- Each fact must be explicitly stated in the conversation.
-- Each fact has "speaker": "user" or "assistant".
-- The conversation may be in any language. Keep entity names in their original language.
 - Common words, greetings, and verbs are NOT entities. Only extract proper nouns.
 - If the conversation has no extractable entities, return {{"entities":[],"relations":[],"facts":[]}}
 
-Entity types: place, person, character, organization, technology, work, project, document
+ENTITIES — each has:
+- "name": exact name from conversation
+- "type": person | organization | project | technology | place | event | document | concept
+- "layer": "PERSONAL" if the user owns/possesses it (my project, my dog, my team) or "UNIVERSAL" if it is public knowledge (a city, a framework, a fictional character)
 
-Relation types: is_a, created_by, alias_of, part_of, located_in, belongs_to, related_to, works_at, lives_in, uses_technology, has_module, published_by
+RELATIONS — directed, typed edges between entities:
+- Only create relations explicitly stated or strongly implied in the conversation.
+- Each relation must have "source", "target", "relation".
+- Valid relations: part_of, created_by, maintains, works_at, member_of, uses_technology, depends_on, alternative_to, located_in, deployed_on, produces, serves, documented_in, participated_in, triggered_by, resulted_in
+- Do NOT create co_mentioned or generic "related_to" as a fallback. If no specific relation exists, do not create one.
+
+FACTS — specific claims from the conversation:
+- Each fact has "entity", "fact" (a specific claim, not vague), "speaker" ("user" or "assistant").
+- Good fact: "Sandy lives in Neuquén" — Bad fact: "Sandy was mentioned"
+- Only record facts explicitly stated. Never infer.
 
 Output valid JSON only. No explanation.
 
@@ -74,16 +85,41 @@ Assistant: {assistant_msg}
 
 JSON:"""
 
-_SEARCH_PROMPT = """Extract entities, relations, and verifiable facts from these search results about "{query}".
+_SEARCH_PROMPT = """You are an entity and fact extractor for search results.
+Extract structured knowledge from the search results below about: "{query}".
 
-Respond in JSON with "entities", "relations", and "facts".
-- entities: list of {{"name": "...", "type": "..."}} (types: place, person, character, organization, universe, publisher, work, technology)
-- relations: list of {{"source": "...", "target": "...", "relation": "..."}} (relations: is_a, created_by, alias_of, part_of, set_in, debuted_in, published_by, located_in, belongs_to)
-- facts: list of {{"entity": "...", "fact": "..."}}
+═══ RULES ═══
+- Extract only what is explicitly stated. Do not infer or invent.
+- ALL entities from search results have layer "UNIVERSAL".
+- NEVER create relations that connect to user-personal entities.
+- Only create relations between entities BOTH found in these search results.
+- Use precise verb phrases for relations. Skip if you can't name it.
+- Valid types: person, organization, project, technology, place, event, document, concept
+- Valid relations: part_of, created_by, maintains, works_at, member_of, uses_technology, depends_on, alternative_to, located_in, deployed_on, produces, serves, documented_in, participated_in, triggered_by, resulted_in
 
-Only include data explicitly stated in the text. Do NOT invent.
+═══ OUTPUT FORMAT ═══
+Return ONLY valid JSON:
 
-Results:
+{{
+  "entities": [
+    {{
+      "id": "snake_case_id",
+      "name": "exact name from text",
+      "type": "person | organization | project | technology | place | event | document | concept",
+      "layer": "UNIVERSAL",
+      "attributes": {{}},
+      "facts": [{{"text": "specific claim", "speaker": "assistant"}}]
+    }}
+  ],
+  "relations": [
+    {{"source": "entity_id", "target": "entity_id", "relation": "verb_phrase"}}
+  ],
+  "facts": [
+    {{"entity": "entity_id", "text": "specific verifiable claim", "speaker": "assistant"}}
+  ]
+}}
+
+SEARCH RESULTS:
 {text}
 
 JSON:"""
@@ -121,24 +157,28 @@ def _clean_response(content: str) -> str:
 # ── Extractors ──
 
 VALID_TYPES = frozenset((
-    # English types
-    "place", "person", "character", "entity", "activity",
-    "organization", "technology", "work", "project",
-    "universe", "publisher", "comic", "document", "rule",
+    # Core types (matching fine-tuned model + S1.5 schema)
+    "person", "organization", "project", "technology",
+    "place", "event", "document", "concept",
+    # Legacy types (accepted for backward compatibility, mapped by ontology)
+    "character", "entity", "activity", "work",
+    "universe", "publisher", "comic", "rule",
     # Legacy Spanish types (accepted for backward compatibility)
     "lugar", "persona", "personaje", "entidad", "actividad",
     "organizacion", "organización", "tecnologia", "tecnología", "obra",
     "universo", "editorial",
 ))
 VALID_RELATIONS = frozenset((
-    # Universal semantic relations
-    "is_a", "created_by", "alias_of", "part_of", "set_in",
-    "debuted_in", "published_by",
-    # English domain relations
-    "works_at", "lives_in", "owns", "belongs_to",
-    "uses_technology", "has_module", "likes", "related_to",
-    "located_in", "managed_by", "played_for", "played_against",
-    "directed_by", "won_against", "lost_to", "co_mentioned",
+    # Core relations (matching fine-tuned model + S1.5 schema)
+    "part_of", "created_by", "maintains", "works_at", "member_of",
+    "uses_technology", "depends_on", "alternative_to",
+    "located_in", "deployed_on", "produces", "serves", "documented_in",
+    "participated_in", "triggered_by", "resulted_in",
+    # Legacy relations (accepted for backward compatibility)
+    "is_a", "alias_of", "set_in", "debuted_in", "published_by",
+    "lives_in", "owns", "belongs_to", "has_module", "likes",
+    "managed_by", "played_for", "played_against",
+    "directed_by", "won_against", "lost_to",
     # Legacy Spanish relations (accepted for backward compatibility)
     "ubicado_en", "tecnico_de", "parte_de", "hincha_de",
     "juega_en", "pertenece_a", "relacionado_con",
@@ -202,7 +242,13 @@ class ConversationExtractor:
         user_msg: str,
         assistant_msg: str,
     ) -> "ExtractionResult":
-        """Post-extraction validation: reject entities not in the conversation."""
+        """Post-extraction validation.
+
+        - Reject entities not in the conversation text
+        - Reject co_mentioned relations
+        - Cap edges at 2× entity count
+        - Reject vague facts (too short or just "was mentioned")
+        """
         conversation = f"{user_msg} {assistant_msg}".lower()
 
         valid_entities: list[Entity] = []
@@ -216,15 +262,34 @@ class ConversationExtractor:
             valid_entities.append(e)
             valid_names.add(e.name)
 
-        # Filter relations and facts to only reference valid entities
+        # Filter relations: must reference valid entities, no co_mentioned
         valid_relations = [
             r for r in result.relations
-            if r.source in valid_names or r.target in valid_names
+            if (r.source in valid_names or r.target in valid_names)
+            and r.relation != "co_mentioned"
         ]
-        valid_facts = [
-            f for f in result.facts
-            if f.entity in valid_names
-        ]
+
+        # Cap edges at 2× entity count to prevent explosion
+        max_edges = max(len(valid_entities) * 2, 1)
+        if len(valid_relations) > max_edges:
+            log.info("Capped relations from %d to %d", len(valid_relations), max_edges)
+            valid_relations = valid_relations[:max_edges]
+
+        # Filter facts: must reference valid entities, reject vague facts
+        _VAGUE_FACTS = {"was mentioned", "is mentioned", "appeared in conversation",
+                        "fue mencionado", "se mencionó"}
+        valid_facts = []
+        for f in result.facts:
+            if f.entity not in valid_names:
+                continue
+            fact_lower = f.fact.lower().strip()
+            if len(fact_lower) < 10:
+                log.info("Rejected short fact for %s: %s", f.entity, f.fact)
+                continue
+            if fact_lower in _VAGUE_FACTS:
+                log.info("Rejected vague fact for %s: %s", f.entity, f.fact)
+                continue
+            valid_facts.append(f)
 
         return ExtractionResult(
             entities=valid_entities,
@@ -272,6 +337,8 @@ class ConversationExtractor:
             tgt = str(item.get("target", "")).strip()
             rel = str(item.get("relation", "")).strip().lower()
             if src and tgt and rel and len(rel) >= 3:
+                if rel == "co_mentioned":
+                    continue
                 if rel not in VALID_RELATIONS:
                     from acervo.ontology import register_relation
                     register_relation(rel)
@@ -298,7 +365,7 @@ class ConversationExtractor:
             return None
         name = str(item.get("name", "")).strip()
         raw_type = str(item.get("type", "")).strip().lower()
-        if not name or raw_type not in VALID_TYPES:
+        if not name or not raw_type or len(raw_type) < 2:
             return None
         name_clean = name.lower().strip("!?.,;:\"'()[]")
         if name_clean in _ENTITY_BLACKLIST:
@@ -307,7 +374,13 @@ class ConversationExtractor:
             return None
         # Map extractor type to ontology type
         ontology_type = map_extractor_type(raw_type)
-        return Entity(name=name, type=ontology_type)
+        # Parse layer from LLM output
+        raw_layer = str(item.get("layer", "")).strip().upper()
+        layer = raw_layer if raw_layer in ("PERSONAL", "UNIVERSAL") else ""
+        # Parse attributes (optional dict of structured properties)
+        raw_attrs = item.get("attributes")
+        attributes = raw_attrs if isinstance(raw_attrs, dict) else {}
+        return Entity(name=name, type=ontology_type, layer=layer, attributes=attributes)
 
 
 class TextExtractor:
@@ -336,7 +409,7 @@ class TextExtractor:
         raw_response = await self._llm.chat(
             [{"role": "user", "content": prompt}],
             temperature=0.0,
-            max_tokens=800,
+            max_tokens=1500,
         )
         raw = _clean_response(raw_response)
         obj = _parse_first_json(raw, "object")
@@ -372,7 +445,7 @@ class SearchExtractor:
         raw_response = await self._llm.chat(
             [{"role": "user", "content": prompt}],
             temperature=0.0,
-            max_tokens=600,
+            max_tokens=1500,
         )
 
         raw = _clean_response(raw_response)
@@ -418,6 +491,8 @@ class SearchExtractor:
             tgt = str(item.get("target", "")).strip()
             rel = str(item.get("relation", "")).strip().lower()
             if src and tgt and rel and len(rel) >= 3:
+                if rel == "co_mentioned":
+                    continue
                 if rel not in VALID_RELATIONS:
                     from acervo.ontology import register_relation
                     register_relation(rel)

@@ -20,7 +20,7 @@ Directory structure:
     │   ├── graph/
     │   │   ├── nodes.json
     │   │   └── edges.json
-    │   └── vectordb/    # (future)
+    │   └── vectordb/    # ChromaDB persistent storage
     └── .gitignore       # ignores data/
 """
 
@@ -38,6 +38,7 @@ _ACERVO_DIR = ".acervo"
 _CONFIG_FILE = "config.toml"
 _DATA_DIR = "data"
 _GRAPH_DIR = "graph"
+_VECTORDB_DIR = "vectordb"
 
 
 @dataclass
@@ -47,6 +48,7 @@ class AcervoProject:
     acervo_dir: Path
     workspace_root: Path
     graph_path: Path
+    vectordb_path: Path
     config: AcervoConfig
 
     @property
@@ -105,6 +107,7 @@ def init_project(root: Path, config_overrides: dict | None = None) -> AcervoProj
     data_dir = acervo_dir / _DATA_DIR
     data_dir.mkdir(exist_ok=True)
     (data_dir / _GRAPH_DIR).mkdir(exist_ok=True)
+    (data_dir / _VECTORDB_DIR).mkdir(exist_ok=True)
 
     # Write default config
     config = AcervoConfig(data_dir=f".acervo/{_DATA_DIR}")
@@ -139,16 +142,19 @@ def load_project(acervo_dir: Path) -> AcervoProject:
     project_root = acervo_dir.parent
     workspace_root = (project_root / config.workspace).resolve()
 
-    # Resolve graph path (inside data_dir)
+    # Resolve data paths
     data_dir = (project_root / config.data_dir).resolve()
     graph_path = data_dir / _GRAPH_DIR
+    vectordb_path = data_dir / _VECTORDB_DIR
 
-    # Ensure graph dir exists
+    # Ensure dirs exist
     graph_path.mkdir(parents=True, exist_ok=True)
+    vectordb_path.mkdir(parents=True, exist_ok=True)
 
     return AcervoProject(
         acervo_dir=acervo_dir,
         workspace_root=workspace_root,
         graph_path=graph_path,
+        vectordb_path=vectordb_path,
         config=config,
     )

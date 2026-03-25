@@ -34,14 +34,34 @@ class OllamaEmbedder:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._embed_sync, text)
 
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """Embed multiple texts in a single HTTP call."""
+        if not texts:
+            return []
+        if len(texts) == 1:
+            return [await self.embed(texts[0])]
+        import asyncio
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._embed_batch_sync, texts)
+
     def _embed_sync(self, text: str) -> list[float]:
         url = f"{self._base_url}/api/embed"
         payload = json.dumps({"model": self._model, "input": text}).encode()
         headers = {"Content-Type": "application/json"}
         req = Request(url, data=payload, headers=headers, method="POST")
-        with urlopen(req, timeout=30) as resp:
+        with urlopen(req, timeout=120) as resp:
             data = json.loads(resp.read())
         return data["embeddings"][0]
+
+    def _embed_batch_sync(self, texts: list[str]) -> list[list[float]]:
+        url = f"{self._base_url}/api/embed"
+        payload = json.dumps({"model": self._model, "input": texts}).encode()
+        headers = {"Content-Type": "application/json"}
+        req = Request(url, data=payload, headers=headers, method="POST")
+        with urlopen(req, timeout=120) as resp:
+            data = json.loads(resp.read())
+        return data["embeddings"]
 
 
 class OpenAIClient:
@@ -50,7 +70,7 @@ class OpenAIClient:
     Usage:
         client = OpenAIClient(
             base_url="http://localhost:1234/v1",
-            model="qwen2.5-3b-instruct",
+            model="qwen3.5-9b",
             api_key="lm-studio",
         )
         response = await client.chat([{"role": "user", "content": "hi"}])
@@ -100,7 +120,7 @@ class OpenAIClient:
             headers["Authorization"] = f"Bearer {self._api_key}"
 
         req = Request(url, data=payload, headers=headers, method="POST")
-        with urlopen(req, timeout=30) as resp:
+        with urlopen(req, timeout=120) as resp:
             data = json.loads(resp.read())
 
         return data["choices"][0]["message"]["content"]

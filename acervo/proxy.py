@@ -56,6 +56,7 @@ class AcervoProxy:
         self._app.router.add_get("/acervo/status", self._handle_status)
         self._app.router.add_get("/acervo/changelog", self._handle_changelog)
         self._app.router.add_post("/acervo/reset", self._handle_reset)
+        self._app.router.add_post("/acervo/clear", self._handle_clear)
         self._app.router.add_get("/acervo/last-turn", self._handle_last_turn)
         self._app.router.add_get("/acervo/last-request", self._handle_last_request)
 
@@ -117,13 +118,38 @@ class AcervoProxy:
                 log.info("Embedder configured: %s @ %s", resolved.model, resolved.url)
 
             project_root = self._config_path.parent.parent
+
+            # Create vector store if embedder is available
+            vector_store = None
+            if embedder:
+                try:
+                    from acervo.vector_store import ChromaVectorStore
+                    vectordb_path = project_root / ".acervo" / "data" / "vectordb"
+                    vectordb_path.mkdir(parents=True, exist_ok=True)
+                    embed_batch_fn = getattr(embedder, "embed_batch", None)
+                    vector_store = ChromaVectorStore(
+                        persist_path=str(vectordb_path),
+                        embed_fn=embedder.embed,
+                        embed_batch_fn=embed_batch_fn,
+                    )
+                    log.info("Vector store initialized at %s", vectordb_path)
+                except ImportError:
+                    log.info("chromadb not installed — vector search disabled")
+                except Exception as e:
+                    log.warning("Vector store init failed: %s", e)
+
             self._acervo = Acervo.from_project(
-                project_root, auto_init=False, embedder=embedder,
+                project_root, auto_init=False,
+                embedder=embedder, vector_store=vector_store,
             )
             stats = self._acervo.get_graph_stats()
             print(f"  Graph: {stats['node_count']} nodes, {stats['edge_count']} edges")
-            if embedder:
-                print(f"  Embedder: {embed_cfg.model} @ {embed_cfg.url}")
+            if vector_store:
+                print(f"  Vector store: active ({embed_cfg.model} @ {embed_cfg.url})")
+                # Facts are indexed incrementally during normal turns.
+                # No startup sync needed — avoids blocking on large graphs.
+            elif embedder:
+                print(f"  Embedder: {embed_cfg.model} @ {embed_cfg.url} (no vector store)")
             else:
                 print("  Embedder: not configured")
         except Exception as e:
@@ -153,17 +179,31 @@ class AcervoProxy:
         target_url = f"{target}/v1/messages"
         headers = self._forward_headers(request)
 
-        if is_stream:
-            return await self._stream_and_forward(
-                request, target_url, headers, body, "anthropic",
-            )
+        try:
+            if is_stream:
+                return await self._stream_and_forward(
+                    request, target_url, headers, body, "anthropic",
+                )
 
-        async with self._session.post(target_url, headers=headers, json=body) as resp:
-            response_body = await resp.json()
-            has_tool_calls = self._watch_tool_calls_anthropic(response_body)
-            if not has_tool_calls:
-                await self._process_response(body, response_body)
-            return web.json_response(response_body, status=resp.status)
+            async with self._session.post(target_url, headers=headers, json=body) as resp:
+                response_body = await resp.json()
+                has_tool_calls = self._watch_tool_calls_anthropic(response_body)
+                if not has_tool_calls:
+                    await self._process_response(body, response_body)
+                return web.json_response(response_body, status=resp.status)
+        except aiohttp.ClientConnectorError:
+            name = self._config.proxy.provider_name or target
+            log.error("Cannot connect to provider '%s' at %s — is it running?", name, target)
+            return web.json_response(
+                {
+                    "error": {
+                        "message": f"Cannot connect to '{name}' at {target}. Make sure the provider is running.",
+                        "type": "connection_error",
+                        "code": "upstream_unreachable",
+                    }
+                },
+                status=502,
+            )
 
     async def _handle_openai(self, request: web.Request) -> web.StreamResponse:
         """Handle OpenAI Chat Completions API requests."""
@@ -176,13 +216,17 @@ class AcervoProxy:
         body = self._compose_system_message_openai(body)
 
         if self._is_new_user_turn_openai(body):
-            print("[proxy] New user turn detected")
+            msg_count = len(body.get("messages", []))
+            log.info("New user turn detected (%d messages)", msg_count)
             self._last_enrichment = {
                 "enriched": False, "topic": "", "warm_tokens": 0,
                 "warm_content_preview": "", "entities_extracted": 0,
                 "facts_extracted": 0,
             }
             body = await self._enrich_openai(body)
+            # Window history: graph context replaces older messages
+            has_context = self._last_enrichment.get("enriched", False)
+            body = self._window_history_openai(body, has_context)
             self._turn_count += 1
         elif self._pending_context_msgs:
             # Tool continuation — re-inject context from the initial enrichment
@@ -196,18 +240,32 @@ class AcervoProxy:
         target_url = f"{target}/v1/chat/completions"
         headers = self._forward_headers(request)
 
-        if is_stream:
-            return await self._stream_and_forward(
-                request, target_url, headers, body, "openai",
-            )
+        try:
+            if is_stream:
+                return await self._stream_and_forward(
+                    request, target_url, headers, body, "openai",
+                )
 
-        async with self._session.post(target_url, headers=headers, json=body) as resp:
-            response_body = await resp.json()
-            has_tool_calls = self._watch_tool_calls_openai(response_body)
-            # Only extract on final text responses, not tool-use rounds
-            if not has_tool_calls:
-                await self._process_response(body, response_body)
-            return web.json_response(response_body, status=resp.status)
+            async with self._session.post(target_url, headers=headers, json=body) as resp:
+                response_body = await resp.json()
+                has_tool_calls = self._watch_tool_calls_openai(response_body)
+                # Only extract on final text responses, not tool-use rounds
+                if not has_tool_calls:
+                    await self._process_response(body, response_body)
+                return web.json_response(response_body, status=resp.status)
+        except aiohttp.ClientConnectorError:
+            name = self._config.proxy.provider_name or target
+            log.error("Cannot connect to provider '%s' at %s — is it running?", name, target)
+            return web.json_response(
+                {
+                    "error": {
+                        "message": f"Cannot connect to '{name}' at {target}. Make sure the provider is running.",
+                        "type": "connection_error",
+                        "code": "upstream_unreachable",
+                    }
+                },
+                status=502,
+            )
 
     async def _handle_status(self, request: web.Request) -> web.Response:
         """Return Acervo proxy status."""
@@ -225,13 +283,57 @@ class AcervoProxy:
         return web.json_response({"changelog": self._changelog})
 
     async def _handle_reset(self, request: web.Request) -> web.Response:
-        """Reset proxy state (changelog, turn count, context cache)."""
+        """Reset proxy state and reinitialize Acervo facade from disk."""
         self._changelog.clear()
         self._turn_count = 0
         self._pending_context_msgs = None
         self._last_forwarded_body = None
         self._last_enrichment = {}
+        # Full reinit — rebuilds facade, topic detector, metrics, graph from disk
+        await self._init_acervo()
         return web.json_response({"status": "reset"})
+
+    async def _handle_clear(self, request: web.Request) -> web.Response:
+        """Clear ALL Acervo data (graph + vectordb) and reinitialize clean.
+
+        Unlike /reset (which reloads from disk), this deletes all persistent
+        data first. Handles ChromaDB file locks by dropping the client before
+        deleting the vectordb directory.
+        """
+        import shutil
+
+        # Drop the current facade (releases ChromaDB file locks)
+        self._acervo = None
+        self._changelog.clear()
+        self._turn_count = 0
+        self._pending_context_msgs = None
+        self._last_forwarded_body = None
+        self._last_enrichment = {}
+
+        # Delete all data
+        project_root = self._config_path.parent.parent
+        data_dir = project_root / ".acervo" / "data"
+        deleted: list[str] = []
+        skipped: list[str] = []
+        if data_dir.exists():
+            for child in data_dir.iterdir():
+                try:
+                    if child.is_dir():
+                        shutil.rmtree(child)
+                    else:
+                        child.unlink()
+                    deleted.append(child.name)
+                except PermissionError:
+                    skipped.append(child.name)
+                    log.warning("Could not delete %s (file locked)", child)
+
+        # Reinitialize with empty state
+        await self._init_acervo()
+        return web.json_response({
+            "status": "cleared",
+            "deleted": deleted,
+            "skipped": skipped,
+        })
 
     async def _handle_last_turn(self, request: web.Request) -> web.Response:
         """Return enrichment details from the last turn."""
@@ -413,7 +515,7 @@ class AcervoProxy:
         _compose_system_message_openai() which runs on ALL requests.
         """
         if not self._acervo:
-            print("[proxy] Pass-through (Acervo not initialized)")
+            log.info("Pass-through (Acervo not initialized)")
             return body
 
         messages = body.get("messages", [])
@@ -430,6 +532,8 @@ class AcervoProxy:
                 {"role": m["role"], "content": m.get("content", "")}
                 for m in messages
             ]
+            log.info("Running prepare() with %d messages, user=%s...",
+                     len(history), user_text[:60])
             prep = await self._acervo.prepare(user_text, history)
 
             self._last_enrichment.update({
@@ -439,7 +543,7 @@ class AcervoProxy:
             })
 
             if not prep.warm_content:
-                print(f"[proxy] No context to inject (topic={prep.topic})")
+                log.info("No context to inject (topic=%s)", prep.topic)
                 return body
 
             # warm_content may contain [CONVERSATION CONTEXT] sections
@@ -476,10 +580,49 @@ class AcervoProxy:
                 "warm_tokens": prep.warm_tokens,
                 "warm_content_preview": prep.warm_content[:300],
             })
-            print(f"[proxy] Enriched: +{prep.warm_tokens}tk, topic={prep.topic}")
+            log.info("Enriched: +%dtk, topic=%s", prep.warm_tokens, prep.topic)
         except Exception as e:
-            print(f"[proxy] Enrichment failed: {e}")
+            log.warning("Enrichment failed: %s", e, exc_info=True)
 
+        return body
+
+    def _window_history_openai(self, body: dict, has_context: bool) -> dict:
+        """Trim conversation history, keeping only the last N messages.
+
+        When the graph has context, older turns are already covered by the
+        enriched [VERIFIED CONTEXT] / [CONVERSATION CONTEXT] blocks.
+        The LLM only needs the most recent messages for conversational flow.
+
+        Message layout after enrichment:
+          [system, context_user, context_ack, ...old_conv..., current_user]
+        After windowing:
+          [system, context_user, context_ack, last_assistant, current_user]
+        """
+        window = self._config.context.history_window
+        if window <= 0:
+            return body  # 0 = disabled
+
+        if not has_context:
+            return body  # No graph context — keep full history as fallback
+
+        messages = body.get("messages", [])
+
+        # Count prefix: system message + optional context injection pair
+        prefix_len = 1  # system
+        if len(messages) > 1 and "[VERIFIED CONTEXT]" in messages[1].get("content", ""):
+            prefix_len += 2  # context_msg + ack_msg
+
+        conversation = messages[prefix_len:]
+        if len(conversation) <= window:
+            return body  # Already within window
+
+        trimmed_count = len(conversation) - window
+        body = dict(body)
+        body["messages"] = messages[:prefix_len] + conversation[-window:]
+        log.info(
+            "History windowed: %d → %d messages (trimmed %d, window=%d)",
+            len(messages), len(body["messages"]), trimmed_count, window,
+        )
         return body
 
     def _reinject_context_openai(self, body: dict) -> dict:
@@ -504,7 +647,7 @@ class AcervoProxy:
         for i, ctx_msg in enumerate(self._pending_context_msgs):
             new_messages.insert(insert_idx + i, ctx_msg)
         body["messages"] = new_messages
-        print(f"[proxy] Re-injected context for tool continuation ({len(self._pending_context_msgs)} msgs)")
+        log.info("Re-injected context for tool continuation (%d msgs)", len(self._pending_context_msgs))
         return body
 
     # ── Forwarding ──
@@ -549,12 +692,22 @@ class AcervoProxy:
                     "Cache-Control": "no-cache",
                 },
             )
-            await response.prepare(request)
+            try:
+                await response.prepare(request)
+            except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError,
+                        aiohttp.ClientConnectionResetError):
+                log.warning("Client disconnected before stream started")
+                return response
 
             buffer = b""
             async for chunk in upstream.content.iter_any():
                 # Forward immediately for real-time token display
-                await response.write(chunk)
+                try:
+                    await response.write(chunk)
+                except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError,
+                            aiohttp.ClientConnectionResetError):
+                    log.warning("Client disconnected during stream")
+                    return response
 
                 # Parse SSE events for tool call detection
                 buffer += chunk
@@ -584,7 +737,11 @@ class AcervoProxy:
                                 accumulated_tool_calls,
                             )
 
-            await response.write_eof()
+            try:
+                await response.write_eof()
+            except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError,
+                        aiohttp.ClientConnectionResetError):
+                pass  # Client already gone
 
         # Post-stream: check tool calls for changelog entries
         for tc in accumulated_tool_calls:
@@ -791,10 +948,10 @@ class AcervoProxy:
                 self._last_enrichment["facts_extracted"] = len(result.facts)
                 self._last_enrichment["indexing_source"] = source
                 self._last_enrichment["indexing_verified"] = has_tool_results
-                print(f"[proxy] Indexed: {len(result.entities)} entities, "
-                      f"{len(result.facts)} facts, source={source}")
+                log.info("Indexed: %d entities, %d facts, source=%s",
+                         len(result.entities), len(result.facts), source)
         except Exception as e:
-            print(f"[proxy] process() failed: {e}")
+            log.warning("process() failed: %s", e)
 
     # ── Helpers ──
 

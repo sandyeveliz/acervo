@@ -124,7 +124,7 @@ class FileIngestor:
         # Index file chunks into vector store if available
         if self._vector_store and is_markdown:
             try:
-                from providers.vector_store import ChromaVectorStore
+                from acervo.vector_store import ChromaVectorStore
                 chunks = ChromaVectorStore.chunk_text(content)
                 await self._vector_store.index_file_chunks(relative, chunks)
             except Exception as e:

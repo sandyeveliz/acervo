@@ -39,6 +39,8 @@ BUILTIN_ENTITY_TYPES: dict[str, list[str]] = {
     # Other
     "Document":      ["name", "type", "path", "summary"],
     "Rule":          ["description", "applies_to", "technology", "severity"],
+    "Event":         ["name", "date", "location", "description"],
+    "Concept":       ["name", "domain", "description"],
     # Structural parsing
     "File":          ["path", "language", "content_hash"],
     "Symbol":        ["name", "symbol_type", "signature", "start_line", "end_line", "language"],
@@ -73,7 +75,11 @@ BUILTIN_RELATIONS: set[str] = {
     "works_at", "lives_in", "owns", "belongs_to",
     "uses_technology", "has_module", "likes", "related_to",
     "located_in", "managed_by", "played_for", "played_against",
-    "directed_by", "won_against", "lost_to", "co_mentioned",
+    "directed_by", "won_against", "lost_to",
+    # Fine-tuned extractor model relation types
+    "maintains", "member_of", "depends_on", "alternative_to",
+    "deployed_on", "produces", "serves", "documented_in",
+    "participated_in", "triggered_by", "resulted_in",
     # Structural parsing relations
     "CONTAINS", "contains",       # File -> Symbol/Section
     "DEFINED_IN", "defined_in",   # Symbol -> File
@@ -138,6 +144,8 @@ _EXTRACTOR_TYPE_MAP: dict[str, str] = {
     "technology": "Technology",
     "document": "Document",
     "rule": "Rule",
+    "event": "Event",
+    "concept": "Concept",
     "entity": "Unknown",
     "activity": "Project",
     "comic": "Work",
@@ -187,7 +195,7 @@ def map_extractor_type(raw_type: str) -> str:
 
 _UNIVERSAL_TYPES: frozenset[str] = frozenset({
     "Place", "Technology", "Character", "Universe", "Publisher", "Work",
-    "File", "Symbol", "Section",
+    "Event", "Concept", "File", "Symbol", "Section",
 })
 
 

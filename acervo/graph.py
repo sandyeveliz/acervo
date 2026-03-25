@@ -38,6 +38,12 @@ _DEDUP_STRIP = re.compile(r"[^a-z0-9\s]")
 _DEDUP_ARTICLES = re.compile(r"\b(el|la|los|las|un|una|de|del|en|the|a|an|of|in)\b")
 
 
+# Relations that are too generic — should be replaced by more specific ones
+_GENERIC_RELATIONS = frozenset({
+    "related_to", "uses", "uses_technology", "belongs_to", "associated_with",
+})
+
+
 def _normalize_for_dedup(text: str) -> str:
     """Normalize text for dedup comparison: lowercase, no punctuation, no articles."""
     nfkd = unicodedata.normalize("NFKD", text.lower())
@@ -52,6 +58,21 @@ def _default_node_meta(etype: str, owner: str | None = None) -> NodeMeta:
     if is_known_type(etype):
         return NodeMeta.personal(owner=owner)
     return NodeMeta.incomplete(owner=owner, pending=["type"])
+
+
+# Legacy type → canonical type (fine-tuned model uses lowercase, ontology capitalizes)
+_TYPE_MIGRATION: dict[str, str] = {
+    "Framework": "Technology",
+    "Library": "Technology",
+    "Platform": "Technology",
+    "Tool": "Technology",
+    "Backend_service": "Technology",
+    "Design_system": "Technology",
+    "Database": "Technology",
+    "Language": "Technology",
+    "Runtime": "Technology",
+    "Api": "Technology",
+}
 
 
 def _migrate_node(node: dict) -> dict:
@@ -73,6 +94,10 @@ def _migrate_node(node: dict) -> dict:
             node["stale_since"] = None
         if "indexed_at" not in node:
             node["indexed_at"] = node.get("created_at")
+    # Normalize legacy entity types to canonical ontology types
+    old_type = node.get("type", "")
+    if old_type in _TYPE_MIGRATION:
+        node["type"] = _TYPE_MIGRATION[old_type]
     return node
 
 
@@ -120,6 +145,22 @@ class TopicGraph:
         for node in self._nodes.values():
             if node.get("status") in ("hot", "warm"):
                 node["status"] = "cold"
+            node.pop("_topic_id", None)
+
+    def reload(self) -> None:
+        """Reload graph from disk (used after external data clear)."""
+        self._load()
+
+    def reset(self) -> None:
+        """Clear all in-memory data and remove files on disk."""
+        self._nodes.clear()
+        self._edges.clear()
+        nodes_file = self._path / "nodes.json"
+        edges_file = self._path / "edges.json"
+        if nodes_file.exists():
+            nodes_file.unlink()
+        if edges_file.exists():
+            edges_file.unlink()
 
     def _save(self) -> None:
         self._path.mkdir(parents=True, exist_ok=True)
@@ -192,7 +233,7 @@ class TopicGraph:
                     "status": "hot",  # runtime status — must come after meta spread
                 }
 
-        # Add semantic relations
+        # Add semantic relations (max 1 edge per directed pair)
         if relations:
             for src_name, tgt_name, relation in relations:
                 src_id = _make_id(src_name)
@@ -200,7 +241,18 @@ class TopicGraph:
                 # Reject self-referential edges
                 if src_id == tgt_id:
                     continue
-                if not self._edge_exists(src_id, tgt_id, relation):
+                # Check if any edge between this pair already exists
+                existing_edge = self._find_edge_between(src_id, tgt_id)
+                if existing_edge:
+                    # Replace generic relation with more specific one
+                    if existing_edge["relation"] in _GENERIC_RELATIONS and relation not in _GENERIC_RELATIONS:
+                        existing_edge["relation"] = relation
+                        existing_edge["last_active"] = now
+                    # Same relation or both specific — just update timestamp
+                    elif existing_edge["relation"] == relation:
+                        existing_edge["last_active"] = now
+                    # else: keep existing, skip new (don't accumulate edges)
+                else:
                     self._edges.append({
                         "source": src_id,
                         "target": tgt_id,
@@ -211,40 +263,6 @@ class TopicGraph:
                         "layer": layer.name,
                         "source_type": source,
                     })
-
-        # Fallback: co_mentioned for entity pairs without explicit relations
-        related_pairs = set()
-        if relations:
-            for src_name, tgt_name, _ in relations:
-                related_pairs.add(frozenset([_make_id(src_name), _make_id(tgt_name)]))
-
-        for i, src in enumerate(node_ids):
-            for tgt in node_ids[i + 1:]:
-                if src == tgt:
-                    continue
-                pair = frozenset([src, tgt])
-                if pair not in related_pairs:
-                    if not self._edge_exists(src, tgt, "co_mentioned"):
-                        self._edges.append({
-                            "source": src,
-                            "target": tgt,
-                            "relation": "co_mentioned",
-                            "weight": 1.0,
-                            "created_at": now,
-                            "last_active": now,
-                            "layer": layer.name,
-                            "source_type": source,
-                        })
-                    else:
-                        for edge in self._edges:
-                            if (
-                                edge.get("relation") == "co_mentioned"
-                                and {edge["source"], edge["target"]} == {src, tgt}
-                            ):
-                                new_weight = edge.get("weight", 1.0) + 0.5
-                                edge["weight"] = min(new_weight, 10.0)  # cap weight
-                                edge["last_active"] = now
-                                break
 
         # Add source-tagged facts to nodes (with dedup)
         self._dedup_log: list[tuple[str, str, str]] = []
@@ -269,34 +287,71 @@ class TopicGraph:
         return len(self._nodes), len(self._edges)
 
     @staticmethod
-    def _find_similar_fact(existing_facts: list[dict], new_fact: str, threshold: float = 0.9) -> str | None:
-        """Check if a similar fact already exists. Returns the existing fact text or None."""
+    def _find_similar_fact(existing_facts: list[dict], new_fact: str, threshold: float = 0.65) -> str | None:
+        """Check if a similar fact already exists. Returns the existing fact text or None.
+
+        Uses three checks:
+        1. Exact normalized match
+        2. Substring containment
+        3. Word-overlap Jaccard similarity (catches paraphrases like
+           "It is a tickets project" vs "Butaco is a ticketing system")
+        """
         new_norm = _normalize_for_dedup(new_fact)
         if not new_norm:
             return None
+        new_words = set(new_norm.split())
         for f in existing_facts:
             existing_norm = _normalize_for_dedup(f.get("fact", ""))
             if not existing_norm:
                 continue
+            # Exact normalized match
             if new_norm == existing_norm:
                 return f["fact"]
+            # Substring containment
             if new_norm in existing_norm or existing_norm in new_norm:
                 return f["fact"]
-            shorter = min(len(new_norm), len(existing_norm))
-            longer = max(len(new_norm), len(existing_norm))
-            matches = sum(1 for a, b in zip(new_norm, existing_norm) if a == b)
-            if matches / longer >= threshold:
+            # Word-overlap Jaccard similarity
+            existing_words = set(existing_norm.split())
+            intersection = new_words & existing_words
+            union = new_words | existing_words
+            if union and len(intersection) / len(union) >= threshold:
                 return f["fact"]
         return None
 
-    def cycle_status(self) -> None:
-        """Demote node statuses: hot→warm, warm→cold. Called at turn start."""
+    def _find_edge_between(self, src: str, tgt: str) -> dict | None:
+        """Find any existing edge between src and tgt (either direction)."""
+        pair = {src, tgt}
+        for e in self._edges:
+            if {e["source"], e["target"]} == pair:
+                return e
+        return None
+
+    def update_status(self, topic_action: str, new_topic_id: str | None = None) -> None:
+        """Update node statuses based on S1 topic decision.
+
+        - "same": no changes — nodes keep current status
+        - "subtopic": no changes — related shift, keep hot nodes hot
+        - "changed": demote hot→warm, warm→cold, then re-promote
+          nodes belonging to new_topic_id (topic re-entry)
+        """
+        if topic_action in ("same", "subtopic"):
+            return
+        # topic_action == "changed" — demote all
         for node in self._nodes.values():
             status = node.get("status", "cold")
             if status == "hot":
                 node["status"] = "warm"
             elif status == "warm":
                 node["status"] = "cold"
+        # Re-promote nodes that belong to the new topic (returning to old topic)
+        if new_topic_id:
+            for node in self._nodes.values():
+                if node.get("_topic_id") == new_topic_id and node.get("status") != "hot":
+                    node["status"] = "hot"
+
+    def cycle_status(self) -> None:
+        """Deprecated: use update_status(). Kept for backwards compat."""
+        self.update_status("changed")
 
     def _edge_exists(self, src: str, tgt: str, relation: str) -> bool:
         pair = {src, tgt}

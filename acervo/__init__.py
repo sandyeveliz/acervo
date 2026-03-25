@@ -42,7 +42,6 @@ from acervo.reindexer import Reindexer
 from acervo.synthesizer import synthesize
 from acervo.layers import Layer, NodeMeta
 from acervo.ontology import register_type, register_relation, get_type, all_types
-from acervo.query_planner import QueryPlanner, PlanResult
 from acervo.topic_detector import TopicDetector, TopicVerdict, DetectionResult
 from acervo.context_index import ContextIndex
 from acervo.metrics import SessionMetrics, TurnMetric
@@ -97,8 +96,6 @@ __all__ = [
     "init_project",
     "load_project",
     # Internal API (backward compat — will be removed)
-    "QueryPlanner",
-    "PlanResult",
     "TopicDetector",
     "TopicVerdict",
     "DetectionResult",

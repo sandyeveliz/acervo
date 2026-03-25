@@ -1,6 +1,7 @@
 <p align="center">
-  <h1 align="center">acervo</h1>
-  <p align="center"><strong>Context proxy for AI agents.</strong><br/>Enriches context before. Extracts knowledge after. Remembers everything.</p>
+  <img src="assets/images/acervologo.png" alt="Acervo" width="320">
+  <br/>
+  <strong>Semantic compression layer for AI agents.</strong><br/>Your agent's context window is finite. Acervo makes it infinite.
 </p>
 
 <p align="center">
@@ -12,143 +13,142 @@
 
 ---
 
-Every conversation your AI agent has starts from scratch. Every context is forgotten. Your agent asks the same questions, loses the same insights, and has no idea who it's talking to.
+## The problem
 
-Acervo fixes that. It sits between the user and the LLM as a **context proxy** — building a knowledge graph that grows with every conversation, and assembling only the relevant context before each LLM call.
+Every chat application sends the **entire conversation history** to the LLM on every turn. Turn 1 costs 200 tokens. Turn 50 costs 9,000. Turn 100 hits the context window limit and starts losing information.
+
+This is like reading an entire book from page one every time someone asks you a question.
+
+RAG helps, but it's brute force — it searches everything, retrieves long text chunks, and floods the context with tokens that are mostly noise. A 5-chunk retrieval at 500 tokens each costs 2,500 tokens per turn, and most of that text isn't relevant to the current question.
+
+## What Acervo does differently
+
+Acervo builds a **knowledge graph** from every conversation. When a new message arrives, it retrieves only the relevant context — not raw text chunks, but **compressed knowledge nodes**. The graph *is* the summary.
+
+```
+Without Acervo:   turn 1 → 200tk  │  turn 50 → 9,000tk  │  turn 100 → context limit
+Classic RAG:      turn 1 → 200tk  │  turn 50 → 2,500tk  │  turn 100 → 2,500tk (noisy)
+With Acervo:      turn 1 → 200tk  │  turn 50 → ~400tk   │  turn 100 → ~400tk (signal)
+```
+
+A question like "What tech does Project Alpha use?" doesn't need 2,500 tokens of retrieved paragraphs. It needs ~80 tokens:
+
+```
+Project Alpha: web app, e-commerce platform
+  → uses: React, PostgreSQL, Redis
+  → maintained by: Alice, Bob
+  → deployed on: AWS, web + mobile
+```
+
+That's the entire context. Pure signal, zero noise. The graph replaces raw text with structured knowledge that the LLM can consume in a fraction of the tokens.
 
 ## How it works
 
-```mermaid
-flowchart LR
-    A["User message"] --> B["acervo.prepare()"]
-    B --> B1["Topic Detector"]
-    B1 --> B2["Query Planner\n(LLM)"]
-    B2 --> B3["Context Index"]
-    B3 --> C["context_stack\n+ plan"]
-    C --> D["Your app\ncalls LLM"]
-    D --> E["acervo.process()"]
-    E --> E1["Extractor\n(LLM)"]
-    E1 --> E2["Graph persist"]
+Acervo is a **context proxy** — it sits between your app and the LLM. Two calls: `prepare()` before, `process()` after.
 
-    style B fill:#2d5016,stroke:#4a8c1c
-    style E fill:#2d5016,stroke:#4a8c1c
-    style D fill:#1a3a5c,stroke:#3a7abd
+```
+User message
+     │
+     ▼
+ prepare()          ← Reads the graph, builds compressed context from relevant nodes
+     │
+     ▼
+ Your app           ← You call the LLM with Acervo's context (you control model, streaming, tools)
+     │
+     ▼
+ process()          ← Extracts entities, relations, facts → updates the graph
+     │
+     ▼
+ Graph grows        ← Next turn has more knowledge available, still constant tokens
 ```
 
 Acervo does **not** call the LLM itself. Your app controls the model, streaming, and tools. Acervo only enriches context and extracts knowledge.
 
-## The knowledge graph
+### The prepare/process cycle
 
-As conversations happen, Acervo builds a persistent graph of entities, relations, and facts:
+**`prepare()`** — Before the LLM call:
+1. **Topic detection**: Identifies what the conversation is about right now
+2. **Layer selection**: Loads the hot layer (current topic's nodes) from the graph
+3. **Context assembly**: Builds an enriched system message with compressed nodes, using only the last 2 messages instead of full history
 
-```mermaid
-graph TD
-    sandy["Sandy\n(Persona)"]
-    avs["Altovallestudio\n(Organizacion)"]
-    cipo["Cipolletti\n(Lugar)"]
-    rn["Rio Negro\n(Lugar)"]
-    butaco["Butaco\n(Proyecto)"]
-    angular["Angular\n(Tecnologia)"]
-    batman["Batman\n(Personaje)"]
-    dc["DC Universe\n(Universo)"]
+**`process()`** — After the LLM responds:
+1. **Extract**: Pulls entities, relations, events, and facts from the conversation
+2. **Connect**: Links new knowledge to existing nodes in the graph
+3. **Curate**: Merges duplicates, corrects types, discards noise
+4. **Available next turn**: New knowledge is immediately available for `prepare()`
 
-    sandy -->|TRABAJA_EN| avs
-    sandy -->|VIVE_EN| cipo
-    cipo -->|ubicado_en| rn
-    sandy -->|DUEÑO_DE| butaco
-    butaco -->|USA_TECNOLOGIA| angular
-    batman -->|PART_OF| dc
+### Stateless by design
 
-    classDef personal fill:#3a1f5c,stroke:#7c3aed
-    classDef universal fill:#1a3a5c,stroke:#3a7abd
-    class sandy,avs,butaco personal
-    class cipo,rn,angular,batman,dc universal
-```
+Acervo has no session state. The graph **is** the state. Every turn follows the same pipeline: read from graph → compress → inject → extract → write. If your app crashes and restarts, the next message works identically.
 
-<sup>Purple = PERSONAL (user-specific) · Blue = UNIVERSAL (world knowledge)</sup>
+## Quick start
 
-## Installation
+### 1. Install
 
 ```bash
 pip install acervo
 ```
 
-Or install from source:
+### 2. Start a local LLM
 
-```bash
-git clone https://github.com/sandyeveliz/acervo.git
-cd acervo
-pip install -e .
-```
+Acervo needs a small utility model for topic detection and extraction. Any OpenAI-compatible endpoint works.
 
-### Requirements
-
-- Python 3.11+
-- An OpenAI-compatible LLM server (LM Studio, Ollama, OpenAI, etc.)
-
-## Quick start
-
-### 1. Start your LLM server
-
-Acervo needs a small utility model for extraction, planning, and topic detection. Any OpenAI-compatible endpoint works.
-
-**With [LM Studio](https://lmstudio.ai/):** Load `qwen2.5-3b-instruct` (or any 3B+ model) and start the server on port 1234.
+**With [LM Studio](https://lmstudio.ai/):**
+Load a model like `qwen2.5-3b-instruct` and start the server.
 
 **With [Ollama](https://ollama.ai/):**
 ```bash
 ollama run qwen2.5:3b
 ```
 
-### 2. Use the prepare/process API
+### 3. Two lines to add memory
 
 ```python
 import asyncio
 from acervo import Acervo, OpenAIClient
 
 async def main():
-    # Connect to your LLM (any OpenAI-compatible endpoint)
     llm = OpenAIClient(
         base_url="http://localhost:1234/v1",
         model="qwen2.5-3b-instruct",
-        api_key="lm-studio",
     )
+    memory = Acervo(llm=llm, owner="demo-user")
 
-    memory = Acervo(llm=llm, owner="Sandy")
     history = [{"role": "system", "content": "You are a helpful assistant."}]
 
-    # --- Turn 1: user tells the agent something ---
-    user_msg = "I work at Altovallestudio, we build software"
+    # Turn 1: user shares information
+    user_msg = "I work at Acme Corp, we're building a React app called Beacon with PostgreSQL"
     history.append({"role": "user", "content": user_msg})
 
-    # Acervo prepares context from graph
     prep = await memory.prepare(user_msg, history)
-    # prep.context_stack → messages with injected graph context
-    # prep.has_context → False (first time, nothing in graph yet)
+    # prep.context_stack → enriched messages for the LLM
+    # prep.has_context → False (first turn, graph is empty)
 
-    # Your app calls the LLM (use your own client, streaming, etc.)
-    assistant_msg = "Nice! Tell me more about your projects."
+    # Call YOUR LLM with prep.context_stack
+    assistant_msg = "Got it! Tell me more about Beacon."
     history.append({"role": "assistant", "content": assistant_msg})
 
-    # Acervo extracts knowledge from the conversation
     await memory.process(user_msg, assistant_msg)
-    # Graph now has: Altovallestudio (Organizacion), Sandy (Persona)
+    # Graph now has: Acme Corp (organization), Beacon (project), React + PostgreSQL (technology)
+    # Plus edges: Acme Corp → produces → Beacon, Beacon → uses_technology → React, etc.
 
-    # --- Turn 2: ask about something stored ---
-    user_msg2 = "What do you know about my company?"
-    history.append({"role": "user", "content": user_msg2})
+    # Turn 2: ask about something stored
+    user_msg = "What do you know about our project?"
+    history.append({"role": "user", "content": user_msg})
 
-    prep2 = await memory.prepare(user_msg2, history)
-    # prep2.has_context → True!
-    # prep2.context_stack includes graph data about Altovallestudio
+    prep = await memory.prepare(user_msg, history)
+    # prep.has_context → True
+    # Context includes Beacon's full node: tech stack, relations, facts
+    # Only ~80 tokens of graph context — not the raw turn 1 text
 
-    print("Context for LLM:", prep2.context_stack)
+    print(prep.context_stack)
 
 asyncio.run(main())
 ```
 
-### 3. Use the low-level API
+### 4. Low-level API
 
-If you don't need the full pipeline (topic detection, planning), you can use `commit()` and `materialize()` directly:
+If you don't need the full pipeline, use `commit()` and `materialize()` directly:
 
 ```python
 # Store knowledge
@@ -158,45 +158,164 @@ await memory.commit(
 )
 
 # Retrieve relevant context
-context = memory.materialize("Batman")
-# Returns: "# Batman (Personaje)\nEl usuario mencionó:\n- was created by Bill Finger..."
+context = await memory.materialize("Batman")
+# Returns compressed node data, not raw text
 ```
 
-## Indexing a project
+## Proxy mode (`acervo serve`)
 
-Acervo can index an entire project directory — parsing source code with tree-sitter, resolving import dependencies, and optionally generating embeddings and semantic summaries with a local LLM.
-
-### Initialize and index
+If you don't want to change your app's code, Acervo can run as a **transparent proxy** between your client and the LLM. Point your app's base URL to Acervo; it enriches every request automatically.
 
 ```bash
-# Create .acervo/ in your project (instant, no model needed)
-acervo init /path/to/project
-
-# Index all files (structural only — no LLM required)
-acervo index /path/to/project
-
-# See what would be indexed without doing it
-acervo index --dry-run
-
-# Per-file progress
-acervo index --verbose
+acervo serve --port 9470 --forward-to http://localhost:1234/v1
 ```
 
-### What it does
+```
+Your app                    Acervo proxy (:9470)                LLM server (:1234)
+   │                              │                                   │
+   ├─ POST /v1/chat/completions ─►│                                   │
+   │                              ├─ prepare() (topic + graph)        │
+   │                              ├─ inject compressed context         │
+   │                              ├─ POST /v1/chat/completions ──────►│
+   │                              │◄──────────── stream response ─────┤
+   │◄──── stream response ────────┤                                   │
+   │                              ├─ process() (extract + persist)    │
+   │                              │                                   │
+```
 
-**Phase 1 — Structural analysis** (tree-sitter, fast, no LLM):
-- Parses `.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.html`, `.css` files
-- Extracts functions, classes, interfaces, types, methods, sections
-- Extracts imports and exports, resolves relative/alias imports
-- Builds a dependency graph (file → file edges)
-- Markdown files are split by heading hierarchy
+**Zero code changes** — just redirect `base_url`. Supports OpenAI (`/v1/chat/completions`) and Anthropic (`/v1/messages`) formats, streaming and non-streaming.
 
-**Phase 2 — Semantic enrichment** (optional, needs running models):
-- Generates embeddings for each code entity / markdown section
-- LLM (3B) generates a summary, topic tags, and implicit relations per chunk
-- Creates semantic `related_to` edges between nodes sharing topics
+```bash
+# What Acervo did on the last turn
+curl http://localhost:9470/acervo/last-turn
 
-### With embeddings and summaries
+# Graph stats
+curl http://localhost:9470/acervo/status
+```
+
+## The knowledge graph
+
+As conversations happen, Acervo builds a persistent graph of entities, relations, and facts. Every node is a compressed representation — not raw text, but structured knowledge.
+
+### What gets extracted
+
+**Entities** — real, named things:
+
+```
+Alice Chen        → person, PERSONAL
+Acme Corp         → organization, PERSONAL
+Project Beacon    → project, PERSONAL, purpose: "e-commerce platform"
+React             → technology, UNIVERSAL
+PostgreSQL        → technology, UNIVERSAL
+Sprint review Q1  → event, participants: [Alice, Bob, CTO]
+```
+
+**Relations** — precise connections:
+
+```
+Alice       → works_at       → Acme Corp
+Acme Corp   → produces       → Project Beacon
+Beacon      → uses_technology → React
+Beacon      → uses_technology → PostgreSQL
+Alice       → participated_in → Sprint review Q1
+```
+
+**Facts** — specific claims attached to entities:
+
+```
+Project Beacon: "In production since March, 50k monthly users"
+Alice Chen: "Lead developer, joined in 2024"
+```
+
+### Two knowledge layers
+
+**PERSONAL** — User-specific knowledge: projects, preferences, relationships, work context. Scoped to that user.
+
+**UNIVERSAL** — World knowledge: technologies, cities, public figures, concepts. Shareable across users.
+
+The extractor assigns layers automatically. "We use React" creates a PERSONAL edge from your project to the UNIVERSAL React node. A web search about React creates UNIVERSAL nodes without touching your personal graph.
+
+### Events as super-summaries
+
+Events capture *what happened* with *who was involved*. Instead of storing 5,000 tokens of meeting notes, the graph stores:
+
+```
+Event: "Sprint review Q1"
+  participants: [Alice, Bob, CTO]
+  description: "Shipped auth module, discussed perf issues, decided to add Redis cache"
+  temporal_marker: "End of Q1 2026"
+```
+
+When someone asks "What did we discuss in the sprint review?", the LLM gets this 40-token node — not the full meeting transcript.
+
+## Topic-based context layers
+
+This is what makes Acervo fundamentally different from a cache or a RAG system.
+
+### The layers move with the conversation
+
+Traditional systems use temporal layers — recent things are "hot", old things are "cold". Acervo uses **topic-based layers**: what's relevant depends on what you're talking about *right now*, not when it was mentioned.
+
+```
+09:00 — "Let's work on the auth bug in Beacon"
+  HOT:  Beacon, React, PostgreSQL, auth module, Alice
+  WARM: (empty, first topic)
+  COLD: (empty)
+  → LLM receives ~200 tokens of graph context
+
+09:45 — "Now let's look at Project Compass, the mobile app"
+  HOT:  Compass, React Native, Firebase, push notifications
+  WARM: Beacon, React, auth module          ← dropped from hot
+  COLD: (empty)
+  → LLM receives ~200 tokens about Compass only
+
+14:00 — "Back to the Beacon auth bug, did we fix it?"
+  HOT:  Beacon, React, auth module          ← jumps from warm back to hot instantly
+  WARM: whatever was just before
+  COLD: Compass, and everything else
+  → LLM receives Beacon context including this morning's facts. No re-explanation needed.
+
+17:00 — "Switching gears — have you read Dune?"
+  HOT:  Dune, Arrakis, Paul Atreides       ← new topic cluster
+  COLD: ALL work context (0 tokens)
+  → Vector search scoped to "Dune" cluster only
+```
+
+### Progressive retrieval
+
+The LLM doesn't receive all layers at once:
+
+1. **Default**: inject only the hot layer (~200-400 tokens)
+2. **If the user asks for more** ("What about the other projects?"): bring in warm layer
+3. **If needed**: bring in cold layer
+
+In 80% of turns, the hot layer is enough. The context window stays small and relevant.
+
+### The topic graph scopes vector search
+
+When Acervo knows the topic is "Beacon", vector search is filtered to only chunks tagged with that cluster. Instead of searching 10,000 chunks across every topic, it searches ~200 chunks from the relevant cluster. Faster, more precise, smaller results.
+
+## Index a codebase
+
+Acervo can index an entire project directory — parsing source code with tree-sitter, resolving import dependencies, and building a structural knowledge graph without any LLM calls.
+
+```bash
+acervo init /path/to/project
+acervo index /path/to/project
+```
+
+For a 50-file project, structural indexing takes **under 2 seconds**. Each file stores a SHA-256 hash — unchanged files are skipped on re-index.
+
+### What it extracts
+
+**Phase 1 — Structural** (tree-sitter, no LLM):
+- Functions, classes, interfaces, types, methods
+- Imports/exports with dependency resolution
+- Markdown files split by heading hierarchy
+
+**Phase 2 — Semantic** (optional, needs running models):
+- Embeddings per code entity for similarity search
+- LLM summaries, topic tags, and implicit relation detection
 
 ```bash
 acervo index /path/to/project \
@@ -206,45 +325,72 @@ acervo index /path/to/project \
   --llm-endpoint http://localhost:1234/v1
 ```
 
-### Check status and re-index
-
-```bash
-# Show graph stats (nodes by kind, stale files)
-acervo status
-
-# Re-index only files that changed on disk
-acervo reindex
-```
-
-### Supported file types
+### Supported files
 
 | Extension | Parser | Extracts |
 |-----------|--------|----------|
 | `.py` | tree-sitter | functions, classes, methods, imports, decorators |
-| `.ts`, `.tsx` | tree-sitter | functions, classes, interfaces, types, imports, exports |
-| `.js`, `.jsx` | tree-sitter | functions, classes, imports, exports |
+| `.ts` `.tsx` | tree-sitter | functions, classes, interfaces, types, imports, exports |
+| `.js` `.jsx` | tree-sitter | functions, classes, imports, exports |
 | `.html` | regex | component references, element IDs |
 | `.css` | regex | selectors, custom properties |
-| `.md` | pure Python | heading sections with parent hierarchy |
+| `.md` | heading parser | sections with hierarchy context |
 
-### Performance
+### Keep it fresh
 
-For a typical 50-file project (structural only): **under 2 seconds**.
-With embeddings + LLM summaries: depends on model speed, typically under 2 minutes.
+```bash
+acervo reindex    # Only changed files (SHA-256 comparison)
+acervo status     # Graph stats
+```
 
-Each file node stores a SHA-256 content hash — unchanged files are skipped on re-index.
+## Architecture
 
-## Tested setup
+### How nodes replace chunks
 
-This is the stack we use daily for development and testing:
+In a traditional RAG system, a question like "When did Alice and Bob first work together?" retrieves 5 text chunks at ~500 tokens each = 2,500 tokens of raw text. Most of it is irrelevant context around the actual answer.
 
-| Component | Tool | Model |
-|-----------|------|-------|
-| **LLM server** | [LM Studio](https://lmstudio.ai/) | `unsloth/qwen3.5-9b` (chat) + `qwen2.5-3b-instruct` (utility) |
-| **Embeddings** | [Ollama](https://ollama.ai/) | `qwen3-embedding` (optional, for topic detection L2) |
-| **Client app** | [AVS-Agents](https://github.com/sandyeveliz/AVS-Agents) | Python TUI with Textual |
+In Acervo, the graph has:
 
-Acervo works with any OpenAI-compatible endpoint. The `LLMClient` protocol is simple:
+```
+Alice → participated_in → Project Beacon launch (event)
+Bob   → participated_in → Project Beacon launch (event)
+
+Event: "Project Beacon launch"
+  participants: [Alice, Bob, CTO]
+  description: "First joint project, shipped MVP in 2 weeks"
+  temporal_marker: "March 2025"
+```
+
+The LLM receives ~60 tokens. Same answer quality, 40x fewer tokens.
+
+### Pipeline components
+
+All behind a single `LLMClient` protocol:
+
+| Component | What it does |
+|-----------|-------------|
+| **Topic detector** | Identifies the current conversation topic. Cascade: keywords → embeddings → LLM |
+| **Context index** | Selects hot/warm/cold nodes based on topic proximity, assembles compressed context |
+| **Extractor** | Pulls entities, relations, events, and facts from conversations |
+| **Graph curator** | Merges duplicates, corrects types, discards noise, connects isolated nodes |
+
+### History windowing
+
+```
+Traditional chat (turn 50):
+  system + msg1 + msg2 + ... + msg49 + msg50
+  = 9,000 tokens and growing
+
+Acervo (turn 50):
+  system + [compressed graph context for current topic] + msg49 + msg50
+  = ~400 tokens, constant
+```
+
+The graph context is **ranked by topic relevance**. Raw history treats every past message equally. Acervo gives you the right 400 tokens of context instead of 9,000 tokens of everything.
+
+### Works with any LLM
+
+Acervo needs one small utility model for extraction and topic detection. Your main LLM can be anything — local or cloud, any size, any provider.
 
 ```python
 class LLMClient(Protocol):
@@ -257,39 +403,13 @@ class LLMClient(Protocol):
     ) -> str: ...
 ```
 
-## Features
+## Tested setup
 
-### Knowledge graph with two layers
-
-- **UNIVERSAL** — world knowledge (cities, characters, technologies). Shared across users.
-- **PERSONAL** — user-specific context (projects, preferences). Trusted within that user's session.
-
-### Auto-registering ontology
-
-Built-in types: `Persona`, `Personaje`, `Organizacion`, `Lugar`, `Tecnologia`, `Obra`, `Universo`, `Editorial`
-
-Built-in relations: `IS_A`, `CREATED_BY`, `ALIAS_OF`, `PART_OF`, `SET_IN`, `DEBUTED_IN`, `PUBLISHED_BY`
-
-When the LLM extracts a type or relation that doesn't exist yet, Acervo registers it automatically. No code changes needed.
-
-### Pipeline components
-
-All behind a single `LLMClient` protocol — one small model handles everything:
-
-| Component | What it does |
-|-----------|-------------|
-| **Topic detector** | 3-level cascade: keywords → embeddings → LLM classification |
-| **Query planner** | LLM decides: use graph, search web, or respond directly |
-| **Context index** | 3-layer stack (system + warm graph + hot messages) with token budgeting |
-| **Extractor** | Entities, semantic relations, and facts from conversations and web results |
-| **Synthesizer** | Renders graph nodes into compact text for context injection |
-
-### Constant token usage
-
-```
-Without Acervo:   turn 1 → 200tk  |  turn 50 → 9000tk  |  turn 100 → limit
-With Acervo:      turn 1 → 200tk  |  turn 50 → 400tk   |  turn 100 → 420tk
-```
+| Component | Tool | Model |
+|-----------|------|-------|
+| **LLM server** | [LM Studio](https://lmstudio.ai/) | `qwen3.5-9b` (chat + extraction) |
+| **Embeddings** | [Ollama](https://ollama.ai/) | `qwen3-embedding` (optional) |
+| **Client app** | [AVS-Agents](https://github.com/sandyeveliz/AVS-Agents) | Python TUI + Web UI |
 
 ## Project status
 
@@ -297,46 +417,46 @@ v0.1.2 — [Changelog](./CHANGELOG.md)
 
 | Feature | Status |
 |---------|--------|
-| Knowledge graph (JSON persistence) | Working |
-| Two-layer architecture (UNIVERSAL / PERSONAL) | Working |
-| prepare() / process() context proxy API | Working |
-| Auto-registering ontology | Working |
-| Semantic relations (IS_A, CREATED_BY, ALIAS_OF, etc.) | Working |
-| Topic detector (keywords → embeddings → LLM) | Working |
-| Query planner (GRAPH_ALL / WEB_SEARCH / READY) | Working |
-| Context index with token budgeting | Working |
-| Built-in OpenAIClient (zero external deps) | Working |
-| LLMClient + Embedder protocols | Working |
-| PyPI package (`pip install acervo`) | Working |
-| Unit tests (56 passing) | Working |
-| REST API (`acervo serve`) | [Planned](https://sandyeveliz.github.io/acervo/roadmap/) |
-| MCP server | [Planned](https://sandyeveliz.github.io/acervo/roadmap/) |
-| `acervo index` — structural parsing + dependency graph | Working |
-| `acervo index` — semantic enrichment (embeddings + LLM summaries) | Working |
-| Community knowledge packs | [Planned](https://sandyeveliz.github.io/acervo/roadmap/) |
+| Knowledge graph (JSON persistence) | ✅ Working |
+| UNIVERSAL / PERSONAL layers | ✅ Working |
+| `prepare()` / `process()` context proxy API | ✅ Working |
+| Topic-based context layers (HOT/WARM/COLD) | ✅ Working |
+| Topic detector (keywords → embeddings → LLM) | ✅ Working |
+| Context index with token budgeting | ✅ Working |
+| History windowing (constant token usage) | ✅ Working |
+| Entity + relation + event extraction | ✅ Working |
+| Graph curation (dedup, type correction) | ✅ Working |
+| `acervo index` — structural + semantic | ✅ Working |
+| REST API (`acervo serve`) | ✅ Working |
+| Progressive retrieval (hot → warm → cold) | 🔜 Next |
+| Topic-scoped vector search | 🔜 Next |
+| Fine-tuned extraction model | 🔜 Planned |
+| Community knowledge packs | 🔜 Planned |
 
 ## Documentation
 
-- **[Tutorial](https://sandyeveliz.github.io/acervo/tutorial/)** — build a chat with persistent memory in 5 minutes
-- **[Getting Started](https://sandyeveliz.github.io/acervo/getting-started/)** — installation, quickstart, LLMClient protocol
+- **[Tutorial](https://sandyeveliz.github.io/acervo/tutorial/)** — Build a chat with persistent memory in 5 minutes
+- **[Getting Started](https://sandyeveliz.github.io/acervo/getting-started/)** — Installation, quick start, LLMClient protocol
 - **[Configuration](https://sandyeveliz.github.io/acervo/configuration/)** — SDK parameters, environment variables
-- **[Knowledge Layers](https://sandyeveliz.github.io/acervo/layers/)** — UNIVERSAL vs PERSONAL, node lifecycle, ontology
-- **[Roadmap](https://sandyeveliz.github.io/acervo/roadmap/)** — planned features and their status
+- **[Knowledge Layers](https://sandyeveliz.github.io/acervo/layers/)** — UNIVERSAL vs PERSONAL, node lifecycle, topic layers
+- **[Roadmap](https://sandyeveliz.github.io/acervo/roadmap/)** — Planned features
 
 ## Why "Acervo"?
 
-In library science, an *acervo* is the complete collection of a library — every book, document, and record it holds, organized so anything can be found when needed.
+In library science, an *acervo* is the complete collection of a library — every book, document, and record, organized so anything can be found when needed.
 
-An agent's memory should work like a well-run library: knowledge organized by subject, filed in the right place, and retrieved by a librarian who knows exactly which shelf to go to — not by someone who reads every book from cover to cover every time you ask a question.
+Your agent's memory should work like a library: knowledge organized by subject, retrievable in an instant. Not like someone who reads every book from cover to cover every time you ask a question.
 
 ## Contributing
 
-Acervo is open source under Apache 2.0. See [CONTRIBUTING.md](./CONTRIBUTING.md) to get started.
+Open source under Apache 2.0. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## License
 
-Apache 2.0 — see [LICENSE](./LICENSE). Copyright 2026 Sandy Veliz.
+Apache 2.0 — see [LICENSE](./LICENSE).
 
 ---
 
-Built by [Sandy Veliz](https://github.com/sandyeveliz) · [AltoValleStudio](https://altovallestudio.com)
+<p align="center">
+  <a href="https://github.com/sandyeveliz/acervo">GitHub</a> · <a href="https://sandyeveliz.github.io/acervo">Docs</a> · <a href="https://pypi.org/project/acervo/">PyPI</a>
+</p>

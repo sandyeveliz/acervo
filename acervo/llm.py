@@ -40,6 +40,10 @@ class Embedder(Protocol):
         """Return embedding vector for text."""
         ...
 
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """Embed multiple texts in a single call. Default: sequential fallback."""
+        return [await self.embed(t) for t in texts]
+
 
 @runtime_checkable
 class VectorStore(Protocol):

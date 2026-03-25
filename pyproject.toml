@@ -30,6 +30,7 @@ Changelog = "https://github.com/sandyeveliz/acervo/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 proxy = ["aiohttp>=3.9"]
+vector = ["chromadb>=0.5"]
 tree-sitter = [
     "tree-sitter>=0.23",
     "tree-sitter-python>=0.23",

@@ -141,7 +141,7 @@ class GatheredInfo:
 
 
 class ContextBuilder:
-    """Uses the utility LLM (3B) to summarize gathered info into optimal context."""
+    """Uses the utility LLM to summarize gathered info into optimal context."""
 
     def __init__(self, llm, prompt_template: str | None = None) -> None:
         """Args:
@@ -172,11 +172,11 @@ class ContextBuilder:
             log.info("Context builder: info fits budget (%d <= %d), passing through", info_tokens, token_budget)
             return formatted
 
-        # Use 3B LLM to summarize
+        # Use utility LLM to summarize
         log.info("Context builder: summarizing %d tokens → %d budget", info_tokens, token_budget)
         prompt = self._prompt.format(
             user_message=user_message[:300],
-            gathered_info=formatted[:4000],  # cap input to avoid overloading 3B
+            gathered_info=formatted[:4000],
             token_budget=token_budget,
         )
 
