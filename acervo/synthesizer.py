@@ -11,7 +11,7 @@ import re
 from acervo.graph import TopicGraph
 
 _IDENTITY_PATTERNS = re.compile(
-    r"(?:el usuario se (?:llama|identific[oó] como)|su nombre es|me llamo|mi nombre es)\s+(\S+)",
+    r"(?:my name is|i am|i'm|the user (?:is called|identified as)|user's name is)\s+(\S+)",
     re.IGNORECASE,
 )
 
@@ -27,7 +27,7 @@ def synthesize(graph: TopicGraph, user_message: str) -> str:
     # Check for user identity across all nodes
     identity = _find_user_identity(graph)
     if identity:
-        parts.append(f"Nota: en sesiones anteriores el usuario se identifico como {identity}.")
+        parts.append(f"Note: in previous sessions the user identified as {identity}.")
 
     hot_nodes = graph.get_nodes_by_status("hot")
     warm_nodes = graph.get_nodes_by_status("warm")
@@ -108,9 +108,9 @@ def _find_user_identity(graph: TopicGraph) -> str | None:
                 return match.group(1)
             # Also check for persona nodes that were stated by the user
             if (
-                node.get("type") == "persona"
+                node.get("type") in ("Person", "Persona")
                 and f.get("source") == "user"
-                and "nombre" in fact_text.lower()
+                and ("name" in fact_text.lower() or "nombre" in fact_text.lower())
             ):
                 return node.get("label", "")
     return None
@@ -142,7 +142,7 @@ def _render_node(node: dict, graph: TopicGraph) -> str:
 
     # Session history indicator
     if session_count > 1:
-        parts.append(f"Mencionado en {session_count} sesiones anteriores.")
+        parts.append(f"Mentioned in {session_count} previous sessions.")
 
     # Facts grouped by source
     by_source: dict[str, list[str]] = {}
@@ -154,9 +154,9 @@ def _render_node(node: dict, graph: TopicGraph) -> str:
         by_source.setdefault(source, []).append(fact_text)
 
     source_labels = {
-        "user": "El usuario mencionó:",
-        "web": "De búsqueda web:",
-        "rag": "De documentos:",
+        "user": "The user mentioned:",
+        "web": "From web search:",
+        "rag": "From documents:",
     }
 
     for source, slabel in source_labels.items():
@@ -169,7 +169,7 @@ def _render_node(node: dict, graph: TopicGraph) -> str:
     # Related entities (from edges)
     relations = _get_relations(node.get("id", ""), graph)
     if relations:
-        parts.append("Relaciones:")
+        parts.append("Relations:")
         for rel_label, rel_type in relations:
             parts.append(f"- {rel_type}: {rel_label}")
 
@@ -198,11 +198,18 @@ def _get_relations(node_id: str, graph: TopicGraph) -> list[tuple[str, str]]:
 def _reverse_relation(relation: str) -> str:
     """Reverse a relation for display from the target's perspective."""
     reverses = {
-        "ubicado_en": "contiene",
-        "tecnico_de": "dirigido_por",
-        "parte_de": "incluye",
-        "hincha_de": "hincha",
-        "juega_en": "tiene_jugador",
-        "pertenece_a": "tiene_miembro",
+        "located_in": "contains",
+        "managed_by": "manages",
+        "part_of": "includes",
+        "belongs_to": "has_member",
+        "played_for": "has_player",
+        "lives_in": "has_resident",
+        # Legacy Spanish relations
+        "ubicado_en": "contains",
+        "tecnico_de": "manages",
+        "parte_de": "includes",
+        "hincha_de": "fan",
+        "juega_en": "has_player",
+        "pertenece_a": "has_member",
     }
     return reverses.get(relation, relation)

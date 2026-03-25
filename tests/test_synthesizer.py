@@ -27,7 +27,7 @@ def test_synthesize_hot_node_with_facts():
     """Hot nodes with facts are included in context."""
     graph = _make_graph()
     graph.upsert_entities(
-        entities=[("Sandy", "Persona")],
+        entities=[("Sandy", "Person")],
         facts=[("Sandy", "Sandy vive en Cipolletti", "user")],
     )
     # upsert sets status to "hot"
@@ -40,7 +40,7 @@ def test_synthesize_cold_node_excluded():
     """Cold nodes are not included in context."""
     graph = _make_graph()
     graph.upsert_entities(
-        entities=[("Sandy", "Persona")],
+        entities=[("Sandy", "Person")],
         facts=[("Sandy", "Sandy vive en Cipolletti", "user")],
     )
     # Cycle twice: hot -> warm -> cold
@@ -55,7 +55,7 @@ def test_synthesize_warm_node_only_if_mentioned():
     """Warm nodes only included if the message mentions them."""
     graph = _make_graph()
     graph.upsert_entities(
-        entities=[("River Plate", "Organización")],
+        entities=[("River Plate", "Organization")],
         facts=[("River Plate", "Club de futbol argentino", "user")],
     )
     # Cycle once: hot -> warm
@@ -74,7 +74,7 @@ def test_synthesize_neighbor_traversal():
     """Neighbors of hot nodes with facts are included."""
     graph = _make_graph()
     graph.upsert_entities(
-        entities=[("Sandy", "Persona"), ("Cipolletti", "Lugar")],
+        entities=[("Sandy", "Person"), ("Cipolletti", "Place")],
         relations=[("Sandy", "Cipolletti", "ubicado_en")],
         facts=[
             ("Sandy", "se llama Sandy", "user"),
@@ -91,8 +91,8 @@ def test_find_user_identity():
     """Detects user identity from facts containing name patterns."""
     graph = _make_graph()
     graph.upsert_entities(
-        entities=[("Sandy", "Persona")],
-        facts=[("Sandy", "el usuario se llama Sandy", "user")],
+        entities=[("Sandy", "Person")],
+        facts=[("Sandy", "my name is Sandy", "user")],
     )
     identity = _find_user_identity(graph)
     assert identity == "Sandy"
@@ -102,7 +102,7 @@ def test_find_user_identity_none():
     """Returns None when no identity facts exist."""
     graph = _make_graph()
     graph.upsert_entities(
-        entities=[("Cipolletti", "Lugar")],
+        entities=[("Cipolletti", "Place")],
         facts=[("Cipolletti", "Ciudad en Rio Negro", "user")],
     )
     identity = _find_user_identity(graph)

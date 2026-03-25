@@ -1,4 +1,4 @@
-"""Built-in OpenAI-compatible LLM client for standalone mode.
+"""Built-in OpenAI-compatible LLM and embedding clients for standalone mode.
 
 Works with any OpenAI-compatible API: LM Studio, Ollama, OpenAI, etc.
 No external dependencies — uses stdlib urllib only.
@@ -13,13 +13,64 @@ from urllib.request import Request, urlopen
 log = logging.getLogger(__name__)
 
 
+class OllamaEmbedder:
+    """Embedder using Ollama's /api/embed endpoint (stdlib only).
+
+    Usage:
+        embedder = OllamaEmbedder(
+            base_url="http://localhost:11434",
+            model="qwen3-embedding",
+        )
+        vector = await embedder.embed("hello world")
+    """
+
+    def __init__(self, base_url: str, model: str) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._model = model
+
+    async def embed(self, text: str) -> list[float]:
+        import asyncio
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._embed_sync, text)
+
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """Embed multiple texts in a single HTTP call."""
+        if not texts:
+            return []
+        if len(texts) == 1:
+            return [await self.embed(texts[0])]
+        import asyncio
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._embed_batch_sync, texts)
+
+    def _embed_sync(self, text: str) -> list[float]:
+        url = f"{self._base_url}/api/embed"
+        payload = json.dumps({"model": self._model, "input": text}).encode()
+        headers = {"Content-Type": "application/json"}
+        req = Request(url, data=payload, headers=headers, method="POST")
+        with urlopen(req, timeout=120) as resp:
+            data = json.loads(resp.read())
+        return data["embeddings"][0]
+
+    def _embed_batch_sync(self, texts: list[str]) -> list[list[float]]:
+        url = f"{self._base_url}/api/embed"
+        payload = json.dumps({"model": self._model, "input": texts}).encode()
+        headers = {"Content-Type": "application/json"}
+        req = Request(url, data=payload, headers=headers, method="POST")
+        with urlopen(req, timeout=120) as resp:
+            data = json.loads(resp.read())
+        return data["embeddings"]
+
+
 class OpenAIClient:
     """Minimal async-compatible OpenAI chat client using stdlib only.
 
     Usage:
         client = OpenAIClient(
             base_url="http://localhost:1234/v1",
-            model="qwen2.5-3b-instruct",
+            model="qwen3.5-9b",
             api_key="lm-studio",
         )
         response = await client.chat([{"role": "user", "content": "hi"}])
@@ -69,7 +120,7 @@ class OpenAIClient:
             headers["Authorization"] = f"Bearer {self._api_key}"
 
         req = Request(url, data=payload, headers=headers, method="POST")
-        with urlopen(req, timeout=30) as resp:
+        with urlopen(req, timeout=120) as resp:
             data = json.loads(resp.read())
 
         return data["choices"][0]["message"]["content"]

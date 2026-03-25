@@ -16,7 +16,7 @@ pip install -e ".[dev]"
 
 ---
 
-## Quickstart: SDK directo
+## Quickstart: SDK
 
 The simplest way to use Acervo — import it into your Python agent.
 
@@ -62,32 +62,12 @@ See [Configuration](configuration.md) for the full list of environment variables
 
 ---
 
-## Quickstart: Standalone server
+!!! info "Planned: Standalone server and MCP"
+    A standalone HTTP server (`acervo serve`) and MCP server (`acervo mcp`) are planned
+    for a future release. These will let you use Acervo from any language via HTTP or
+    as a tool in MCP-compatible clients like Claude Desktop.
 
-Run Acervo as an independent service with its own LLM configuration:
-
-```bash
-# Configure via .env
-cat .env
-ACERVO_LIGHT_MODEL_URL=http://localhost:1234/v1
-ACERVO_LIGHT_MODEL=qwen2.5-3b-instruct
-ACERVO_LIGHT_API_KEY=lm-studio
-
-# Start the server
-acervo serve --port 5820
-```
-
-Then from any language:
-
-```bash
-# Store knowledge
-curl -X POST http://localhost:5820/v1/commit \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Sandy works at Altovallestudio", "owner": "Sandy"}'
-
-# Retrieve context
-curl "http://localhost:5820/v1/materialize?query=projects&owner=Sandy&budget=800"
-```
+    See the [Roadmap](roadmap.md) for details and status.
 
 ---
 

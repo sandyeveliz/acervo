@@ -12,22 +12,24 @@ Acervo fixes that — not by dumping everything into the context window, but by 
 
 ## How it works
 
-Acervo is a **context proxy**. It intercepts every message to build context from its knowledge graph, and intercepts every response to extract and store new knowledge.
+```mermaid
+flowchart LR
+    A["User message"] --> B["acervo.prepare()"]
+    B --> B1["Topic Detector"]
+    B1 --> B2["Query Planner\n(LLM)"]
+    B2 --> B3["Context Index"]
+    B3 --> C["context_stack\n+ plan"]
+    C --> D["Your app\ncalls LLM"]
+    D --> E["acervo.process()"]
+    E --> E1["Extractor\n(LLM)"]
+    E1 --> E2["Graph persist"]
 
+    style B fill:#2d5016,stroke:#4a8c1c
+    style E fill:#2d5016,stroke:#4a8c1c
+    style D fill:#1a3a5c,stroke:#3a7abd
 ```
-User message
-    |
-acervo.prepare(message, history)
-    |  topic detection > query planning > context building
-    |  returns context_stack + plan (GRAPH or WEB_SEARCH)
-    |
-Client calls LLM with enriched context
-    |
-acervo.process(message, response, web_results?)
-    |  entity extraction > fact persistence > graph update
-    |
-Knowledge accumulates. Token usage stays flat.
-```
+
+Acervo does **not** call the LLM itself. Your app controls the model, streaming, and tool execution. Acervo only enriches context and extracts knowledge.
 
 ---
 
@@ -44,14 +46,14 @@ llm = OpenAIClient(
 
 memory = Acervo(llm=llm, owner="Sandy")
 
-# Before LLM call
+# Before LLM call — enrich context from graph
 prep = await memory.prepare(user_text, history)
 
-# After LLM call
+# After LLM call — extract knowledge from response
 await memory.process(user_text, assistant_response)
 ```
 
-See [Getting Started](getting-started.md) for the full guide.
+See the [Tutorial](tutorial.md) for a full walkthrough with a running example.
 
 ---
 
@@ -59,16 +61,16 @@ See [Getting Started](getting-started.md) for the full guide.
 
 | Feature | Status |
 |---------|--------|
-| Knowledge graph + JSON persistence | Working |
-| Two-layer architecture (UNIVERSAL/PERSONAL) | Working |
+| Knowledge graph (JSON persistence) | Working |
+| Two-layer architecture (UNIVERSAL / PERSONAL) | Working |
+| prepare() / process() context proxy API | Working |
 | Auto-registering ontology | Working |
-| Semantic relations (IS_A, CREATED_BY, etc.) | Working |
-| prepare()/process() context proxy API | Working |
 | Topic detector, query planner, context index | Working |
+| PyPI package (`pip install acervo`) | Working |
 | 56 unit tests | Passing |
-| MCP server | Planned |
-| REST API | Planned |
-| Vector search | Planned |
+| REST API / MCP server | [Planned](roadmap.md) |
+| Vector search | [Planned](roadmap.md) |
+| Community knowledge packs | [Planned](roadmap.md) |
 
 ---
 

@@ -23,22 +23,28 @@ log = logging.getLogger(__name__)
 
 BUILTIN_ENTITY_TYPES: dict[str, list[str]] = {
     # People and characters
-    "Persona":       ["nombre", "edad", "rol", "relacion_con_owner"],
-    "Personaje":     ["nombre", "alias", "creador", "universo"],
+    "Person":        ["name", "age", "role", "relation_to_owner"],
+    "Character":     ["name", "alias", "creator", "universe"],
     # Organizations and universes
-    "Organización":  ["nombre", "tipo", "industria", "ubicacion"],
-    "Universo":      ["nombre", "editorial", "personajes"],
-    "Editorial":     ["nombre", "fundacion", "pais"],
+    "Organization":  ["name", "type", "industry", "location"],
+    "Universe":      ["name", "publisher", "characters"],
+    "Publisher":     ["name", "founded", "country"],
     # Projects and works
-    "Proyecto":      ["nombre", "stack", "scaffold", "arquitectura", "modulos", "estado"],
-    "Obra":          ["nombre", "tipo", "autor", "genero", "año"],
+    "Project":       ["name", "stack", "scaffold", "architecture", "modules", "status"],
+    "Work":          ["name", "type", "author", "genre", "year"],
     # Places
-    "Lugar":         ["nombre", "tipo", "region", "pais"],
+    "Place":         ["name", "type", "region", "country"],
     # Technology
-    "Tecnología":    ["nombre", "tipo", "version"],
+    "Technology":    ["name", "type", "version"],
     # Other
-    "Documento":     ["nombre", "tipo", "path", "contenido_resumen"],
-    "Regla":         ["descripcion", "aplica_a", "tecnologia", "severity"],
+    "Document":      ["name", "type", "path", "summary"],
+    "Rule":          ["description", "applies_to", "technology", "severity"],
+    "Event":         ["name", "date", "location", "description"],
+    "Concept":       ["name", "domain", "description"],
+    # Structural parsing
+    "File":          ["path", "language", "content_hash"],
+    "Symbol":        ["name", "symbol_type", "signature", "start_line", "end_line", "language"],
+    "Section":       ["name", "heading_level", "start_line", "end_line"],
 }
 
 _entity_registry: dict[str, list[str]] = dict(BUILTIN_ENTITY_TYPES)
@@ -47,7 +53,7 @@ _entity_registry: dict[str, list[str]] = dict(BUILTIN_ENTITY_TYPES)
 
 BUILTIN_RELATIONS: set[str] = {
     # Universal semantic relations (knowledge graph standard)
-    "IS_A",           # Batman is_a Personaje
+    "IS_A",           # Batman is_a Character
     "CREATED_BY",     # Batman created_by Bill Finger
     "ALIAS_OF",       # Batman alias_of Bruce Wayne
     "PART_OF",        # Batman part_of DC Universe
@@ -55,21 +61,34 @@ BUILTIN_RELATIONS: set[str] = {
     "DEBUTED_IN",     # Batman debuted_in Detective Comics
     "PUBLISHED_BY",   # Detective Comics published_by DC Comics
     # Domain relations
-    "TRABAJA_EN",
-    "VIVE_EN",
-    "DUEÑO_DE",
-    "PERTENECE_A",
-    "USA_TECNOLOGIA",
-    "TIENE_MODULO",
-    "GUSTA_DE",
-    "FAMILIAR_DE",
-    "RELACIONADO_CON",
-    # Legacy from conversation extractor (snake_case)
+    "WORKS_AT",
+    "LIVES_IN",
+    "OWNS",
+    "BELONGS_TO",
+    "USES_TECHNOLOGY",
+    "HAS_MODULE",
+    "LIKES",
+    "RELATED_TO",
+    # snake_case variants (from extractor output)
     "is_a", "created_by", "alias_of", "part_of", "set_in",
     "debuted_in", "published_by",
-    "ubicado_en", "tecnico_de", "parte_de", "hincha_de",
-    "juega_en", "pertenece_a", "relacionado_con", "co_mentioned",
-    "jugó_contra", "dirigido_por", "ganó_a", "perdió_contra",
+    "works_at", "lives_in", "owns", "belongs_to",
+    "uses_technology", "has_module", "likes", "related_to",
+    "located_in", "managed_by", "played_for", "played_against",
+    "directed_by", "won_against", "lost_to",
+    # Fine-tuned extractor model relation types
+    "maintains", "member_of", "depends_on", "alternative_to",
+    "deployed_on", "produces", "serves", "documented_in",
+    "participated_in", "triggered_by", "resulted_in",
+    # Structural parsing relations
+    "CONTAINS", "contains",       # File -> Symbol/Section
+    "DEFINED_IN", "defined_in",   # Symbol -> File
+    "CHILD_OF", "child_of",       # nested method -> class, subsection -> section
+    # Dependency graph relations (from indexer)
+    "IMPORTS", "imports",         # File -> File (resolved import)
+    "CALLS", "calls",             # Function -> Function
+    "EXTENDS", "extends",         # Class -> Class
+    "IMPLEMENTS", "implements",   # Class -> Interface
 }
 
 _relation_registry: set[str] = set(BUILTIN_RELATIONS)
@@ -113,22 +132,42 @@ def is_known_type(name: str) -> bool:
 # ── Type mapping (extractor lowercase → ontology capitalized) ──────────────
 
 _EXTRACTOR_TYPE_MAP: dict[str, str] = {
-    "lugar": "Lugar",
-    "persona": "Persona",
-    "personaje": "Personaje",
+    # English types (primary)
+    "person": "Person",
+    "character": "Character",
+    "organization": "Organization",
+    "universe": "Universe",
+    "publisher": "Publisher",
+    "project": "Project",
+    "work": "Work",
+    "place": "Place",
+    "technology": "Technology",
+    "document": "Document",
+    "rule": "Rule",
+    "event": "Event",
+    "concept": "Concept",
+    "entity": "Unknown",
+    "activity": "Project",
+    "comic": "Work",
+    "file": "File",
+    "symbol": "Symbol",
+    "section": "Section",
+    # Legacy Spanish mappings (for existing graphs)
+    "lugar": "Place",
+    "persona": "Person",
+    "personaje": "Character",
     "entidad": "Unknown",
-    "actividad": "Proyecto",
-    "tecnologia": "Tecnología",
-    "tecnología": "Tecnología",
-    "documento": "Documento",
-    "regla": "Regla",
-    "organizacion": "Organización",
-    "organización": "Organización",
-    "proyecto": "Proyecto",
-    "obra": "Obra",
-    "universo": "Universo",
-    "editorial": "Editorial",
-    "comic": "Obra",
+    "actividad": "Project",
+    "tecnologia": "Technology",
+    "tecnología": "Technology",
+    "documento": "Document",
+    "regla": "Rule",
+    "organizacion": "Organization",
+    "organización": "Organization",
+    "proyecto": "Project",
+    "obra": "Work",
+    "universo": "Universe",
+    "editorial": "Publisher",
 }
 
 
@@ -155,7 +194,8 @@ def map_extractor_type(raw_type: str) -> str:
 # ── Universal knowledge detection ──────────────────────────────────────────
 
 _UNIVERSAL_TYPES: frozenset[str] = frozenset({
-    "Lugar", "Tecnología", "Personaje", "Universo", "Editorial", "Obra",
+    "Place", "Technology", "Character", "Universe", "Publisher", "Work",
+    "Event", "Concept", "File", "Symbol", "Section",
 })
 
 

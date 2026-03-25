@@ -34,7 +34,7 @@ async def test_commit_extracts_and_persists():
     assert len(result.entities) == 1
     node = memory.graph.get_node("sandy")
     assert node is not None
-    assert node["type"] == "Persona"
+    assert node["type"] == "Person"
     assert node["owner"] == "Sandy"
 
 

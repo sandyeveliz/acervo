@@ -1,5 +1,5 @@
 site_name: Acervo
-site_description: Layered memory for AI agents
+site_description: Context proxy for AI agents
 site_url: https://sandyeveliz.github.io/acervo
 repo_url: https://github.com/sandyeveliz/acervo
 repo_name: sandyeveliz/acervo
@@ -15,12 +15,20 @@ theme:
 
 nav:
   - Home: index.md
+  - Tutorial: tutorial.md
   - Getting Started: getting-started.md
   - Configuration: configuration.md
   - Layers: layers.md
+  - Roadmap: roadmap.md
   - Contributing: contributing.md
 
 markdown_extensions:
   - pymdownx.highlight
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - admonition
+  - pymdownx.details
+  - attr_list
