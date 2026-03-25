@@ -105,38 +105,46 @@ class AcervoProxy:
         try:
             from acervo import Acervo
 
-            # Create embedder from config if configured
+            # --- Embeddings disabled for now ---
+            # Entity-level embedding replaced by graph activation + S1 extraction.
+            # Will be re-enabled for document chunk indexing linked to graph nodes.
             embedder = None
-            embed_cfg = self._config.embeddings
-            if embed_cfg.url and embed_cfg.model:
-                from acervo.openai_client import OllamaEmbedder
-                resolved = embed_cfg.resolve()
-                embedder = OllamaEmbedder(
-                    base_url=resolved.url,
-                    model=resolved.model,
-                )
-                log.info("Embedder configured: %s @ %s", resolved.model, resolved.url)
+            vector_store = None
+            # embed_cfg = self._config.embeddings
+            # if embed_cfg.url and embed_cfg.model:
+            #     from acervo.openai_client import OllamaEmbedder
+            #     resolved = embed_cfg.resolve()
+            #     _embedder = OllamaEmbedder(
+            #         base_url=resolved.url,
+            #         model=resolved.model,
+            #     )
+            #     try:
+            #         await _embedder.embed("health")
+            #         embedder = _embedder
+            #         log.info("Embedder configured: %s @ %s", resolved.model, resolved.url)
+            #     except Exception as e:
+            #         log.warning("Ollama unavailable (%s) — running without embeddings", e)
+            #         print(f"  WARNING: Ollama unavailable — embeddings disabled")
+            #
+            # vector_store = None
+            # if embedder:
+            #     try:
+            #         from acervo.vector_store import ChromaVectorStore
+            #         vectordb_path = project_root / ".acervo" / "data" / "vectordb"
+            #         vectordb_path.mkdir(parents=True, exist_ok=True)
+            #         embed_batch_fn = getattr(embedder, "embed_batch", None)
+            #         vector_store = ChromaVectorStore(
+            #             persist_path=str(vectordb_path),
+            #             embed_fn=embedder.embed,
+            #             embed_batch_fn=embed_batch_fn,
+            #         )
+            #         log.info("Vector store initialized at %s", vectordb_path)
+            #     except ImportError:
+            #         log.info("chromadb not installed — vector search disabled")
+            #     except Exception as e:
+            #         log.warning("Vector store init failed: %s", e)
 
             project_root = self._config_path.parent.parent
-
-            # Create vector store if embedder is available
-            vector_store = None
-            if embedder:
-                try:
-                    from acervo.vector_store import ChromaVectorStore
-                    vectordb_path = project_root / ".acervo" / "data" / "vectordb"
-                    vectordb_path.mkdir(parents=True, exist_ok=True)
-                    embed_batch_fn = getattr(embedder, "embed_batch", None)
-                    vector_store = ChromaVectorStore(
-                        persist_path=str(vectordb_path),
-                        embed_fn=embedder.embed,
-                        embed_batch_fn=embed_batch_fn,
-                    )
-                    log.info("Vector store initialized at %s", vectordb_path)
-                except ImportError:
-                    log.info("chromadb not installed — vector search disabled")
-                except Exception as e:
-                    log.warning("Vector store init failed: %s", e)
 
             self._acervo = Acervo.from_project(
                 project_root, auto_init=False,
@@ -144,14 +152,7 @@ class AcervoProxy:
             )
             stats = self._acervo.get_graph_stats()
             print(f"  Graph: {stats['node_count']} nodes, {stats['edge_count']} edges")
-            if vector_store:
-                print(f"  Vector store: active ({embed_cfg.model} @ {embed_cfg.url})")
-                # Facts are indexed incrementally during normal turns.
-                # No startup sync needed — avoids blocking on large graphs.
-            elif embedder:
-                print(f"  Embedder: {embed_cfg.model} @ {embed_cfg.url} (no vector store)")
-            else:
-                print("  Embedder: not configured")
+            print("  Embeddings: disabled (document chunk indexing planned)")
         except Exception as e:
             log.warning("Acervo init failed (proxy will pass-through): %s", e)
             print(f"  WARNING: Acervo init failed: {e}")
@@ -170,6 +171,7 @@ class AcervoProxy:
 
         if self._is_new_user_turn_anthropic(body):
             body = await self._enrich_anthropic(body)
+            body = self._window_history_anthropic(body)
             self._turn_count += 1
 
         # Capture what we're actually sending to the LLM (for trace/debug)
@@ -224,9 +226,7 @@ class AcervoProxy:
                 "facts_extracted": 0,
             }
             body = await self._enrich_openai(body)
-            # Window history: graph context replaces older messages
-            has_context = self._last_enrichment.get("enriched", False)
-            body = self._window_history_openai(body, has_context)
+            body = self._window_history_openai(body)
             self._turn_count += 1
         elif self._pending_context_msgs:
             # Tool continuation — re-inject context from the initial enrichment
@@ -586,12 +586,12 @@ class AcervoProxy:
 
         return body
 
-    def _window_history_openai(self, body: dict, has_context: bool) -> dict:
+    def _window_history_openai(self, body: dict) -> dict:
         """Trim conversation history, keeping only the last N messages.
 
-        When the graph has context, older turns are already covered by the
-        enriched [VERIFIED CONTEXT] / [CONVERSATION CONTEXT] blocks.
-        The LLM only needs the most recent messages for conversational flow.
+        Windowing applies ALWAYS — with graph context, older turns are covered
+        by the enriched context blocks. Without graph context, older turns
+        aren't useful anyway; the last N messages provide conversational flow.
 
         Message layout after enrichment:
           [system, context_user, context_ack, ...old_conv..., current_user]
@@ -601,9 +601,6 @@ class AcervoProxy:
         window = self._config.context.history_window
         if window <= 0:
             return body  # 0 = disabled
-
-        if not has_context:
-            return body  # No graph context — keep full history as fallback
 
         messages = body.get("messages", [])
 
@@ -621,6 +618,30 @@ class AcervoProxy:
         body["messages"] = messages[:prefix_len] + conversation[-window:]
         log.info(
             "History windowed: %d → %d messages (trimmed %d, window=%d)",
+            len(messages), len(body["messages"]), trimmed_count, window,
+        )
+        return body
+
+    def _window_history_anthropic(self, body: dict) -> dict:
+        """Trim Anthropic conversation history, keeping only the last N messages.
+
+        Anthropic format: system is a top-level string, messages is pure
+        conversation (no system message in the array). Just keep the last
+        `window` messages.
+        """
+        window = self._config.context.history_window
+        if window <= 0:
+            return body  # 0 = disabled
+
+        messages = body.get("messages", [])
+        if len(messages) <= window:
+            return body  # Already within window
+
+        trimmed_count = len(messages) - window
+        body = dict(body)
+        body["messages"] = messages[-window:]
+        log.info(
+            "History windowed (Anthropic): %d → %d messages (trimmed %d, window=%d)",
             len(messages), len(body["messages"]), trimmed_count, window,
         )
         return body
