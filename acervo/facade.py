@@ -18,6 +18,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -1133,23 +1134,29 @@ class Acervo:
                 if node.get("facts"):
                     node["status"] = "enriched"
 
-            # Index entity facts in vector store for semantic search
+            # Index entity facts in vector store (background — don't block response)
             if self._vector_store:
-                try:
-                    fact_texts = [
-                        f.get("fact", "") if isinstance(f, dict) else str(f)
-                        for f in node.get("facts", [])
-                    ]
-                    fact_texts = [t for t in fact_texts if t.strip()]
-                    if fact_texts:
-                        await self._vector_store.index_facts(
-                            node_id, entity.name, fact_texts,
-                        )
-                        log.info("[acervo] Indexed %d facts for: %s", len(fact_texts), entity.name)
-                except Exception as e:
-                    log.warning("Vector indexing failed for %s: %s", entity.name, e)
+                fact_texts = [
+                    f.get("fact", "") if isinstance(f, dict) else str(f)
+                    for f in node.get("facts", [])
+                ]
+                fact_texts = [t for t in fact_texts if t.strip()]
+                if fact_texts:
+                    asyncio.create_task(
+                        self._bg_index_facts(node_id, entity.name, fact_texts)
+                    )
 
         self._graph.save()
+
+    async def _bg_index_facts(
+        self, node_id: str, label: str, fact_texts: list[str],
+    ) -> None:
+        """Background task: index facts in vector store without blocking response."""
+        try:
+            await self._vector_store.index_facts(node_id, label, fact_texts)
+            log.info("[acervo] Indexed %d facts for: %s", len(fact_texts), label)
+        except Exception as e:
+            log.warning("Vector indexing failed for %s: %s", label, e)
 
     def materialize(self, query: str, token_budget: int = 800) -> str:
         """Build a context string from relevant graph nodes."""

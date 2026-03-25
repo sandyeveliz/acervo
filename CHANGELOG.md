@@ -4,6 +4,14 @@ All notable changes to this project will be documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-03-25
+
+### Changed
+- **Disabled entity-level embeddings in chat flow** — S1 fine-tuned model handles entity extraction; graph activation + traversal covers retrieval without per-turn embedding calls. Removes Ollama as a runtime dependency. Embedding code preserved for future document chunk indexing.
+- **Graceful Ollama health check** — Proxy verifies Ollama connectivity on startup before enabling embeddings. Falls back cleanly if unavailable.
+- **Background fact indexing** — Vector store fact indexing moved to `asyncio.create_task()` so it doesn't block LLM response streaming.
+- **Removed startup sync** — `sync_vector_store()` no longer blocks proxy startup; facts are indexed incrementally.
+
 ## [0.2.0] - 2026-03-24
 
 ### Architecture

@@ -105,38 +105,46 @@ class AcervoProxy:
         try:
             from acervo import Acervo
 
-            # Create embedder from config if configured
+            # --- Embeddings disabled for now ---
+            # Entity-level embedding replaced by graph activation + S1 extraction.
+            # Will be re-enabled for document chunk indexing linked to graph nodes.
             embedder = None
-            embed_cfg = self._config.embeddings
-            if embed_cfg.url and embed_cfg.model:
-                from acervo.openai_client import OllamaEmbedder
-                resolved = embed_cfg.resolve()
-                embedder = OllamaEmbedder(
-                    base_url=resolved.url,
-                    model=resolved.model,
-                )
-                log.info("Embedder configured: %s @ %s", resolved.model, resolved.url)
+            vector_store = None
+            # embed_cfg = self._config.embeddings
+            # if embed_cfg.url and embed_cfg.model:
+            #     from acervo.openai_client import OllamaEmbedder
+            #     resolved = embed_cfg.resolve()
+            #     _embedder = OllamaEmbedder(
+            #         base_url=resolved.url,
+            #         model=resolved.model,
+            #     )
+            #     try:
+            #         await _embedder.embed("health")
+            #         embedder = _embedder
+            #         log.info("Embedder configured: %s @ %s", resolved.model, resolved.url)
+            #     except Exception as e:
+            #         log.warning("Ollama unavailable (%s) — running without embeddings", e)
+            #         print(f"  WARNING: Ollama unavailable — embeddings disabled")
+            #
+            # vector_store = None
+            # if embedder:
+            #     try:
+            #         from acervo.vector_store import ChromaVectorStore
+            #         vectordb_path = project_root / ".acervo" / "data" / "vectordb"
+            #         vectordb_path.mkdir(parents=True, exist_ok=True)
+            #         embed_batch_fn = getattr(embedder, "embed_batch", None)
+            #         vector_store = ChromaVectorStore(
+            #             persist_path=str(vectordb_path),
+            #             embed_fn=embedder.embed,
+            #             embed_batch_fn=embed_batch_fn,
+            #         )
+            #         log.info("Vector store initialized at %s", vectordb_path)
+            #     except ImportError:
+            #         log.info("chromadb not installed — vector search disabled")
+            #     except Exception as e:
+            #         log.warning("Vector store init failed: %s", e)
 
             project_root = self._config_path.parent.parent
-
-            # Create vector store if embedder is available
-            vector_store = None
-            if embedder:
-                try:
-                    from acervo.vector_store import ChromaVectorStore
-                    vectordb_path = project_root / ".acervo" / "data" / "vectordb"
-                    vectordb_path.mkdir(parents=True, exist_ok=True)
-                    embed_batch_fn = getattr(embedder, "embed_batch", None)
-                    vector_store = ChromaVectorStore(
-                        persist_path=str(vectordb_path),
-                        embed_fn=embedder.embed,
-                        embed_batch_fn=embed_batch_fn,
-                    )
-                    log.info("Vector store initialized at %s", vectordb_path)
-                except ImportError:
-                    log.info("chromadb not installed — vector search disabled")
-                except Exception as e:
-                    log.warning("Vector store init failed: %s", e)
 
             self._acervo = Acervo.from_project(
                 project_root, auto_init=False,
@@ -144,14 +152,7 @@ class AcervoProxy:
             )
             stats = self._acervo.get_graph_stats()
             print(f"  Graph: {stats['node_count']} nodes, {stats['edge_count']} edges")
-            if vector_store:
-                print(f"  Vector store: active ({embed_cfg.model} @ {embed_cfg.url})")
-                # Facts are indexed incrementally during normal turns.
-                # No startup sync needed — avoids blocking on large graphs.
-            elif embedder:
-                print(f"  Embedder: {embed_cfg.model} @ {embed_cfg.url} (no vector store)")
-            else:
-                print("  Embedder: not configured")
+            print("  Embeddings: disabled (document chunk indexing planned)")
         except Exception as e:
             log.warning("Acervo init failed (proxy will pass-through): %s", e)
             print(f"  WARNING: Acervo init failed: {e}")
