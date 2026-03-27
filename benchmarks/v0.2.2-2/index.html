@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Acervo Benchmark Report — v0.2.2-2</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+         background: #0d1117; color: #c9d1d9; line-height: 1.6; }
+
+  /* Hero */
+  .hero { text-align: center; padding: 4rem 2rem 3rem; background: linear-gradient(180deg, #161b22 0%, #0d1117 100%); }
+  .hero h1 { font-size: 2.8rem; color: #fff; margin-bottom: 0.5rem; }
+  .hero h1 span { color: #58a6ff; }
+  .hero .tagline { color: #8b949e; font-size: 1.2rem; max-width: 700px; margin: 0 auto 2rem; }
+  .hero-stats { display: flex; justify-content: center; gap: 3rem; flex-wrap: wrap; }
+  .hero-stat { text-align: center; }
+  .hero-stat .value { font-size: 3rem; font-weight: 800; color: #3fb950; }
+  .hero-stat .value.blue { color: #58a6ff; }
+  .hero-stat .label { color: #8b949e; font-size: 0.9rem; }
+  .hero .version { color: #484f58; font-size: 0.85rem; margin-top: 1.5rem; }
+
+  /* Sections */
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 2rem; }
+  .section { padding: 3rem 0; }
+  .section-title { color: #58a6ff; font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .section-subtitle { color: #8b949e; margin-bottom: 2rem; font-size: 1rem; }
+
+  /* Problem section */
+  .problem-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.5rem; }
+  .problem-card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 1.5rem; text-align: center; }
+  .problem-card .icon { font-size: 2rem; margin-bottom: 0.5rem; }
+  .problem-card h3 { color: #f85149; font-size: 1rem; margin-bottom: 0.5rem; }
+  .problem-card p { color: #8b949e; font-size: 0.9rem; }
+
+  /* Case studies */
+  .case-study { background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+                 padding: 2rem; margin-bottom: 1.5rem; }
+  .case-header { display: flex; align-items: center; gap: 1.5rem; margin-bottom: 1rem; }
+  .case-avatar { width: 56px; height: 56px; border-radius: 50%; background: #1f6feb33;
+                  display: flex; align-items: center; justify-content: center;
+                  font-size: 1.5rem; font-weight: 700; color: #58a6ff; flex-shrink: 0; }
+  .case-meta { flex: 1; }
+  .case-meta h3 { color: #fff; font-size: 1.2rem; }
+  .case-meta .role { color: #8b949e; font-size: 0.9rem; }
+  .case-headline { display: inline-block; background: #238636; color: #fff; padding: 0.3rem 0.8rem;
+                    border-radius: 20px; font-weight: 700; font-size: 0.9rem; }
+  .case-hook { color: #c9d1d9; margin: 1rem 0; font-size: 1rem; line-height: 1.7; }
+  .beats-timeline { margin-top: 1.5rem; padding-left: 1.5rem; border-left: 2px solid #30363d; }
+  .beat { position: relative; padding: 0.5rem 0 1rem 1rem; }
+  .beat::before { content: ''; position: absolute; left: -1.62rem; top: 0.7rem;
+                   width: 10px; height: 10px; border-radius: 50%; }
+  .beat.resurrection::before { background: #3fb950; }
+  .beat.cost_crossover::before { background: #d29922; }
+  .beat.compression_climax::before { background: #f85149; }
+  .beat.graph_milestone::before { background: #58a6ff; }
+  .beat.small_talk_resilience::before { background: #8b949e; }
+  .beat .beat-headline { color: #fff; font-weight: 600; font-size: 0.95rem; }
+  .beat .beat-detail { color: #8b949e; font-size: 0.85rem; margin-top: 0.2rem; }
+  .beat .beat-turn { color: #484f58; font-size: 0.75rem; }
+
+  /* Hero chart */
+  .chart-section { background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+                    padding: 2rem; margin: 2rem 0; }
+  .chart-section h3 { color: #fff; margin-bottom: 0.5rem; }
+  .chart-section p { color: #8b949e; font-size: 0.9rem; margin-bottom: 1rem; }
+
+  /* Cost section */
+  .cost-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; }
+  .cost-card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 1.5rem; }
+  .cost-card h3 { color: #8b949e; font-size: 0.9rem; margin-bottom: 0.5rem; }
+  .cost-card .saved { font-size: 1.8rem; font-weight: 700; color: #3fb950; }
+  .cost-card .detail { color: #8b949e; font-size: 0.85rem; margin-top: 0.3rem; }
+
+  /* Technical details toggle */
+  .tech-toggle { text-align: center; margin: 3rem 0 1rem; }
+  .tech-toggle button { background: #21262d; border: 1px solid #30363d; color: #58a6ff;
+                         padding: 0.8rem 2rem; border-radius: 8px; cursor: pointer;
+                         font-size: 1rem; }
+  .tech-toggle button:hover { background: #30363d; }
+  .tech-details { display: none; margin-top: 2rem; }
+  .tech-details.show { display: block; }
+
+  /* Footer */
+  .footer { text-align: center; padding: 2rem; color: #484f58; font-size: 0.85rem;
+             border-top: 1px solid #30363d; margin-top: 3rem; }
+
+  /* Beat type legend */
+  .beat-legend { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+  .beat-legend-item { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: #8b949e; }
+  .beat-legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+  @media (max-width: 768px) {
+    .hero h1 { font-size: 2rem; }
+    .hero-stats { gap: 1.5rem; }
+    .hero-stat .value { font-size: 2rem; }
+    .problem-grid { grid-template-columns: 1fr; }
+    .case-header { flex-direction: column; text-align: center; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ─── Hero ─── -->
+<div class="hero">
+  <h1><span>Acervo</span> Benchmark Report</h1>
+  <p class="tagline">Every message grows your context window. Acervo replaces growing history with a constant-size knowledge graph. Here's the proof.</p>
+  <div class="hero-stats">
+    <div class="hero-stat"><div class="value">76%</div><div class="label">Avg Token Savings</div></div>
+    <div class="hero-stat"><div class="value blue">360</div><div class="label">Turns Tested</div></div>
+    <div class="hero-stat"><div class="value">94%</div><div class="label">Context Hit Rate</div></div>
+    <div class="hero-stat"><div class="value blue">165</div><div class="label">Entities Extracted</div></div>
+    <div class="hero-stat"><div class="value">0</div><div class="label">Phantom Entities</div></div>
+  </div>
+  <p class="version">2026-03-27 07:45 &mdash; v0.2.2-2 &mdash; 6 scenarios</p>
+</div>
+
+<div class="container">
+
+<!-- ─── The Problem ─── -->
+<div class="section">
+  <h2 class="section-title">The Problem</h2>
+  <p class="section-subtitle">Traditional conversation memory has three fundamental flaws.</p>
+  <div class="problem-grid">
+    <div class="problem-card">
+      <div class="icon">&#x1F4C8;</div>
+      <h3>Linear Token Growth</h3>
+      <p>Every message adds to the context window. By turn 50, you're sending thousands of tokens of old history with every request.</p>
+    </div>
+    <div class="problem-card">
+      <div class="icon">&#x1F4B8;</div>
+      <h3>Exploding Costs</h3>
+      <p>API costs scale with token count. A 100-turn conversation costs 10x more than the first 10 turns combined.</p>
+    </div>
+    <div class="problem-card">
+      <div class="icon">&#x1F50D;</div>
+      <h3>Lost Context</h3>
+      <p>Truncation discards old messages. The AI forgets what the user said 30 turns ago even though it might be critical now.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Token Growth Chart ─── -->
+<div class="section">
+  <div class="chart-section">
+    <h3>Acervo vs Full History: Token Usage Over Time</h3>
+    <p>The red line (full history) grows with every turn. The green line (Acervo) stays flat because the knowledge graph compresses context.</p>
+    <div id="hero-charts"></div>
+  </div>
+</div>
+
+<!-- ─── Case Studies ─── -->
+<div class="section">
+  <h2 class="section-title">Scenario Case Studies</h2>
+  <p class="section-subtitle">Real conversation patterns tested end-to-end. Each scenario runs through the full Acervo pipeline with a real LLM.</p>
+  <div class="beat-legend">
+    <div class="beat-legend-item"><div class="beat-legend-dot" style="background:#3fb950;"></div> Context Resurrection</div>
+    <div class="beat-legend-item"><div class="beat-legend-dot" style="background:#d29922;"></div> Cost Crossover</div>
+    <div class="beat-legend-item"><div class="beat-legend-dot" style="background:#f85149;"></div> Peak Compression</div>
+    <div class="beat-legend-item"><div class="beat-legend-dot" style="background:#58a6ff;"></div> Graph Milestone</div>
+    <div class="beat-legend-item"><div class="beat-legend-dot" style="background:#8b949e;"></div> Small Talk Resilience</div>
+  </div>
+  <div id="case-studies"></div>
+</div>
+
+<!-- ─── Cost Impact ─── -->
+<div class="section">
+  <h2 class="section-title">What This Means For Your Wallet</h2>
+  <p class="section-subtitle">Projected savings per 1,000 conversations based on real API pricing.</p>
+  <div class="cost-grid" id="cost-cards"></div>
+  <p style="color:#484f58;font-size:0.8rem;margin-top:1rem;">Based on published API pricing (per 1M tokens). Output estimated at 30% of input. Actual costs depend on response length.</p>
+</div>
+
+<!-- ─── Technical Details ─── -->
+<div class="tech-toggle">
+  <button onclick="document.getElementById('tech-details').classList.toggle('show'); this.textContent = this.textContent.includes('Show') ? 'Hide Technical Details' : 'Show Technical Details';">
+    Show Technical Details
+  </button>
+</div>
+<div id="tech-details" class="tech-details"></div>
+
+<div class="footer">
+  <p>Acervo &mdash; Context proxy for AI agents. Graph-based memory compression.</p>
+</div>
+
+</div><!-- .container -->
+
+<script>
+const narratives = [{"persona": "Sandy", "role": "Full-stack Developer", "hook": "A senior developer introduces his company, projects, and tech stack. After 30 turns of deep technical discussion, can Acervo recall the earliest details?", "headline": "68% token savings over 50 turns", "category": "programming", "total_turns": 50, "beats": [{"turn": 1, "type": "cost_crossover", "headline": "50% savings milestone at turn 1", "detail": "By turn 1, Acervo had used 6 tokens vs 40 for full history — 85% savings.", "value": 85.0}, {"turn": 13, "type": "graph_milestone", "headline": "Knowledge graph reached 10 entities", "detail": "Turn 13: Acervo's knowledge graph now contains 10 entities and 13 relations.", "value": 10.0}, {"turn": 17, "type": "small_talk_resilience", "headline": "Survived 4 turns of small talk without graph pollution", "detail": "Turns 17-20: the conversation went off-topic, but Acervo kept the knowledge graph clean.", "value": 4.0}, {"turn": 21, "type": "compression_climax", "headline": "Peak compression: 89% savings at turn 21", "detail": "Turn 21: Acervo used 76 tokens vs 707 for full history — a 89% reduction.", "value": 89.3}, {"turn": 39, "type": "graph_milestone", "headline": "Knowledge graph reached 25 entities", "detail": "Turn 39: Acervo's knowledge graph now contains 26 entities and 37 relations.", "value": 25.0}]}, {"persona": "Martin", "role": "Comic Collector", "hook": "A passionate reader discusses DC comics, manga, and Latin American literature. Topics jump across genres — does Acervo keep each domain's context separate and accurate?", "headline": "78% token savings over 50 turns", "category": "literature", "total_turns": 50, "beats": [{"turn": 1, "type": "cost_crossover", "headline": "50% savings milestone at turn 1", "detail": "By turn 1, Acervo had used 6 tokens vs 31 for full history — 81% savings.", "value": 80.64516129032258}, {"turn": 14, "type": "graph_milestone", "headline": "Knowledge graph reached 10 entities", "detail": "Turn 14: Acervo's knowledge graph now contains 10 entities and 13 relations.", "value": 10.0}, {"turn": 19, "type": "small_talk_resilience", "headline": "Survived 4 turns of small talk without graph pollution", "detail": "Turns 19-22: the conversation went off-topic, but Acervo kept the knowledge graph clean.", "value": 4.0}, {"turn": 36, "type": "graph_milestone", "headline": "Knowledge graph reached 25 entities", "detail": "Turn 36: Acervo's knowledge graph now contains 25 entities and 24 relations.", "value": 25.0}, {"turn": 44, "type": "compression_climax", "headline": "Peak compression: 91% savings at turn 44", "detail": "Turn 44: Acervo used 142 tokens vs 1609 for full history — a 91% reduction.", "value": 91.2}]}, {"persona": "Lucia", "role": "CS Student", "hook": "A computer science student discusses her thesis on NER, her courses, and ML research. Academic entities (papers, algorithms, professors) test extraction beyond casual conversation.", "headline": "67% token savings over 50 turns", "category": "academic", "total_turns": 50, "beats": [{"turn": 1, "type": "cost_crossover", "headline": "50% savings milestone at turn 1", "detail": "By turn 1, Acervo had used 6 tokens vs 40 for full history — 85% savings.", "value": 85.0}, {"turn": 1, "type": "compression_climax", "headline": "Peak compression: 85% savings at turn 1", "detail": "Turn 1: Acervo used 6 tokens vs 40 for full history — a 85% reduction.", "value": 85.0}, {"turn": 12, "type": "graph_milestone", "headline": "Knowledge graph reached 10 entities", "detail": "Turn 12: Acervo's knowledge graph now contains 10 entities and 6 relations.", "value": 10.0}, {"turn": 19, "type": "small_talk_resilience", "headline": "Survived 4 turns of small talk without graph pollution", "detail": "Turns 19-22: the conversation went off-topic, but Acervo kept the knowledge graph clean.", "value": 4.0}, {"turn": 35, "type": "graph_milestone", "headline": "Knowledge graph reached 25 entities", "detail": "Turn 35: Acervo's knowledge graph now contains 25 entities and 24 relations.", "value": 25.0}]}, {"persona": "Diego", "role": "Multi-hobby Enthusiast", "hook": "Cooking, travel, sports, music, and work — all in one conversation. The ultimate chaos test for topic separation and context restoration across unrelated domains.", "headline": "80% token savings over 50 turns", "category": "mixed", "total_turns": 50, "beats": [{"turn": 1, "type": "cost_crossover", "headline": "50% savings milestone at turn 1", "detail": "By turn 1, Acervo had used 6 tokens vs 31 for full history — 81% savings.", "value": 80.64516129032258}, {"turn": 9, "type": "graph_milestone", "headline": "Knowledge graph reached 10 entities", "detail": "Turn 9: Acervo's knowledge graph now contains 10 entities and 4 relations.", "value": 10.0}, {"turn": 15, "type": "small_talk_resilience", "headline": "Survived 3 turns of small talk without graph pollution", "detail": "Turns 15-17: the conversation went off-topic, but Acervo kept the knowledge graph clean.", "value": 3.0}, {"turn": 27, "type": "compression_climax", "headline": "Peak compression: 90% savings at turn 27", "detail": "Turn 27: Acervo used 92 tokens vs 955 for full history — a 90% reduction.", "value": 90.4}, {"turn": 32, "type": "graph_milestone", "headline": "Knowledge graph reached 25 entities", "detail": "Turn 32: Acervo's knowledge graph now contains 25 entities and 24 relations.", "value": 25.0}]}, {"persona": "Carlos", "role": "Indie SaaS Founder", "hook": "Carlos is building Menuboard alone — a digital menu SaaS for restaurants. Over 100 turns and 3 simulated weeks, he makes tech decisions, changes his mind, goes on tangents, and comes back. Can Acervo remember what matters?", "headline": "83% token savings over 101 turns", "category": "real_world", "total_turns": 101, "beats": [{"turn": 1, "type": "cost_crossover", "headline": "50% savings milestone at turn 1", "detail": "By turn 1, Acervo had used 6 tokens vs 17 for full history — 65% savings.", "value": 64.70588235294117}, {"turn": 17, "type": "graph_milestone", "headline": "Knowledge graph reached 10 entities", "detail": "Turn 17: Acervo's knowledge graph now contains 10 entities and 14 relations.", "value": 10.0}, {"turn": 53, "type": "small_talk_resilience", "headline": "Survived 11 turns of small talk without graph pollution", "detail": "Turns 53-63: the conversation went off-topic, but Acervo kept the knowledge graph clean.", "value": 11.0}, {"turn": 101, "type": "compression_climax", "headline": "Peak compression: 91% savings at turn 101", "detail": "Turn 101: Acervo used 486 tokens vs 5243 for full history — a 91% reduction.", "value": 90.7}]}, {"persona": "Ana", "role": "Product Manager", "hook": "Ana is a PM at a logistics startup. Her conversations are prose-heavy, not code — roadmaps, stakeholders, business metrics. Can Acervo handle non-technical knowledge as well as it handles tech?", "headline": "81% token savings over 59 turns", "category": "real_world", "total_turns": 59, "beats": [{"turn": 1, "type": "cost_crossover", "headline": "50% savings milestone at turn 1", "detail": "By turn 1, Acervo had used 6 tokens vs 28 for full history — 79% savings.", "value": 78.57142857142857}, {"turn": 29, "type": "graph_milestone", "headline": "Knowledge graph reached 10 entities", "detail": "Turn 29: Acervo's knowledge graph now contains 10 entities and 7 relations.", "value": 10.0}, {"turn": 29, "type": "small_talk_resilience", "headline": "Survived 10 turns of small talk without graph pollution", "detail": "Turns 29-38: the conversation went off-topic, but Acervo kept the knowledge graph clean.", "value": 10.0}, {"turn": 56, "type": "compression_climax", "headline": "Peak compression: 86% savings at turn 56", "detail": "Turn 56: Acervo used 469 tokens vs 3421 for full history — a 86% reduction.", "value": 86.3}]}];
+const turnData = {"developer_workflow": {"acervo": [6, 59, 91, 144, 139, 163, 200, 258, 255, 259, 279, 286, 293, 287, 305, 319, 318, 307, 308, 78, 76, 89, 105, 135, 157, 171, 201, 226, 249, 268, 311, 348, 376, 402, 397, 400, 394, 399, 391, 395, 399, 396, 391, 389, 399, 405, 409, 391, 390, 393], "baseline": [40, 74, 105, 135, 172, 208, 241, 278, 323, 363, 396, 434, 474, 512, 543, 571, 596, 627, 656, 679, 707, 744, 780, 813, 843, 876, 909, 939, 977, 1012, 1045, 1077, 1109, 1138, 1177, 1212, 1250, 1280, 1317, 1349, 1376, 1412, 1443, 1484, 1516, 1556, 1592, 1623, 1659, 1709]}, "literature_comics": {"acervo": [6, 46, 75, 129, 142, 164, 164, 179, 218, 227, 229, 266, 260, 286, 284, 306, 318, 369, 378, 382, 369, 69, 99, 102, 115, 130, 133, 140, 140, 175, 178, 185, 255, 251, 241, 236, 236, 237, 136, 130, 132, 141, 139, 142, 168, 166, 168, 248, 311, 338], "baseline": [31, 55, 97, 129, 157, 187, 224, 259, 301, 338, 375, 417, 457, 488, 525, 560, 595, 635, 663, 690, 716, 742, 779, 817, 856, 902, 940, 978, 1016, 1058, 1109, 1149, 1187, 1224, 1262, 1299, 1336, 1372, 1403, 1450, 1483, 1527, 1570, 1609, 1659, 1700, 1742, 1787, 1829, 1876]}, "academic_research": {"acervo": [6, 56, 88, 152, 185, 207, 204, 205, 197, 196, 204, 225, 239, 229, 256, 259, 261, 270, 277, 275, 305, 296, 286, 301, 327, 333, 430, 429, 426, 422, 421, 426, 423, 420, 426, 437, 447, 445, 435, 419, 420, 429, 444, 444, 427, 424, 423, 426, 431, 426], "baseline": [40, 74, 116, 151, 192, 233, 264, 298, 341, 390, 437, 476, 514, 563, 605, 647, 685, 725, 759, 793, 825, 852, 887, 926, 960, 996, 1033, 1062, 1094, 1126, 1163, 1202, 1234, 1278, 1329, 1378, 1417, 1457, 1491, 1537, 1590, 1638, 1677, 1717, 1756, 1798, 1845, 1888, 1925, 1972]}, "mixed_domains": {"acervo": [6, 16, 45, 96, 152, 173, 161, 171, 132, 114, 120, 134, 206, 207, 218, 202, 197, 72, 75, 80, 133, 163, 103, 115, 135, 131, 92, 115, 129, 167, 185, 200, 199, 198, 200, 208, 226, 261, 275, 274, 273, 254, 281, 299, 330, 342, 355, 364, 383, 397], "baseline": [31, 57, 107, 146, 179, 224, 274, 299, 329, 366, 404, 445, 478, 504, 526, 561, 580, 616, 658, 699, 734, 776, 814, 849, 887, 916, 955, 992, 1034, 1078, 1123, 1153, 1179, 1214, 1252, 1307, 1346, 1394, 1429, 1467, 1495, 1531, 1559, 1595, 1631, 1664, 1694, 1727, 1777, 1830]}, "saas_founder_real": {"acervo": [6, 15, 44, 73, 92, 143, 167, 249, 302, 303, 273, 292, 273, 247, 255, 284, 294, 268, 319, 388, 425, 453, 465, 451, 422, 421, 439, 450, 401, 396, 433, 457, 461, 455, 449, 475, 482, 491, 430, 438, 440, 507, 485, 482, 444, 433, 414, 459, 463, 464, 463, 466, 471, 423, 401, 393, 408, 429, 484, 507, 530, 523, 493, 452, 432, 476, 521, 485, 469, 452, 486, 506, 513, 462, 461, 481, 466, 419, 415, 471, 482, 472, 456, 460, 470, 494, 515, 509, 503, 464, 505, 481, 521, 481, 517, 542, 579, 537, 525, 490, 486], "baseline": [17, 50, 95, 115, 148, 202, 258, 298, 346, 387, 429, 446, 462, 506, 540, 560, 584, 632, 675, 742, 819, 877, 921, 955, 1023, 1074, 1121, 1144, 1195, 1239, 1295, 1345, 1398, 1438, 1514, 1566, 1611, 1627, 1704, 1758, 1825, 1886, 1942, 1972, 2014, 2057, 2123, 2171, 2208, 2279, 2332, 2369, 2398, 2417, 2456, 2501, 2543, 2632, 2707, 2761, 2848, 2885, 2904, 2989, 3057, 3122, 3166, 3220, 3263, 3358, 3423, 3472, 3505, 3580, 3643, 3656, 3696, 3748, 3822, 3870, 3917, 3972, 4025, 4075, 4163, 4234, 4274, 4360, 4391, 4474, 4525, 4595, 4637, 4749, 4832, 4918, 4976, 5060, 5097, 5157, 5243]}, "product_manager_real": {"acervo": [6, 17, 60, 84, 136, 153, 139, 172, 209, 224, 222, 241, 319, 326, 377, 322, 321, 313, 377, 378, 337, 263, 308, 337, 360, 363, 398, 340, 339, 315, 336, 311, 313, 320, 327, 314, 325, 415, 454, 415, 338, 375, 386, 456, 478, 475, 443, 445, 485, 483, 478, 502, 501, 498, 468, 469, 514, 523, 519], "baseline": [28, 63, 109, 154, 196, 230, 318, 370, 419, 480, 558, 663, 758, 841, 888, 969, 1030, 1154, 1201, 1222, 1282, 1370, 1391, 1500, 1574, 1626, 1676, 1750, 1789, 1843, 1887, 1927, 1974, 2020, 2042, 2105, 2225, 2261, 2297, 2344, 2409, 2461, 2544, 2626, 2670, 2729, 2805, 2867, 2922, 2979, 3082, 3136, 3184, 3254, 3314, 3421, 3493, 3528, 3698]}};
+const costSavings = {"GPT-4o": {"baseline_1k": 487.13, "acervo_1k": 102.29, "saved_1k": 384.84}, "Claude Sonnet": {"baseline_1k": 664.27, "acervo_1k": 139.49, "saved_1k": 524.79}, "GPT-4o-mini": {"baseline_1k": 29.23, "acervo_1k": 6.14, "saved_1k": 23.09}};
+
+// ─── Hero Charts (one per scenario) ───
+const heroEl = document.getElementById('hero-charts');
+Object.entries(turnData).forEach(([name, data]) => {
+  const canvas = document.createElement('canvas');
+  canvas.height = 60;
+  canvas.style.marginBottom = '1rem';
+  heroEl.appendChild(canvas);
+  const labels = data.acervo.map((_, i) => i + 1);
+  new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: name.replace(/_/g, ' ') + ' — Acervo', data: data.acervo,
+           borderColor: '#238636', backgroundColor: '#23863622', fill: true, tension: 0.3, pointRadius: 0 },
+        { label: name.replace(/_/g, ' ') + ' — Full History', data: data.baseline,
+           borderColor: '#f85149', backgroundColor: '#f8514922', fill: true, tension: 0.3, pointRadius: 0 },
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { labels: { color: '#8b949e' } } },
+      scales: {
+        x: { ticks: { color: '#8b949e' }, grid: { color: '#30363d22' }, title: { display: true, text: 'Turn', color: '#8b949e' } },
+        y: { ticks: { color: '#8b949e' }, grid: { color: '#30363d22' }, title: { display: true, text: 'Tokens', color: '#8b949e' } },
+      }
+    }
+  });
+});
+
+// ─── Case Study Cards ───
+const caseEl = document.getElementById('case-studies');
+narratives.forEach(n => {
+  const initial = n.persona ? n.persona[0].toUpperCase() : '?';
+  const beatsHtml = n.beats.map(b => `
+    <div class="beat ${b.type}">
+      <div class="beat-turn">Turn ${b.turn}</div>
+      <div class="beat-headline">${b.headline}</div>
+      <div class="beat-detail">${b.detail}</div>
+    </div>
+  `).join('');
+
+  caseEl.innerHTML += `
+    <div class="case-study">
+      <div class="case-header">
+        <div class="case-avatar">${initial}</div>
+        <div class="case-meta">
+          <h3>${n.persona}</h3>
+          <div class="role">${n.role} &mdash; ${n.total_turns} turns</div>
+        </div>
+        <span class="case-headline">${n.headline}</span>
+      </div>
+      <div class="case-hook">${n.hook}</div>
+      ${n.beats.length ? `<div class="beats-timeline">${beatsHtml}</div>` : '<p style="color:#8b949e;">No notable beats detected in this run.</p>'}
+    </div>
+  `;
+});
+
+// ─── Cost Cards ───
+const costEl = document.getElementById('cost-cards');
+Object.entries(costSavings).forEach(([model, d]) => {
+  costEl.innerHTML += `
+    <div class="cost-card">
+      <h3>${model}</h3>
+      <div class="saved">$${d.saved_1k.toFixed(2)} saved</div>
+      <div class="detail">per 1,000 conversations</div>
+      <div class="detail">$${d.baseline_1k.toFixed(2)} baseline &rarr; $${d.acervo_1k.toFixed(2)} with Acervo</div>
+    </div>
+  `;
+});
+</script>
+</body>
+</html>
