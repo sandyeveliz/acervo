@@ -96,6 +96,17 @@ class IndexingConfig:
 
 
 @dataclass
+class TimeoutsConfig:
+    """Timeout settings per pipeline phase (seconds)."""
+
+    llm_chat: int = 120       # LLM chat/extraction calls
+    embedding: int = 30       # Embedding calls
+    s1_unified: int = 60      # S1 Unified (topic + extraction)
+    s1_5_update: int = 60     # S1.5 Graph Update
+    vector_search: int = 10   # Vector store search
+
+
+@dataclass
 class ContextConfig:
     """Context building settings."""
 
@@ -162,6 +173,17 @@ class ModelsConfig:
 
 
 @dataclass
+class ServicesConfig:
+    """Configuration for 'acervo up' service ports and paths."""
+
+    ollama_port: int = 11434
+    lmstudio_port: int = 1234
+    studio_path: str = ""       # path to acervo-studio for --dev mode
+    studio_port: int = 8000
+    frontend_port: int = 5173
+
+
+@dataclass
 class AcervoConfig:
     """Complete Acervo configuration loaded from .acervo/config.toml."""
 
@@ -176,6 +198,13 @@ class AcervoConfig:
     indexing: IndexingConfig = field(default_factory=IndexingConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
     prompts: PromptsConfig = field(default_factory=PromptsConfig)
+    timeouts: TimeoutsConfig = field(default_factory=TimeoutsConfig)
+    services: ServicesConfig = field(default_factory=ServicesConfig)
+    _has_services: bool = field(default=False, repr=False)
+
+    def has_services_config(self) -> bool:
+        """Whether [acervo.services] was present in the TOML file."""
+        return self._has_services
 
     @staticmethod
     def find_config(start_path: Path | None = None) -> Path | None:
@@ -272,6 +301,29 @@ class AcervoConfig:
                 prompts_dir=prompts_raw.get("dir", config.prompts.prompts_dir),
             )
 
+        services_raw = acervo.get("services", {})
+        if services_raw:
+            config._has_services = True
+            defaults = ServicesConfig()
+            config.services = ServicesConfig(
+                ollama_port=services_raw.get("ollama_port", defaults.ollama_port),
+                lmstudio_port=services_raw.get("lmstudio_port", defaults.lmstudio_port),
+                studio_path=services_raw.get("studio_path", defaults.studio_path),
+                studio_port=services_raw.get("studio_port", defaults.studio_port),
+                frontend_port=services_raw.get("frontend_port", defaults.frontend_port),
+            )
+
+        timeouts_raw = acervo.get("timeouts", {})
+        if timeouts_raw:
+            defaults_t = TimeoutsConfig()
+            config.timeouts = TimeoutsConfig(
+                llm_chat=timeouts_raw.get("llm_chat", defaults_t.llm_chat),
+                embedding=timeouts_raw.get("embedding", defaults_t.embedding),
+                s1_unified=timeouts_raw.get("s1_unified", defaults_t.s1_unified),
+                s1_5_update=timeouts_raw.get("s1_5_update", defaults_t.s1_5_update),
+                vector_search=timeouts_raw.get("vector_search", defaults_t.vector_search),
+            )
+
         # Legacy format support: [project] + [llm] sections
         if "project" in raw and "acervo" not in raw:
             proj = raw["project"]
@@ -351,6 +403,17 @@ history_window = {self.context.history_window}
 # Prompts live as .txt files in this directory (relative to project root).
 # Each file overrides the built-in default. Delete a file to use the default.
 dir = "{self.prompts.prompts_dir}"
+"""
+        if self._has_services:
+            svc = self.services
+            content += f"""
+[acervo.services]
+# Ports and paths for 'acervo up --dev'
+ollama_port = {svc.ollama_port}
+lmstudio_port = {svc.lmstudio_port}
+studio_path = "{svc.studio_path}"
+studio_port = {svc.studio_port}
+frontend_port = {svc.frontend_port}
 """
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(content, encoding="utf-8")

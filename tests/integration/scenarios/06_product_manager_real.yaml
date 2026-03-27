@@ -1,0 +1,396 @@
+name: product_manager_real
+category: real_world
+description: >
+  Product Manager en una startup de logistica usando Claude como asistente diario.
+  60 turnos que cubren trabajo (roadmap, stakeholders, metricas), vida personal y
+  tangentes. Patron realista: preguntas de negocio mezcladas con redaccion, el usuario
+  NO es developer por lo que las conversaciones son mas en prosa y menos en codigo.
+
+  Por que es valioso para el benchmark: prueba Acervo en dominio no-tecnico,
+  con entidades de negocio (empresa, producto, personas, metricas), correcciones de
+  nombres y numeros, y recall de contexto organizacional.
+persona: "Ana"
+persona_role: "Product Manager"
+narrative_hook: "Ana is a PM at a logistics startup. Her conversations are prose-heavy, not code — roadmaps, stakeholders, business metrics. Can Acervo handle non-technical knowledge as well as it handles tech?"
+
+turns:
+
+  # ===================================================
+  # SESION 1: Contexto inicial (turnos 1-12)
+  # ===================================================
+
+  - user_msg: "hola, necesito ayuda con algunas cosas de trabajo"
+    assistant_msg: "Hola! Claro, contame en que estas."
+    phase: intro
+    description: "Inicio vago"
+    max_new_nodes: 0
+
+  - user_msg: "soy PM en una startup de logistica, se llama Enviotech. llevamos 3 anios"
+    assistant_msg: "Interesante sector. Que hace Enviotech exactamente?"
+    phase: intro
+    description: "Contexto empresa"
+    expected_entities:
+      - label: "enviotech"
+
+  - user_msg: "gestionamos los envios de ecommerces. tenemos un dashboard para que los negocios trackeen sus pedidos"
+    assistant_msg: "Entendido. Un TMS orientado a pymes. Cuantos clientes activos tienen?"
+    phase: intro
+    description: "Producto core"
+
+  - user_msg: "como 80 clientes, casi todos pymes de ecommerce. el cliente mas grande es una tienda de ropa, Modaverde"
+    assistant_msg: "Modaverde como anchor client es estrategico. Que porcentaje del revenue representa?"
+    phase: intro
+    description: "Base de clientes"
+    expected_entities:
+      - label: "modaverde"
+
+  - user_msg: "como el 18% del MRR. demasiado concentrado, lo sabemos"
+    assistant_msg: "Si, por encima del 15% ya es un riesgo de concentracion. Tienen plan para diversificar?"
+    phase: intro
+    description: "Riesgo concentracion"
+
+  - user_msg: "si, eso es parte de mi roadmap del Q2. me llamo Ana por cierto"
+    assistant_msg: "Hola Ana! Y el roadmap del Q2, que prioridades tiene?"
+    phase: intro
+    description: "Nombre y roadmap"
+    expected_entities:
+      - label: "ana"
+
+  - user_msg: "tres cosas: (1) un modulo de notificaciones para el comprador final, (2) integracion con Tiendanube, (3) mejorar el onboarding para reducir el churn de los primeros 30 dias"
+    assistant_msg: "Buenas prioridades. Las notificaciones y Tiendanube son features de adquisicion; el onboarding es retencion. Cual tiene mas peso en los OKRs del trimestre?"
+    phase: intro
+    description: "Prioridades Q2"
+    expected_entities:
+      - label: "tiendanube"
+
+  - user_msg: "el onboarding. el churn en los primeros 30 dias es del 22%, muy alto"
+    assistant_msg: "22% en el primer mes es alto para B2B. Tienen datos de por que se van? Entrevistas, encuestas de cancelacion?"
+    phase: intro
+    description: "Metrica churn"
+
+  - user_msg: "tenemos encuestas de salida, el 60% dice que el producto es confuso al principio"
+    assistant_msg: "La confusion inicial es un problema de onboarding clasico, no de producto. Tienen un customer success que acompaña los primeros dias?"
+    phase: intro
+    description: "Causa churn"
+
+  - user_msg: "tenemos a Paula de CS, pero solo puede atender como 5 clientes nuevos por semana"
+    assistant_msg: "Paula es el cuello de botella. La solucion escalable es un onboarding en producto: tooltips, checklists, progress bars. El humano solo entra cuando hay friccion alta."
+    phase: intro
+    description: "CS y cuello de botella"
+    expected_entities:
+      - label: "paula"
+
+  - user_msg: "exacto, es lo que quiero proponer. necesito armar un documento para presentarle a Marcos, nuestro CEO"
+    assistant_msg: "Perfecto. Para Marcos el framing tiene que ser en business impact: cuanto vale reducir el churn 10 puntos (en MRR preservado), cuanto cuesta implementar vs cuanto cuesta no hacerlo. Te ayudo a estructurarlo?"
+    phase: intro
+    description: "Presentacion para CEO Marcos"
+    expected_entities:
+      - label: "marcos"
+
+  - user_msg: "si, dale"
+    assistant_msg: "Estructura sugerida: (1) El problema en numeros (22% churn, X clientes perdidos en los ultimos 90 dias, Y pesos en MRR), (2) Causa raiz (confusion en onboarding, dato de encuesta), (3) Solucion propuesta (onboarding in-product), (4) Costo de implementacion vs impacto esperado, (5) Metricas de exito. Tenes los numeros de clientes perdidos?"
+    phase: intro
+    description: "Estructura documento"
+
+  # ===================================================
+  # SESION 2: Redaccion y stakeholders (turnos 13-28)
+  # ===================================================
+
+  - user_msg: "en los ultimos 90 dias perdimos 11 clientes en los primeros 30 dias. el MRR promedio es 45000 pesos"
+    assistant_msg: "Perfecto. 11 clientes x ARS 45.000 = ARS 495.000 perdidos en 90 dias. Anualizado son ARS 1.98M. Ese numero impacta en la presentacion. Cuanto calcula que cuesta implementar el onboarding in-product?"
+    phase: deep_dive
+    description: "Numeros para el documento"
+
+  - user_msg: "desarrollo me dio 3 semanas de trabajo. nuestros devs cuestan como 800k al mes en promedio"
+    assistant_msg: "3 semanas = ARS 600k de costo de implementacion. Si reduce el churn aunque sea 5 puntos (de 22% a 17%), recupera la inversion en menos de 2 meses. Ese ROI lo mencionas explicitamente en la presentacion."
+    phase: deep_dive
+    description: "Calculo ROI"
+
+  - user_msg: "bien calculado. tambien tengo que hablar con Lucas de producto para alinear antes de ir a Marcos"
+    assistant_msg: "Si, la alineacion previa con Lucas es clave. Que puntos pueden tener fricciones entre vos y el?"
+    phase: deep_dive
+    description: "Stakeholder Lucas"
+    expected_entities:
+      - label: "lucas"
+
+  - user_msg: "lucas quiere priorizar la integracion con tiendanube porque trae clientes nuevos. no ve el churn como urgente"
+    assistant_msg: "Tension clasica entre adquisicion y retencion. El argumento mas fuerte contra Lucas: si el churn sigue al 22%, los nuevos clientes de Tiendanube se van igual al mes. Es como llenar un balde agujereado."
+    phase: deep_dive
+    description: "Tension prioridades con Lucas"
+
+  - user_msg: "jaja esa analogia es perfecta para usar con el"
+    assistant_msg: "Usala. Es intuitiva y correcta. Si queres ser mas cuantitativo: con 22% de churn, el LTV de un cliente nuevo es mucho menor que si logras bajar el churn a 12%."
+    phase: deep_dive
+    description: "Argumento balde agujereado"
+    max_new_nodes: 0
+
+  - user_msg: "calculame el LTV con 22% vs 12% de churn, nuestro MRR promedio es 45k"
+    assistant_msg: "LTV = MRR / churn mensual. Con 22% anual el churn mensual es ~1.83%, LTV = 45.000 / 0.0183 = ARS 2.46M. Con 12% anual (1% mensual), LTV = 45.000 / 0.01 = ARS 4.5M. Reducir el churn a 12% casi duplica el valor de cada cliente."
+    phase: deep_dive
+    description: "Calculo LTV"
+
+  - user_msg: "wow, eso lo uso si o si con Marcos y Lucas"
+    assistant_msg: "Ese numero es el argumento central. Un cliente que dura el doble vale el doble. Queres que arme el texto del documento con estos numeros?"
+    phase: deep_dive
+    description: "Impacto del calculo"
+    max_new_nodes: 0
+
+  - user_msg: "si, pero primero me conta... te puedo llamar Claude?"
+    assistant_msg: "Si, soy Claude. Decime."
+    phase: deep_dive
+    description: "Clarificacion nombre asistente"
+    max_new_nodes: 0
+
+  - user_msg: "bueno claude, antes del documento quiero confirmar los numeros con Paula. le escribo un mensaje?"
+    assistant_msg: "Buena idea validar antes de presentar. Le preguntas cuantos clientes nuevos atendio en los ultimos 90 dias y cuantos cancelo antes del mes?"
+    phase: deep_dive
+    description: "Verificar con Paula"
+
+  - user_msg: "exacto. redactame el mensaje para paula, informal porque la conozco bien"
+    assistant_msg: "Mensaje para Paula: 'Hola Paula! Estoy armando un doc para Marcos sobre el churn temprano. Me podes confirmar: en los ultimos 90 dias, cuantos clientes nuevos atendiste y cuantos cancelaron antes del mes? Necesito los numeros para la semana que viene. Gracias!'"
+    phase: deep_dive
+    description: "Redaccion mensaje Paula"
+
+  - user_msg: "perfecto, lo mando ahora"
+    assistant_msg: "Dale. Cuando te responda seguimos con el doc."
+    phase: deep_dive
+    description: "Confirmacion"
+    max_new_nodes: 0
+
+  - user_msg: "paula me respondio: fueron 14 clientes nuevos, 11 cancelaron en los primeros 30 dias. es peor de lo que pensaba"
+    assistant_msg: "11/14 = 78% de churn en el primer mes para los que se van. Eso es devastador y cambia el framing: el problema no es solo el 22% total, sino que casi 8 de cada 10 clientes que no superan el primer mes se van en ese primer mes. Eso hace la urgencia mucho mas clara."
+    phase: deep_dive
+    description: "Datos de Paula confirmados"
+
+  - user_msg: "dios mio, no lo habia procesado asi. es aun peor"
+    assistant_msg: "Si. El numero para Marcos ahora es: 'De los clientes que se van en el primer anio, el 78% ya lo hacen antes del mes 1. El onboarding es el punto de quiebre.' Mucho mas impactante que '22% de churn'."
+    phase: deep_dive
+    description: "Reframing del problema"
+    max_new_nodes: 0
+
+  - user_msg: "totalmente de acuerdo. armo el documento con ese framing"
+    assistant_msg: "Te armo el borrador ahora con ese angulo. Titulo sugerido: 'Reducir el churn temprano: el caso de negocio para un onboarding in-product'. Sigo?"
+    phase: deep_dive
+    description: "Borrador documento"
+
+  - user_msg: "si dale pero ponele un titulo menos formal"
+    assistant_msg: "Ok. Algo como 'Por que 8 de cada 10 clientes que se van, se van en el primer mes (y como arreglarlo)'. Funciona como titulo?"
+    phase: deep_dive
+    description: "Titulo documento"
+
+  - user_msg: "jaja si ese esta mejor. dale, armalo"
+    assistant_msg: "Documento listo con esa estructura: problema cuantificado, causa raiz con dato de encuesta, propuesta de solucion, ROI en 2 meses, metricas de exito (activation rate, churn a 30 dias, NPS en onboarding). Queres que te lo paste?"
+    phase: deep_dive
+    description: "Documento listo"
+    max_new_nodes: 0
+
+  # ===================================================
+  # SESION 3: Tangentes personales (turnos 29-38)
+  # Patron: info personal que enriquece el contexto
+  # ===================================================
+
+  - user_msg: "si pastemelo. oye antes: trabajo desde Buenos Aires pero Enviotech tiene sede en Montevideo"
+    assistant_msg: "Equipo distribuido entonces. Eso complica la comunicacion con Marcos?"
+    phase: small_talk
+    description: "Contexto geografico"
+    expected_entities:
+      - label: "buenos_aires"
+      - label: "montevideo"
+
+  - user_msg: "un poco si. marcos esta en montevideo. lucas y paula son de buenos aires como yo"
+    assistant_msg: "La division geografica entre CEO y algunos del equipo puede crear fricciones. Las decisiones importantes las hacen por video o viajan?"
+    phase: small_talk
+    description: "Dinamica geografica del equipo"
+
+  - user_msg: "video principalmente. cada 2 meses voy a montevideo. de hecho voy en 2 semanas"
+    assistant_msg: "Buena oportunidad para presentar el documento en persona. Es mucho mas efectivo para este tipo de propuesta."
+    phase: small_talk
+    description: "Viaje a Montevideo"
+
+  - user_msg: "exacto, lo planeé asi. siempre es mas facil convencer a marcos en persona"
+    assistant_msg: "Bien estrategico de tu parte. Los numeros hacen el trabajo pero el cara a cara cierra."
+    phase: small_talk
+    description: "Estrategia presentacion"
+    max_new_nodes: 0
+
+  - user_msg: "si. che, tengo un hijo de 4 anios que me distrae mucho cuando trabajo desde casa jaja"
+    assistant_msg: "Jaja el trabajo remoto con chicos es otro nivel. Tenes horarios definidos o vas improvisando?"
+    phase: small_talk
+    description: "Contexto personal"
+
+  - user_msg: "horario improvisado mayormente. mi pareja Sofia trabaja tambien y nos turnamos"
+    assistant_msg: "El sistema de turnos es lo mas efectivo cuando los dos trabajan. Tienen algo fijo o es segun el dia?"
+    phase: small_talk
+    description: "Pareja Sofia"
+    expected_entities:
+      - label: "sofia"
+
+  - user_msg: "segun el dia, caos total jaja. pero funciona"
+    assistant_msg: "El caos organizado, clasico."
+    phase: small_talk
+    description: "Vida personal casual"
+    max_new_nodes: 0
+
+  - user_msg: "si jaja. bueno volvamos al trabajo. pasame el borrador del documento"
+    assistant_msg: "Va el borrador con ese framing de los 8 de cada 10, el ROI a 2 meses, y las metricas de exito que mencionamos. Lo adaptas o lo usas directo?"
+    phase: small_talk
+    description: "Vuelta al trabajo"
+    max_new_nodes: 0
+
+  - user_msg: "lo adapto un poco. oye me acorde: el MRR promedio que te di era incorrecto, no es 45k sino 52k"
+    assistant_msg: "Corregido. Con ARS 52.000 de MRR promedio: los 11 clientes perdidos representan ARS 572.000 en 90 dias (ARS 2.28M anualizados). El LTV con 22% de churn sube a ARS 2.84M, y con 12% a ARS 5.2M. Actualizo los numeros del documento."
+    phase: small_talk
+    description: "Correccion de numero clave"
+
+  - user_msg: "perfecto, esos son los reales"
+    assistant_msg: "Guardado. Todos los calculos anteriores con 45k eran estimados; los definitivos son con 52k."
+    phase: small_talk
+    description: "Confirmacion correccion"
+    max_new_nodes: 0
+
+  # ===================================================
+  # SESION 4: Nuevas iniciativas (turnos 39-50)
+  # ===================================================
+
+  - user_msg: "oye, aparte del documento, tengo que preparar el quarterly review para el mes que viene"
+    assistant_msg: "El quarterly review de Q1? Que metricas tenes que presentar?"
+    phase: new_domain
+    description: "Quarterly review"
+
+  - user_msg: "MRR, churn, NPS, y activation rate. el NPS lo medimos por primera vez este trimestre"
+    assistant_msg: "Primera medicion de NPS es importante. Tienen los datos ya o lo estan levantando?"
+    phase: new_domain
+    description: "Metricas Q1"
+
+  - user_msg: "lo cerramos hace 2 semanas. salimos con 42 de NPS"
+    assistant_msg: "42 es un NPS solido para B2B SaaS. El benchmark del sector logistico suele estar entre 30-50. Es tu primer medicion asi que es el baseline; lo importante es la trayectoria."
+    phase: new_domain
+    description: "NPS resultado"
+
+  - user_msg: "exacto, es el baseline. el MRR cerro en 3.6M el trimestre"
+    assistant_msg: "ARS 3.6M de MRR en Q1. Cual era el target? Y como compara con Q4 del anio pasado?"
+    phase: new_domain
+    description: "MRR Q1"
+
+  - user_msg: "el target era 3.4M, lo superamos. Q4 habiamos cerrado en 3.1M"
+    assistant_msg: "Crecimiento de 16% QoQ (de 3.1 a 3.6M). Eso es muy bueno para el quarterly review. Puedes presentarlo como: superaste el target y aceleraste el crecimiento respecto al trimestre anterior."
+    phase: new_domain
+    description: "Calculo crecimiento"
+
+  - user_msg: "bien. el activation rate fue de 68%, target era 70%, no lo alcanzamos"
+    assistant_msg: "68% vs 70% target es una desviacion menor, pero en el contexto del churn que vimos (22%), el activation rate bajo explica parte del problema. Lo presentas como area de mejora con plan de accion (el onboarding in-product que estas proponiendo)."
+    phase: new_domain
+    description: "Activation rate miss"
+
+  - user_msg: "exacto, asi lo encadeno con la propuesta. bien pensado"
+    assistant_msg: "Si, el quarterly review te da el contexto de problema y la propuesta de onboarding es la solucion. El narrative es natural."
+    phase: new_domain
+    description: "Narrative del quarterly"
+    max_new_nodes: 0
+
+  - user_msg: "cambiando de tema: Modaverde, nuestro cliente grande, me pidio una reunion para pedir nuevas features"
+    assistant_msg: "Modaverde el cliente con 18% del MRR. Que tipo de features pidio? Algo relacionado con volumen de envios o con reportes?"
+    phase: new_domain
+    description: "Recall cliente Modaverde"
+    checkpoint:
+      should_have_context: true
+      context_should_mention: ["modaverde"]
+
+  - user_msg: "principalmente reportes avanzados y una API para integrarse con su propio sistema"
+    assistant_msg: "Dos pedidos enterprise clasicos. La API es especialmente relevante: un cliente con 18% del MRR pidiendo API es una oportunidad de bloqueo competitivo, pero tambien es mucho esfuerzo de desarrollo. Como lo priorizas vs el onboarding?"
+    phase: new_domain
+    description: "Features de Modaverde"
+
+  - user_msg: "el onboarding primero porque es sistemico. la API de Modaverde la negocio para Q3"
+    assistant_msg: "Bien priorizado. Podes decirle a Modaverde que la API esta en el roadmap de Q3 como feature premium. Eso los retiene y les da expectativa sin comprometer Q2."
+    phase: new_domain
+    description: "Negociacion con Modaverde"
+    max_new_nodes: 0
+
+  - user_msg: "exacto. bien, creo que tengo para un par de dias de trabajo con todo esto"
+    assistant_msg: "Si, bastante material: el documento para Marcos, el quarterly review, la reunion con Modaverde. Cualquier cosa que necesites redactar o calcular, avisame."
+    phase: new_domain
+    description: "Resumen de pendientes"
+    max_new_nodes: 0
+
+  # ===================================================
+  # SESION 5: Recall stress test (turnos 51-60)
+  # ===================================================
+
+  - user_msg: "hola! una semana despues. como estamos?"
+    assistant_msg: "Hola Ana! Teniamos varias cosas en paralelo: el documento para Marcos sobre el churn/onboarding, el quarterly review de Q1, y la reunion pendiente con Modaverde. Donde arrancamos?"
+    phase: stress
+    description: "Recall despues de una semana"
+    checkpoint:
+      should_have_context: true
+      context_should_mention: ["marcos", "modaverde"]
+
+  - user_msg: "present el documento a marcos. le gusto pero quiere un numero mas: cuanto tiempo tardariamos en ver impacto"
+    assistant_msg: "Marcos quiere el tiempo al impacto. La respuesta honesta: primeras mejoras en activation rate visibles a los 30 dias de lanzar el onboarding. Impacto en churn mensurable a los 60-90 dias (necesitas al menos un ciclo completo de onboarding). El ROI a 2 meses que calculamos asume que ya hay impacto."
+    phase: stress
+    description: "Follow-up con Marcos"
+    checkpoint:
+      should_have_context: true
+      context_should_mention: ["marcos"]
+
+  - user_msg: "bien, le digo 30 dias para las primeras metricas y 90 para el impacto en churn"
+    assistant_msg: "Correcto y honesto. No prometas menos de 60-90 dias para el churn porque el ciclo de vida del cliente no lo permite."
+    phase: stress
+    description: "Timeline impacto"
+    max_new_nodes: 0
+
+  - user_msg: "hable con Lucas tambien. use la analogia del balde agujereado y funciono jaja"
+    assistant_msg: "Jaja! La analogia del balde agujereado funcionó. Se alineo con la propuesta?"
+    phase: stress
+    description: "Recall Lucas y analogia"
+    checkpoint:
+      should_have_context: true
+      context_should_mention: ["lucas"]
+
+  - user_msg: "si, pero quiere que el onboarding no retrase tiendanube mas de 2 semanas"
+    assistant_msg: "Razonable el pedido de Lucas. Si development puede paralelizar o si el onboarding tiene un scope minimo viable que no bloquee Tiendanube, es factible. Cuanto del equipo de dev necesita el onboarding?"
+    phase: stress
+    description: "Negociacion con Lucas sobre Tiendanube"
+
+  - user_msg: "segun Lucas, 1 dev para el onboarding y 2 para tiendanube. pueden paralelizar"
+    assistant_msg: "Perfecto. Con 1 dev en onboarding y 2 en Tiendanube no hay bloqueo. Eso resuelve la tension que tenias con Lucas."
+    phase: stress
+    description: "Resolucion tension"
+    max_new_nodes: 0
+
+  - user_msg: "exacto. oye me acuerdo que el MRR promedio lo habiamos corregido a 52k. es correcto para el doc que le mande a marcos?"
+    assistant_msg: "Si, el numero correcto es ARS 52.000 de MRR promedio. Todos los calculos del documento usan ese numero: ARS 572.000 perdidos en 90 dias, LTV de ARS 2.84M con churn actual y ARS 5.2M con churn objetivo."
+    phase: stress
+    description: "Recall correccion MRR"
+    checkpoint:
+      should_have_context: true
+      context_should_mention: ["52"]
+
+  - user_msg: "perfecto, si esos son los que use. che, voy a montevideo en una semana, me habia dicho que ibas cada 2 meses"
+    assistant_msg: "Exacto, cada 2 meses vas a Montevideo donde esta Marcos. Esta vez es buena oportunidad para hacer el seguimiento del documento en persona y alinear el Q2 definitivo."
+    phase: stress
+    description: "Recall viaje Montevideo"
+    checkpoint:
+      should_have_context: true
+      context_should_mention: ["montevideo", "marcos"]
+
+  - user_msg: "exactamente. y sofia se queda con el nene esa semana"
+    assistant_msg: "Sofia cubriendo esa semana con el nene. Bien coordinado el equipo de casa."
+    phase: stress
+    description: "Recall contexto personal Sofia"
+    checkpoint:
+      should_have_context: true
+      context_should_mention: ["sofia"]
+
+  - user_msg: "jaja si. oye, un resumen de todo lo que decidimos esta semana?"
+    assistant_msg: >
+      Resumen de la semana: (1) Documento aprobado por Marcos, falta confirmarle timeline de 30/90 dias.
+      (2) Lucas alineado con el balde agujereado: 1 dev para onboarding, 2 para Tiendanube, sin bloqueo.
+      (3) Modaverde: API para Q3, la reunion la tenes pendiente. (4) Quarterly review con MRR de 3.6M
+      (supero target 3.4M), NPS 42 (baseline), activation 68% (bajo del target, plan de onboarding es la respuesta).
+      (5) Viaje a Montevideo en una semana para seguimiento con Marcos.
+    phase: stress
+    description: "Resumen semanal completo"
+    checkpoint:
+      should_have_context: true
+      context_should_mention: ["marcos", "lucas", "modaverde", "tiendanube"]

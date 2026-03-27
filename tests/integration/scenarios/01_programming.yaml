@@ -1,0 +1,309 @@
+name: developer_workflow
+category: programming
+description: "Developer workflow with project intro, tech discussion, and context restoration"
+persona: "Sandy"
+persona_role: "Full-stack Developer"
+narrative_hook: "A senior developer introduces his company, projects, and tech stack. After 30 turns of deep technical discussion, can Acervo recall the earliest details?"
+
+turns:
+  # ── Phase 1: Self-Introduction (turns 1-8) ──
+  - user_msg: "Me llamo Sandy y vivo en Cipolletti, Rio Negro"
+    assistant_msg: "Hola Sandy! Cipolletti es una linda ciudad en la Patagonia."
+    phase: intro
+    description: "Name and location"
+    expected_entities:
+      - label: "Sandy"
+      - label: "Cipolletti"
+
+  - user_msg: "Soy desarrollador de software, llevo mas de 10 anios programando"
+    assistant_msg: "Genial, mucha experiencia! En que lenguajes te especializas?"
+    phase: intro
+    description: "Role introduction"
+
+  - user_msg: "Trabajo en Alto Valle Studio, es mi empresa de desarrollo de software"
+    assistant_msg: "Tener tu propia empresa es un gran logro. Que tipo de proyectos hacen?"
+    phase: intro
+    description: "Company introduction"
+    expected_entities:
+      - label: "Alto Valle Studio"
+
+  - user_msg: "Somos un equipo de 5 personas, hacemos desarrollo web y mobile"
+    assistant_msg: "Buen tamanio de equipo. Que tecnologias usan?"
+    phase: intro
+    description: "Team size"
+
+  - user_msg: "Tenemos un proyecto llamado Chequear, es un SaaS de verificacion con tags NFC"
+    assistant_msg: "Interesante, verificacion fisica con NFC. Para que tipo de empresas?"
+    phase: intro
+    description: "Project introduction"
+    expected_entities:
+      - label: "Chequear"
+
+  - user_msg: "Chequear esta hecho con React y Vite en el frontend, y Supabase en el backend"
+    assistant_msg: "Buen stack moderno. Supabase simplifica mucho el backend."
+    phase: intro
+    description: "Tech stack"
+    expected_entities:
+      - label: "React"
+      - label: "Supabase"
+
+  - user_msg: "Tambien tenemos una app mobile con Expo para los operarios que escanean los tags"
+    assistant_msg: "Expo es ideal para ese caso. Los operarios usan Android?"
+    phase: intro
+    description: "Mobile app"
+    expected_entities:
+      - label: "Expo"
+
+  - user_msg: "Si, todo Android. Usamos Capacitor para otra app que es Butaco, un ERP con Angular"
+    assistant_msg: "Angular para un ERP es buena eleccion, es robusto para apps grandes."
+    phase: intro
+    description: "Second project"
+    expected_entities:
+      - label: "Butaco"
+      - label: "Angular"
+
+  # ── Phase 2: Deep Dive — Chequear Architecture (turns 9-16) ──
+  - user_msg: "Te cuento mas sobre la arquitectura de Chequear. Usamos un monorepo con pnpm workspaces"
+    assistant_msg: "Los monorepos con pnpm son muy eficientes. Como lo tienen organizado?"
+    phase: deep_dive
+    description: "Monorepo setup"
+
+  - user_msg: "Tenemos 3 packages: web (React), mobile (Expo), y shared (tipos y utilidades comunes)"
+    assistant_msg: "Buena separacion. El package shared evita duplicar codigo."
+    phase: deep_dive
+    description: "Package structure"
+
+  - user_msg: "La autenticacion usa Supabase Auth con OAuth de Google para empresas"
+    assistant_msg: "OAuth con Google es practico para B2B. Manejan roles con RLS?"
+    phase: deep_dive
+    description: "Auth system"
+
+  - user_msg: "Si, usamos Row Level Security en Supabase. Cada empresa tiene su tenant_id"
+    assistant_msg: "Multi-tenancy con RLS es solido. Separa bien los datos por empresa."
+    phase: deep_dive
+    description: "RLS multi-tenancy"
+
+  - user_msg: "El flujo principal es: operario escanea tag NFC, la app registra la verificacion con GPS y foto"
+    assistant_msg: "Trazabilidad completa. Guardan las fotos en Supabase Storage?"
+    phase: deep_dive
+    description: "Core flow"
+
+  - user_msg: "Si, las fotos van a Supabase Storage con un bucket por empresa. Usamos Edge Functions para procesar"
+    assistant_msg: "Edge Functions para procesamiento es eficiente. Que procesan exactamente?"
+    phase: deep_dive
+    description: "Storage and processing"
+
+  - user_msg: "Las Edge Functions validan el tag, registran la verificacion y mandan notificaciones push"
+    assistant_msg: "Un pipeline completo. Usan algun servicio para push notifications?"
+    phase: deep_dive
+    description: "Edge functions"
+
+  - user_msg: "Usamos OneSignal para las push notifications, integrado con las Edge Functions"
+    assistant_msg: "OneSignal es confiable para push. Buena integracion."
+    phase: deep_dive
+    description: "Push notifications"
+    expected_entities:
+      - label: "OneSignal"
+
+  # ── Phase 3: Small Talk (turns 17-20) ──
+  - user_msg: "Bueno, basta de laburo por hoy jaja"
+    assistant_msg: "Jaja si, hay que descansar tambien!"
+    phase: small_talk
+    description: "Break from work"
+    max_new_nodes: 1
+
+  - user_msg: "Hace un calor terrible hoy en Cipolletti"
+    assistant_msg: "Si, tipico del verano patagonico. Bastante seco por suerte."
+    phase: small_talk
+    description: "Weather chat"
+    max_new_nodes: 1
+
+  - user_msg: "Si, por suerte. Que ganas de ir al rio"
+    assistant_msg: "El rio Negro es hermoso para refrescarse en verano."
+    phase: small_talk
+    description: "Casual chat"
+    max_new_nodes: 1
+
+  - user_msg: "Totalmente. Bueno, volvamos a lo tecnico"
+    assistant_msg: "Dale, en que te puedo ayudar?"
+    phase: small_talk
+    description: "Transition back"
+    max_new_nodes: 1
+
+  # ── Phase 4: Topic Change — New Technology (turns 21-30) ──
+  - user_msg: "Cambiando de tema, estoy evaluando Rust para un proyecto personal"
+    assistant_msg: "Rust es excelente. Que tipo de proyecto tenes en mente?"
+    phase: topic_change
+    description: "Switch to Rust"
+    expected_entities:
+      - label: "Rust"
+
+  - user_msg: "Quiero hacer un CLI tool para automatizar deployments, algo como un mini Terraform"
+    assistant_msg: "Interesante. Rust es ideal para CLIs por la velocidad y binarios estaticos."
+    phase: topic_change
+    description: "CLI project idea"
+
+  - user_msg: "Estoy entre usar Clap o Argh para parsear argumentos"
+    assistant_msg: "Clap es mas completo, Argh mas simple. Para un CLI complejo te recomiendo Clap."
+    phase: topic_change
+    description: "Rust libraries"
+    expected_entities:
+      - label: "Clap"
+
+  - user_msg: "Tambien necesito hacer llamadas HTTP, estoy viendo Reqwest y Hyper"
+    assistant_msg: "Reqwest es mas alto nivel. Hyper te da mas control pero mas codigo."
+    phase: topic_change
+    description: "HTTP libraries"
+
+  - user_msg: "Creo que voy con Reqwest. Y para async estoy usando Tokio"
+    assistant_msg: "Tokio es el runtime async standard en Rust. Buena eleccion."
+    phase: topic_change
+    description: "Async runtime"
+    expected_entities:
+      - label: "Tokio"
+
+  - user_msg: "Tambien me interesa Go como alternativa. Es mas simple para CLIs"
+    assistant_msg: "Go es mas simple de aprender. Cobra es el framework de CLI mas popular."
+    phase: topic_change
+    description: "Go alternative"
+    expected_entities:
+      - label: "Go"
+
+  - user_msg: "Go tiene goroutines que son mas faciles que async en Rust"
+    assistant_msg: "Si, el modelo de concurrencia de Go es mas directo. Menos boilerplate."
+    phase: topic_change
+    description: "Concurrency comparison"
+
+  - user_msg: "Pero Rust tiene mejor manejo de errores con Result y Option"
+    assistant_msg: "Totalmente. El sistema de tipos de Rust previene muchos bugs en compilacion."
+    phase: topic_change
+    description: "Error handling"
+
+  - user_msg: "Creo que voy a prototipar en Go primero y si necesito performance paso a Rust"
+    assistant_msg: "Buen approach pragmatico. Prototipar rapido y optimizar despues."
+    phase: topic_change
+    description: "Decision"
+
+  - user_msg: "El prototipo lo voy a llamar Deployer, para deployments en AWS y GCP"
+    assistant_msg: "Buen nombre. Multi-cloud desde el inicio es ambicioso pero util."
+    phase: topic_change
+    description: "Project naming"
+    expected_entities:
+      - label: "Deployer"
+
+  # ── Phase 5: Return to Chequear (turns 31-35) ──
+  - user_msg: "Volviendo a Chequear, necesito agregar un modulo de reportes"
+    assistant_msg: "Reportes es clave para B2B. Que tipo de reportes necesitan?"
+    phase: return
+    description: "Return to Chequear"
+    checkpoint:
+      should_have_context: true
+      context_should_mention: ["Chequear"]
+
+  - user_msg: "Reportes de verificaciones por periodo, por operario y por ubicacion"
+    assistant_msg: "Tres dimensiones de analisis. Van a usar algun servicio de graficos?"
+    phase: return
+    description: "Report types"
+
+  - user_msg: "Estamos evaluando Recharts o Chart.js para las graficas en React"
+    assistant_msg: "Recharts se integra mejor con React. Chart.js es mas versatil."
+    phase: return
+    description: "Chart libraries"
+
+  - user_msg: "Tambien necesitamos exportar a PDF, estamos viendo react-pdf"
+    assistant_msg: "react-pdf funciona bien para generar PDFs desde componentes React."
+    phase: return
+    description: "PDF export"
+
+  - user_msg: "Los reportes van a estar disponibles en el dashboard web y tambien por email automatico"
+    assistant_msg: "Emails automaticos con reportes es muy util para gerentes. Usan algun servicio de email?"
+    phase: return
+    description: "Report distribution"
+
+  # ── Phase 6: Project Management (turns 36-45) ──
+  - user_msg: "Hablando del equipo, Mati es nuestro frontend lead, trabaja desde Neuquen capital"
+    assistant_msg: "Tener un frontend lead es clave. Trabajan remoto entonces?"
+    phase: new_domain
+    description: "Team member intro"
+    expected_entities:
+      - label: "Mati"
+
+  - user_msg: "Si, todos remotos. Facu es el otro dev, se encarga del backend y las Edge Functions"
+    assistant_msg: "Buena division. Facu maneja toda la parte de Supabase?"
+    phase: new_domain
+    description: "Another team member"
+    expected_entities:
+      - label: "Facu"
+
+  - user_msg: "Si, Facu es experto en Supabase. Y Lau hace el diseno UX de todo"
+    assistant_msg: "Un equipo completo. Lau usa Figma?"
+    phase: new_domain
+    description: "Designer"
+    expected_entities:
+      - label: "Lau"
+
+  - user_msg: "Si, Lau trabaja en Figma. Y Nico es QA, se encarga de testing"
+    assistant_msg: "QA dedicado es un lujo en equipos chicos. Que herramientas usa Nico?"
+    phase: new_domain
+    description: "QA team member"
+    expected_entities:
+      - label: "Nico"
+
+  - user_msg: "Nico usa Playwright para E2E y tenemos unit tests con Vitest"
+    assistant_msg: "Playwright y Vitest son herramientas modernas. Buena cobertura."
+    phase: new_domain
+    description: "Testing tools"
+    expected_entities:
+      - label: "Playwright"
+      - label: "Vitest"
+
+  - user_msg: "Nuestro deadline es fin de marzo para lanzar Chequear en beta"
+    assistant_msg: "Marzo esta cerca. Que falta para la beta?"
+    phase: new_domain
+    description: "Deadline"
+
+  - user_msg: "Falta el modulo de reportes que te conte, y pulir el onboarding de empresas nuevas"
+    assistant_msg: "Dos features criticas. El onboarding es clave para la primera impresion."
+    phase: new_domain
+    description: "Remaining work"
+
+  - user_msg: "El onboarding tiene que guiar a la empresa para configurar sus tags y zonas de verificacion"
+    assistant_msg: "Un wizard step-by-step seria ideal para eso."
+    phase: new_domain
+    description: "Onboarding details"
+
+  - user_msg: "Si, estamos haciendo un wizard de 4 pasos: crear empresa, agregar zonas, configurar tags, invitar operarios"
+    assistant_msg: "Flujo logico. Cada paso depende del anterior."
+    phase: new_domain
+    description: "Wizard steps"
+
+  - user_msg: "Butaco tambien tiene deadline en marzo, pero es para facturacion y logistica"
+    assistant_msg: "Dos deadlines en marzo es intenso. Butaco es para otro cliente?"
+    phase: new_domain
+    description: "Second project deadline"
+
+  # ── Phase 7: Rapid Topic Switching — Stress Test (turns 46-50) ──
+  - user_msg: "Che y volviendo a lo de Rust, salio Rust 2024 edition con mejoras en async"
+    assistant_msg: "Si, la 2024 edition trajo mejoras en async traits y return types."
+    phase: stress
+    description: "Quick return to Rust"
+
+  - user_msg: "Hablando de Butaco, el cliente quiere que agreguemos un portal para sus clientes tambien"
+    assistant_msg: "Un portal B2B2C. Butaco crece en scope."
+    phase: stress
+    description: "Quick switch to Butaco"
+
+  - user_msg: "Si, y el portal externo de Butaco esta en Angular tambien, es un monorepo"
+    assistant_msg: "Angular monorepo con NX o solo CLI?"
+    phase: stress
+    description: "Butaco architecture"
+
+  - user_msg: "Solo Angular CLI con projects. Tiene 3 apps: interno, externo y mobile"
+    assistant_msg: "Tres apps en un monorepo Angular es manejable con shared libraries."
+    phase: stress
+    description: "Butaco apps"
+
+  - user_msg: "Bueno, creo que eso resume bastante mi laburo actual. Chequear, Butaco, y el side project en Go"
+    assistant_msg: "Mucho en el plato! Chequear y Butaco con deadlines, y Deployer cuando puedas."
+    phase: stress
+    description: "Summary"

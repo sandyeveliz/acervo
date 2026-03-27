@@ -29,7 +29,7 @@ from acervo.context_builder import (
     GatheredInfo,
     RankedChunk,
     select_chunks_by_budget,
-    format_chunks_as_context,
+    format_chunks_compact,
 )
 from acervo.graph import TopicGraph, _make_id
 from acervo.extractor import (
@@ -41,6 +41,7 @@ from acervo.layers import Layer
 from acervo.llm import LLMClient, Embedder, VectorStore
 from acervo.metrics import SessionMetrics
 from acervo.ontology import is_likely_universal
+from acervo.specificity import classify_specificity
 from acervo.reindexer import Reindexer, hash_file
 from acervo.s1_unified import S1Unified, build_graph_summary, generate_topic_hint
 from acervo.synthesizer import synthesize
@@ -120,6 +121,7 @@ class Acervo:
         embed_threshold: float = 0.65,
         hot_layer_max_messages: int = 2,
         hot_layer_max_tokens: int = 500,
+        warm_token_budget: int = 400,
         compaction_trigger_tokens: int = 2000,
         vector_store: VectorStore | None = None,
         workspace_path: str | Path | None = None,
@@ -142,6 +144,7 @@ class Acervo:
         self._extractor = ConversationExtractor(extractor_llm, prompt_template=p.get("extractor_conversation"))
         self._search_extractor = SearchExtractor(llm, prompt_template=p.get("extractor_search"))
         self._owner = owner
+        self._warm_token_budget = warm_token_budget
         self._embedder = embedder
         self._vector_store = vector_store
         self._workspace_path = Path(workspace_path) if workspace_path else None
@@ -337,6 +340,101 @@ class Acervo:
             log.info("[acervo] Synced %d nodes to vector store", indexed)
         return indexed
 
+    async def index_document(self, file_path: Path) -> dict:
+        """Index a document through the full pipeline (parse + enrich + chunks + graph).
+
+        Args:
+            file_path: Absolute path to the .md file.
+
+        Returns:
+            {"document_id": str, "chunk_count": int, "chunk_ids": list, "node_id": str}
+        """
+        from acervo.structural_parser import StructuralParser
+        from acervo.semantic_enricher import SemanticEnricher
+        from acervo.graph import make_symbol_id
+
+        workspace = file_path.parent
+        parser = StructuralParser()
+        structure = parser.parse(file_path, workspace)
+
+        # Phase 1: structural nodes
+        self._graph.upsert_file_structure(
+            structure.file_path, structure.language,
+            structure.units, structure.content_hash,
+        )
+        file_id = _make_id(structure.file_path)
+
+        # Phase 2: semantic enrichment (chunks + embeddings)
+        all_chunk_ids: list[str] = []
+        chunk_count = 0
+
+        if self._embedder:
+            enricher = SemanticEnricher(llm=self._llm, embedder=self._embedder)
+            content = file_path.read_text(encoding="utf-8")
+            enrichment = await enricher.enrich_file(structure, content)
+
+            if enrichment.chunks and self._vector_store:
+                await self._vector_store.index_file_chunks(
+                    file_path=enrichment.chunks[0].file_path,
+                    chunks=[c.content for c in enrichment.chunks],
+                    chunk_ids=[c.chunk_id for c in enrichment.chunks],
+                    embeddings=[c.embedding for c in enrichment.chunks],
+                    extra_metadata={"file_id": file_id},
+                )
+                all_chunk_ids = [c.chunk_id for c in enrichment.chunks]
+                chunk_count = len(enrichment.chunks)
+
+                # Link to file node
+                self._graph.link_chunks(file_id, all_chunk_ids)
+
+                # Link to section nodes
+                for unit in structure.units:
+                    node_id = make_symbol_id(structure.file_path, unit.name, unit.parent)
+                    matching = [
+                        c.chunk_id for c in enrichment.chunks
+                        if c.line_start >= unit.start_line and c.line_end <= unit.end_line
+                    ]
+                    if matching:
+                        self._graph.link_chunks(node_id, matching)
+
+        self._graph.save()
+        return {
+            "document_id": file_id,
+            "chunk_count": chunk_count,
+            "chunk_ids": all_chunk_ids,
+            "node_id": file_id,
+        }
+
+    async def delete_document(self, document_id: str) -> dict:
+        """Delete a document, its chunks from ChromaDB, and its graph nodes.
+
+        Returns:
+            {"deleted": str, "chunks_removed": int}
+        """
+        node = self._graph.get_node(document_id)
+        if not node:
+            return {"deleted": document_id, "chunks_removed": 0}
+
+        # Collect all chunk_ids (file node + children)
+        chunk_ids = list(node.get("chunk_ids", []))
+        prefix = document_id + "__"
+        child_ids = [nid for nid in self._graph._nodes if nid.startswith(prefix)]
+        for cid in child_ids:
+            child = self._graph.get_node(cid)
+            if child:
+                chunk_ids.extend(child.get("chunk_ids", []))
+
+        # Remove from ChromaDB
+        if chunk_ids and self._vector_store and hasattr(self._vector_store, "remove_by_chunk_ids"):
+            self._vector_store.remove_by_chunk_ids(chunk_ids)
+
+        # Remove graph nodes (children + file node)
+        self._graph._remove_file_children(document_id)
+        self._graph.remove_node(document_id)
+        self._graph.save()
+
+        return {"deleted": document_id, "chunks_removed": len(chunk_ids)}
+
     @property
     def topic_detector(self) -> TopicDetector:
         return self._topic_detector
@@ -530,6 +628,8 @@ class Acervo:
             except Exception as e:
                 log.warning("User text embedding failed: %s", e)
 
+        log.info("prepare: user_text=%d chars", len(user_text))
+
         # L1/L2 as hints (no L3 LLM call)
         detection = await self._topic_detector.detect_hints(user_text, pre_embedding=user_embedding)
 
@@ -566,6 +666,13 @@ class Acervo:
 
         # Apply S1's topic decision
         s1_topic = s1_result.topic
+        log.debug("S1 topic: action=%s label=%s", s1_topic.action, s1_topic.label)
+        log.debug(
+            "S1 extraction: %d entities, %d relations, %d facts",
+            len(s1_result.extraction.entities),
+            len(s1_result.extraction.relations),
+            len(s1_result.extraction.facts),
+        )
         if s1_topic.action in ("changed", "subtopic") and s1_topic.label:
             self._topic_detector.current_topic = s1_topic.label
         elif s1_topic.action == "changed" and not s1_topic.label:
@@ -695,6 +802,30 @@ class Acervo:
                         except Exception as e:
                             log.warning("Failed to read linked file %s: %s", file_path, e)
 
+        # Node-scoped chunk retrieval: search within chunks linked to activated nodes
+        node_chunk_ids: list[str] = []
+        for node in gathered.nodes:
+            node_chunk_ids.extend(node.get("chunk_ids", []))
+
+        # Specificity classifier: only fetch chunks for detail-oriented questions
+        query_specificity = classify_specificity(user_text)
+        log.debug(
+            "S2 gather: %d nodes, %d chunk_ids, specificity=%s",
+            len(gathered.nodes), len(node_chunk_ids), query_specificity,
+        )
+
+        if node_chunk_ids and self._vector_store and user_embedding and query_specificity == "specific":
+            try:
+                if hasattr(self._vector_store, "search_by_chunk_ids"):
+                    scoped_hits = await self._vector_store.search_by_chunk_ids(
+                        node_chunk_ids, user_embedding, n_results=3,
+                    )
+                    for hit in scoped_hits:
+                        hit["score"] = min(hit.get("score", 0.5) + 0.15, 1.0)
+                    gathered.vector_results.extend(scoped_hits)
+            except Exception as e:
+                log.warning("Node-scoped chunk search failed: %s", e)
+
         # Vector search for semantic matches (topic-scoped boost)
         if self._vector_store:
             try:
@@ -720,6 +851,7 @@ class Acervo:
         # Unverified: source=conversation/user_assertion, placeholder/enriched nodes
         chunks: list[RankedChunk] = []
         verified_labels: set[str] = set()  # node labels with verified content
+        user_lower = user_text.lower()
         for node in gathered.nodes:
             # Skip placeholder nodes — nothing useful to inject
             if node.get("status") == "placeholder":
@@ -727,6 +859,10 @@ class Acervo:
             is_hot = node.get("_hot", True)
             is_warm = node.get("_warm", False)
             base_score = 1.0 if is_hot else (0.5 if is_warm else 0.8)
+            # Query-relevance boost: entities mentioned in user message rank higher
+            label_lower = node.get("label", "").lower()
+            if label_lower and label_lower in user_lower:
+                base_score = min(base_score + 0.3, 1.0)
             is_verified = (
                 node.get("source") in ("world", "web")
                 or node.get("attributes", {}).get("verified", False)
@@ -752,9 +888,10 @@ class Acervo:
                 ))
         for hit in gathered.vector_results:
             text = hit.get("text", "")
+            source = hit.get("source", "vector")
             chunks.append(RankedChunk(
-                text=text, score=hit.get("score", 0.5), source="vector",
-                label=hit.get("node_id", ""), tokens=count_tokens(text),
+                text=text, score=hit.get("score", 0.5), source=source,
+                label=hit.get("node_id", hit.get("chunk_id", "")), tokens=count_tokens(text),
             ))
         for path, content in gathered.file_contents.items():
             preview = content[:2000]
@@ -773,8 +910,7 @@ class Acervo:
 
         # ── S3: Context Assembly (deterministic, no LLM) ──
         # Split chunks into verified and conversation (unverified)
-        warm_budget = 1500
-        selected, warm_used = select_chunks_by_budget(chunks, warm_budget)
+        selected, warm_used = select_chunks_by_budget(chunks, self._warm_token_budget)
 
         verified_chunks = [c for c in selected if c.source.startswith("verified")]
         conversation_chunks = [c for c in selected if not c.source.startswith("verified")]
@@ -782,14 +918,12 @@ class Acervo:
         # Build warm override with verification markers
         parts: list[str] = []
         if verified_chunks:
-            parts.append(format_chunks_as_context(verified_chunks))
+            parts.append(format_chunks_compact(verified_chunks))
         if conversation_chunks:
             if parts:
                 parts.append("")  # blank line separator
-            parts.append("[CONVERSATION CONTEXT (unverified)]\n"
-                         + format_chunks_as_context(conversation_chunks)
-                         + "\n(This information came from previous conversations "
-                         "and has not been verified against primary sources.)")
+            parts.append("[UNVERIFIED]\n"
+                         + format_chunks_compact(conversation_chunks))
 
         warm_override = "\n".join(parts) if parts else ""
         warm_source = "graph" if warm_override else ""
@@ -875,7 +1009,7 @@ class Acervo:
                 "warm_tokens": warm_tk,
                 "hot_tokens": hot_tk,
                 "total_tokens": total_tk,
-                "warm_budget": warm_budget,
+                "warm_budget": self._warm_token_budget,
                 "chunks_used": len(selected),
                 "verified_chunks": len(verified_chunks),
                 "conversation_chunks": len(conversation_chunks),
@@ -883,7 +1017,20 @@ class Acervo:
                 "warm_content_preview": warm_override[:500] if warm_override else "",
                 "has_context": has_context,
             },
+            "chunks": {
+                "documents_with_chunks_activated": len([n for n in gathered.nodes if n.get("chunk_ids")]),
+                "chunks_retrieved": len([h for h in gathered.vector_results if h.get("source") == "node_scoped_chunk"]),
+                "chunks_total_on_activated_nodes": len(node_chunk_ids),
+                "retrieval_scope": "node_scoped" if node_chunk_ids and query_specificity == "specific" else "global",
+                "query_specificity": query_specificity,
+            },
         }
+
+        _elapsed_ms = int((time.monotonic() - _t0) * 1000)
+        log.info(
+            "prepare done: topic=%s tokens=%d (warm=%d hot=%d) %dms",
+            current_topic, total_tk, warm_tk, hot_tk, _elapsed_ms,
+        )
 
         return PrepareResult(
             context_stack=context_stack,

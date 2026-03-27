@@ -117,7 +117,7 @@ def init_project(root: Path, config_overrides: dict | None = None) -> AcervoProj
     gitignore_path = acervo_dir / ".gitignore"
     if not gitignore_path.exists():
         gitignore_path.write_text(
-            "# Machine-specific data (graph, embeddings)\ndata/\n",
+            "# Machine-specific data (graph, embeddings)\ndata/\n# Service PID files\nrun/\n",
             encoding="utf-8",
         )
 

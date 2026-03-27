@@ -59,6 +59,20 @@ class AcervoProxy:
         self._app.router.add_post("/acervo/clear", self._handle_clear)
         self._app.router.add_get("/acervo/last-turn", self._handle_last_turn)
         self._app.router.add_get("/acervo/last-request", self._handle_last_request)
+        self._app.router.add_get("/acervo/traces", self._handle_traces_list)
+        self._app.router.add_get("/acervo/traces/{session_id}", self._handle_trace)
+        self._app.router.add_get("/acervo/traces/{session_id}/summary", self._handle_trace_summary)
+        # Graph CRUD
+        self._app.router.add_get("/acervo/graph/nodes", self._handle_graph_list)
+        self._app.router.add_get("/acervo/graph/search", self._handle_graph_search)
+        self._app.router.add_get("/acervo/graph/nodes/{node_id}", self._handle_graph_get)
+        self._app.router.add_delete("/acervo/graph/nodes/{node_id}", self._handle_graph_delete)
+        self._app.router.add_post("/acervo/graph/merge", self._handle_graph_merge)
+        # Document management
+        self._app.router.add_post("/acervo/documents", self._handle_document_upload)
+        self._app.router.add_get("/acervo/documents", self._handle_documents_list)
+        self._app.router.add_get("/acervo/documents/{doc_id}", self._handle_document_get)
+        self._app.router.add_delete("/acervo/documents/{doc_id}", self._handle_document_delete)
 
     def _reload_config(self) -> None:
         """Reload config from disk (cheap — single TOML parse)."""
@@ -105,46 +119,43 @@ class AcervoProxy:
         try:
             from acervo import Acervo
 
-            # --- Embeddings disabled for now ---
-            # Entity-level embedding replaced by graph activation + S1 extraction.
-            # Will be re-enabled for document chunk indexing linked to graph nodes.
+            # Embeddings + vector store (for document chunk indexing)
             embedder = None
             vector_store = None
-            # embed_cfg = self._config.embeddings
-            # if embed_cfg.url and embed_cfg.model:
-            #     from acervo.openai_client import OllamaEmbedder
-            #     resolved = embed_cfg.resolve()
-            #     _embedder = OllamaEmbedder(
-            #         base_url=resolved.url,
-            #         model=resolved.model,
-            #     )
-            #     try:
-            #         await _embedder.embed("health")
-            #         embedder = _embedder
-            #         log.info("Embedder configured: %s @ %s", resolved.model, resolved.url)
-            #     except Exception as e:
-            #         log.warning("Ollama unavailable (%s) — running without embeddings", e)
-            #         print(f"  WARNING: Ollama unavailable — embeddings disabled")
-            #
-            # vector_store = None
-            # if embedder:
-            #     try:
-            #         from acervo.vector_store import ChromaVectorStore
-            #         vectordb_path = project_root / ".acervo" / "data" / "vectordb"
-            #         vectordb_path.mkdir(parents=True, exist_ok=True)
-            #         embed_batch_fn = getattr(embedder, "embed_batch", None)
-            #         vector_store = ChromaVectorStore(
-            #             persist_path=str(vectordb_path),
-            #             embed_fn=embedder.embed,
-            #             embed_batch_fn=embed_batch_fn,
-            #         )
-            #         log.info("Vector store initialized at %s", vectordb_path)
-            #     except ImportError:
-            #         log.info("chromadb not installed — vector search disabled")
-            #     except Exception as e:
-            #         log.warning("Vector store init failed: %s", e)
+            embed_cfg = self._config.embeddings
+            if embed_cfg.url and embed_cfg.model:
+                from acervo.openai_client import OllamaEmbedder
+                resolved = embed_cfg.resolve()
+                _embedder = OllamaEmbedder(
+                    base_url=resolved.url,
+                    model=resolved.model,
+                )
+                try:
+                    await _embedder.embed("health")
+                    embedder = _embedder
+                    log.info("Embedder configured: %s @ %s", resolved.model, resolved.url)
+                except Exception as e:
+                    log.warning("Ollama unavailable (%s) — running without embeddings", e)
+                    print(f"  WARNING: Ollama unavailable — embeddings disabled")
 
             project_root = self._config_path.parent.parent
+
+            if embedder:
+                try:
+                    from acervo.vector_store import ChromaVectorStore
+                    vectordb_path = project_root / ".acervo" / "data" / "vectordb"
+                    vectordb_path.mkdir(parents=True, exist_ok=True)
+                    embed_batch_fn = getattr(embedder, "embed_batch", None)
+                    vector_store = ChromaVectorStore(
+                        persist_path=str(vectordb_path),
+                        embed_fn=embedder.embed,
+                        embed_batch_fn=embed_batch_fn,
+                    )
+                    log.info("Vector store initialized at %s", vectordb_path)
+                except ImportError:
+                    log.info("chromadb not installed — vector search disabled")
+                except Exception as e:
+                    log.warning("Vector store init failed: %s", e)
 
             self._acervo = Acervo.from_project(
                 project_root, auto_init=False,
@@ -152,7 +163,9 @@ class AcervoProxy:
             )
             stats = self._acervo.get_graph_stats()
             print(f"  Graph: {stats['node_count']} nodes, {stats['edge_count']} edges")
-            print("  Embeddings: disabled (document chunk indexing planned)")
+            embed_status = f"enabled ({embed_cfg.model})" if embedder else "disabled"
+            vs_status = "enabled" if vector_store else "disabled"
+            print(f"  Embeddings: {embed_status}, Vector store: {vs_status}")
         except Exception as e:
             log.warning("Acervo init failed (proxy will pass-through): %s", e)
             print(f"  WARNING: Acervo init failed: {e}")
@@ -367,6 +380,216 @@ class AcervoProxy:
             "stream": self._last_forwarded_body.get("stream"),
             "has_tools": bool(self._last_forwarded_body.get("tools")),
         })
+
+    async def _handle_traces_list(self, request: web.Request) -> web.Response:
+        """List available trace files."""
+        if not self._acervo:
+            return web.json_response({"traces": []})
+        traces_dir = self._acervo.metrics.trace_path.parent if self._acervo.metrics.trace_path else None
+        if not traces_dir or not traces_dir.exists():
+            return web.json_response({"traces": []})
+        files = sorted(traces_dir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
+        return web.json_response({
+            "traces": [{"session_id": f.stem, "size_kb": round(f.stat().st_size / 1024, 1)} for f in files],
+        })
+
+    async def _handle_trace(self, request: web.Request) -> web.Response:
+        """Return all turns from a trace session as a JSON array."""
+        import json
+        session_id = request.match_info["session_id"]
+        if not self._acervo or not self._acervo.metrics.trace_path:
+            return web.json_response({"error": "traces not configured"}, status=404)
+        trace_file = self._acervo.metrics.trace_path.parent / f"{session_id}.jsonl"
+        if not trace_file.exists():
+            return web.json_response({"error": f"trace {session_id} not found"}, status=404)
+        turns = []
+        for line in trace_file.read_text(encoding="utf-8").strip().splitlines():
+            if line.strip():
+                turns.append(json.loads(line))
+        return web.json_response({"session_id": session_id, "turns": turns})
+
+    async def _handle_trace_summary(self, request: web.Request) -> web.Response:
+        """Return aggregated metrics for a trace session."""
+        import json
+        from acervo.metrics import SessionMetrics, TurnMetric
+        session_id = request.match_info["session_id"]
+        if not self._acervo or not self._acervo.metrics.trace_path:
+            return web.json_response({"error": "traces not configured"}, status=404)
+        trace_file = self._acervo.metrics.trace_path.parent / f"{session_id}.jsonl"
+        if not trace_file.exists():
+            return web.json_response({"error": f"trace {session_id} not found"}, status=404)
+        # Reconstruct SessionMetrics from JSONL
+        metrics = SessionMetrics(session_id=session_id)
+        for line in trace_file.read_text(encoding="utf-8").strip().splitlines():
+            if line.strip():
+                data = json.loads(line)
+                turn = TurnMetric(**{k: v for k, v in data.items() if k in TurnMetric.__dataclass_fields__})
+                metrics.turns.append(turn)
+        return web.json_response(metrics.export_json())
+
+    # ── Graph CRUD handlers ──
+
+    def _require_graph(self):
+        """Get the TopicGraph or raise 503."""
+        if not self._acervo:
+            raise web.HTTPServiceUnavailable(text="Acervo not initialized")
+        return self._acervo.graph
+
+    async def _handle_graph_list(self, request: web.Request) -> web.Response:
+        """GET /acervo/graph/nodes — list nodes."""
+        graph = self._require_graph()
+        kind = request.query.get("kind")
+        nodes = graph.get_nodes_by_kind(kind) if kind else graph.get_all_nodes()
+        limit = int(request.query.get("limit", 0))
+        if limit > 0:
+            nodes = nodes[:limit]
+        return web.json_response(nodes)
+
+    async def _handle_graph_get(self, request: web.Request) -> web.Response:
+        """GET /acervo/graph/nodes/{node_id} — node detail with edges."""
+        graph = self._require_graph()
+        node_id = request.match_info["node_id"]
+        node = graph.get_node(node_id)
+        if not node:
+            return web.json_response({"error": f"node not found: {node_id}"}, status=404)
+        edges = graph.get_edges_for(node["id"])
+        files = graph.get_linked_files(node["id"])
+        return web.json_response({**node, "edges": edges, "linked_files": files})
+
+    async def _handle_graph_search(self, request: web.Request) -> web.Response:
+        """GET /acervo/graph/search?q=query&kind=entity — search nodes."""
+        graph = self._require_graph()
+        query = request.query.get("q", "").lower()
+        if not query:
+            return web.json_response({"error": "missing q parameter"}, status=400)
+        kind = request.query.get("kind")
+        nodes = graph.get_nodes_by_kind(kind) if kind else graph.get_all_nodes()
+        results = []
+        for node in nodes:
+            label = node.get("label", node["id"])
+            if query in label.lower() or query in node["id"].lower():
+                results.append(node)
+                continue
+            for f in node.get("facts", []):
+                if query in f.get("fact", "").lower():
+                    results.append(node)
+                    break
+        return web.json_response(results)
+
+    async def _handle_graph_delete(self, request: web.Request) -> web.Response:
+        """DELETE /acervo/graph/nodes/{node_id} — delete node and edges."""
+        graph = self._require_graph()
+        node_id = request.match_info["node_id"]
+        node = graph.get_node(node_id)
+        if not node:
+            return web.json_response({"error": f"node not found: {node_id}"}, status=404)
+        nid = node["id"]
+        graph.remove_node(nid)
+        graph.save()
+        return web.json_response({"deleted": nid})
+
+    async def _handle_graph_merge(self, request: web.Request) -> web.Response:
+        """POST /acervo/graph/merge — body: {"keep": "id1", "absorb": "id2"}."""
+        graph = self._require_graph()
+        body = await request.json()
+        keep_id = body.get("keep", "")
+        absorb_id = body.get("absorb", "")
+        if not keep_id or not absorb_id:
+            return web.json_response({"error": "missing keep or absorb"}, status=400)
+        ok = graph.merge_nodes(keep_id, absorb_id)
+        if not ok:
+            return web.json_response({"error": "one or both nodes not found"}, status=404)
+        graph.save()
+        return web.json_response({"merged": {"keep": keep_id, "absorbed": absorb_id}})
+
+    # ── Document management handlers ──
+
+    async def _handle_document_upload(self, request: web.Request) -> web.Response:
+        """POST /acervo/documents — upload and index a .md file."""
+        if not self._acervo:
+            raise web.HTTPServiceUnavailable(text="Acervo not initialized")
+
+        reader = await request.multipart()
+        if not reader:
+            return web.json_response({"error": "multipart form data required"}, status=400)
+
+        field = await reader.next()
+        if not field or field.name != "file":
+            return web.json_response({"error": "missing 'file' field"}, status=400)
+
+        filename = field.filename or "document.md"
+        if not filename.endswith(".md"):
+            return web.json_response(
+                {"error": "only .md files supported in v0.3.0"}, status=400,
+            )
+
+        content = await field.read(decode=True)
+
+        # Save to .acervo/data/documents/
+        project_root = self._config_path.parent.parent
+        docs_dir = project_root / ".acervo" / "data" / "documents"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        dest = docs_dir / filename
+        dest.write_bytes(content)
+
+        result = await self._acervo.index_document(dest)
+        return web.json_response(result)
+
+    async def _handle_documents_list(self, request: web.Request) -> web.Response:
+        """GET /acervo/documents — list indexed documents."""
+        graph = self._require_graph()
+        nodes = graph.get_nodes_with_chunks()
+        docs = []
+        for n in nodes:
+            if n.get("kind") != "file":
+                continue
+            docs.append({
+                "id": n["id"],
+                "label": n.get("label", ""),
+                "file_path": n.get("attributes", {}).get("path", ""),
+                "chunk_count": len(n.get("chunk_ids", [])),
+                "indexed_at": n.get("indexed_at", ""),
+            })
+        return web.json_response(docs)
+
+    async def _handle_document_get(self, request: web.Request) -> web.Response:
+        """GET /acervo/documents/{doc_id} — document detail with chunk_ids."""
+        graph = self._require_graph()
+        doc_id = request.match_info["doc_id"]
+        node = graph.get_node(doc_id)
+        if not node or node.get("kind") != "file" or not node.get("chunk_ids"):
+            return web.json_response({"error": f"document not found: {doc_id}"}, status=404)
+
+        # Include section children
+        sections = []
+        prefix = doc_id + "__"
+        for nid, n in graph._nodes.items():
+            if nid.startswith(prefix) and n.get("kind") == "section":
+                sections.append({
+                    "id": nid,
+                    "label": n.get("label", ""),
+                    "chunk_ids": n.get("chunk_ids", []),
+                    "start_line": n.get("attributes", {}).get("start_line"),
+                    "end_line": n.get("attributes", {}).get("end_line"),
+                })
+
+        return web.json_response({
+            **node,
+            "sections": sections,
+        })
+
+    async def _handle_document_delete(self, request: web.Request) -> web.Response:
+        """DELETE /acervo/documents/{doc_id} — delete doc + chunks + nodes."""
+        if not self._acervo:
+            raise web.HTTPServiceUnavailable(text="Acervo not initialized")
+
+        doc_id = request.match_info["doc_id"]
+        result = await self._acervo.delete_document(doc_id)
+        if result["chunks_removed"] == 0:
+            node = self._acervo.graph.get_node(doc_id)
+            if not node:
+                return web.json_response({"error": f"document not found: {doc_id}"}, status=404)
+        return web.json_response(result)
 
     def _resolve_target(self, request: web.Request) -> str:
         """Resolve the upstream LLM target URL.

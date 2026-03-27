@@ -94,6 +94,9 @@ def _migrate_node(node: dict) -> dict:
             node["stale_since"] = None
         if "indexed_at" not in node:
             node["indexed_at"] = node.get("created_at")
+    # chunk_ids for document chunk linkage
+    if "chunk_ids" not in node:
+        node["chunk_ids"] = []
     # Normalize legacy entity types to canonical ontology types
     old_type = node.get("type", "")
     if old_type in _TYPE_MIGRATION:
@@ -162,6 +165,67 @@ class TopicGraph:
         if edges_file.exists():
             edges_file.unlink()
 
+    def repair(self) -> dict:
+        """Detect and fix graph corruption. Returns a report of fixes applied.
+
+        Checks:
+        - Nodes missing required fields (id, label, type, kind)
+        - Edges referencing non-existent nodes
+        - Duplicate edges
+        - Nodes with invalid chunk_ids (non-list)
+        """
+        report: dict = {"removed_nodes": 0, "removed_edges": 0, "fixed_fields": 0, "deduped_edges": 0}
+
+        # Fix nodes with missing required fields
+        bad_node_ids: list[str] = []
+        for nid, node in self._nodes.items():
+            if not isinstance(node, dict) or not node.get("id") or not node.get("label"):
+                bad_node_ids.append(nid)
+                continue
+            # Ensure required fields exist
+            if "type" not in node:
+                node["type"] = "unknown"
+                report["fixed_fields"] += 1
+            if "kind" not in node:
+                node["kind"] = "entity"
+                report["fixed_fields"] += 1
+            if "facts" not in node:
+                node["facts"] = []
+                report["fixed_fields"] += 1
+            if "chunk_ids" not in node or not isinstance(node.get("chunk_ids"), list):
+                node["chunk_ids"] = []
+                report["fixed_fields"] += 1
+
+        for nid in bad_node_ids:
+            del self._nodes[nid]
+            report["removed_nodes"] += 1
+
+        # Remove edges referencing non-existent nodes
+        valid_ids = set(self._nodes.keys())
+        original_edge_count = len(self._edges)
+        self._edges = [
+            e for e in self._edges
+            if isinstance(e, dict) and e.get("source") in valid_ids and e.get("target") in valid_ids
+        ]
+        report["removed_edges"] = original_edge_count - len(self._edges)
+
+        # Deduplicate edges (same source + target + relation)
+        seen: set[tuple[str, str, str]] = set()
+        deduped: list[dict] = []
+        for e in self._edges:
+            key = (e.get("source", ""), e.get("target", ""), e.get("relation", ""))
+            if key not in seen:
+                seen.add(key)
+                deduped.append(e)
+            else:
+                report["deduped_edges"] += 1
+        self._edges = deduped
+
+        if any(v > 0 for v in report.values()):
+            self._save()
+
+        return report
+
     def _save(self) -> None:
         self._path.mkdir(parents=True, exist_ok=True)
         (self._path / "nodes.json").write_text(
@@ -229,6 +293,7 @@ class TopicGraph:
                     "attributes": {},
                     "facts": [],
                     "files": [],
+                    "chunk_ids": [],
                     **meta.to_dict(),
                     "status": "hot",  # runtime status — must come after meta spread
                 }
@@ -694,6 +759,7 @@ class TopicGraph:
                 },
                 "facts": [],
                 "files": [file_path],
+                "chunk_ids": [],
                 "stale": False,
                 "stale_since": None,
                 "indexed_at": now,
@@ -732,6 +798,7 @@ class TopicGraph:
                 },
                 "facts": [],
                 "files": [file_path],
+                "chunk_ids": [],
                 **meta.to_dict(),
                 "status": "cold",
             }
@@ -781,6 +848,39 @@ class TopicGraph:
             e for e in self._edges
             if e["source"] not in child_set and e["target"] not in child_set
         ]
+        # Clear chunk_ids on the parent file node (re-indexing starts clean)
+        parent = self._nodes.get(file_id)
+        if parent:
+            parent["chunk_ids"] = []
+
+    # ── Chunk linkage ──
+
+    def link_chunks(self, node_id: str, chunk_ids: list[str]) -> bool:
+        """Set chunk_ids on a node (replaces existing, for re-indexing)."""
+        node = self._nodes.get(node_id)
+        if not node:
+            return False
+        node["chunk_ids"] = chunk_ids
+        return True
+
+    def get_chunks_for_node(self, node_id: str) -> list[str]:
+        """Return chunk_ids for a node, or empty list if not found."""
+        node = self._nodes.get(node_id)
+        if not node:
+            return []
+        return node.get("chunk_ids", [])
+
+    def clear_chunks(self, node_id: str) -> bool:
+        """Clear chunk_ids on a node."""
+        node = self._nodes.get(node_id)
+        if not node:
+            return False
+        node["chunk_ids"] = []
+        return True
+
+    def get_nodes_with_chunks(self) -> list[dict]:
+        """Return all nodes that have non-empty chunk_ids."""
+        return [n for n in self._nodes.values() if n.get("chunk_ids")]
 
     def get_symbol_content(self, node_id: str, workspace_root: Path) -> str | None:
         """Read and return ONLY the lines for a symbol/section node from disk.

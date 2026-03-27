@@ -25,6 +25,7 @@ MANIFEST
 
 # Testing
 .pytest_cache/
+tests/integration/reports/
 .coverage
 .coverage.*
 htmlcov/
@@ -73,9 +74,6 @@ site/
 *.swp
 *.swo
 *~
-
-# Plans (local roadmap tracking)
-plans/
 
 # Claude Code
 .claude/

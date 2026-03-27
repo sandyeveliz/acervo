@@ -51,10 +51,61 @@ def select_chunks_by_budget(
 
 
 def format_chunks_as_context(chunks: list[RankedChunk]) -> str:
-    """Format selected chunks into the warm context block."""
+    """Format selected chunks into the warm context block (verbose, one per line)."""
     if not chunks:
         return ""
     return "\n\n".join(c.text for c in chunks)
+
+
+def format_chunks_compact(chunks: list[RankedChunk]) -> str:
+    """Format chunks grouped by entity label for maximum token efficiency.
+
+    Produces compact output like:
+        **Sandy**: programador; vive en Cipolletti
+        **Chequear**: SaaS de verificacion con NFC; stack React+Vite+Supabase
+        **Sandy** -> located_in: Cipolletti; works_at: Alto Valle Studio
+
+    Instead of verbose one-fact-per-block format.
+    """
+    if not chunks:
+        return ""
+
+    # Group by label, separating facts from relations
+    facts_by_label: dict[str, list[str]] = {}
+    rels_by_label: dict[str, list[str]] = {}
+
+    for c in chunks:
+        if "relation" in c.source:
+            # Extract relation text after the arrow
+            rel_text = c.text.split("\u2192", 1)[-1].strip() if "\u2192" in c.text else c.text
+            # Also try ASCII arrow
+            if rel_text == c.text and " → " in c.text:
+                rel_text = c.text.split(" → ", 1)[-1].strip()
+            rels_by_label.setdefault(c.label, []).append(rel_text)
+        else:
+            # Extract fact text after the colon (strip **Label**: prefix)
+            if "**: " in c.text:
+                fact_text = c.text.split("**: ", 1)[-1].strip()
+            else:
+                fact_text = c.text
+            facts_by_label.setdefault(c.label, []).append(fact_text)
+
+    lines: list[str] = []
+
+    # Facts first (higher information density)
+    for label, facts in facts_by_label.items():
+        lines.append(f"**{label}**: {'; '.join(facts)}")
+
+    # Relations for entities not already shown via facts
+    for label, rels in rels_by_label.items():
+        if label in facts_by_label:
+            # Append relations to the existing fact line
+            idx = next(i for i, l in enumerate(lines) if l.startswith(f"**{label}**"))
+            lines[idx] += f" | {', '.join(rels)}"
+        else:
+            lines.append(f"**{label}** -> {', '.join(rels)}")
+
+    return "\n".join(lines)
 
 
 # ── Legacy: GatheredInfo container (kept for debug display) ──

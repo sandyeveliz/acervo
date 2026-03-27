@@ -44,6 +44,96 @@ Project Alpha: web app, e-commerce platform
 
 Pure signal, zero noise. And when you close the session and come back tomorrow, the graph is still there. **No more starting from scratch.**
 
+## Acervo in Action
+
+Real data from automated benchmarks. 360 turns across 6 scenarios — programming, literature, academic, mixed, SaaS founder (101 turns), product manager (59 turns). All runs use the fine-tuned `acervo-extractor-qwen3.5-9b` model.
+
+### A real conversation: developer building a SaaS
+
+Sandy describes his projects, switches topics, comes back to earlier subjects. Without Acervo, context grows linearly. With Acervo, the graph compresses everything.
+
+```
+TURN 1 — "Me llamo Sandy y vivo en Cipolletti, Rio Negro"
+                                           Without Acervo   With Acervo
+                                           ──────────────   ───────────
+  Tokens sent to LLM:                            40 tk          6 tk
+  Context:                                       (none)         (none, first turn)
+  Graph after:                                   —              + Sandy (person)
+                                                                + Cipolletti (place)
+
+TURN 10 — "Tenemos 3 packages: web (React), mobile (Expo), y shared"
+                                           Without Acervo   With Acervo
+                                           ──────────────   ───────────
+  Tokens sent to LLM:                           363 tk        259 tk
+  Context:                                      full history   graph: 8 nodes
+  Savings:                                      —              29%
+
+TURN 25 — Topic change: "Estoy usando Reqwest y Tokio para async"
+                                           Without Acervo   With Acervo
+                                           ──────────────   ───────────
+  Tokens sent to LLM:                           843 tk        157 tk
+  Context:                                      full history   graph: Rust subgraph only
+  Savings:                                      —              81%
+  What happened:                                keeps growing  switched to new topic,
+                                                               old context dropped
+
+TURN 35 — Return: "Los reportes van a estar en el dashboard web"
+                                           Without Acervo   With Acervo
+                                           ──────────────   ───────────
+  Tokens sent to LLM:                         1,177 tk        397 tk
+  Context:                                      full history   Chequear subgraph restored
+  Savings:                                      —              66%
+  What happened:                                growing        graph restored morning's
+                                                               context instantly
+
+TURN 50 — "Eso resume mi laburo: Chequear, Butaco, y el side project"
+                                           Without Acervo   With Acervo
+                                           ──────────────   ───────────
+  Tokens sent to LLM:                         1,709 tk        393 tk
+  Context:                                      full history   graph: 32 nodes, 53 edges
+  Savings:                                      —              77%
+```
+
+### 101-turn stress test (SaaS founder)
+
+Carlos building Menuboard across 3 simulated weeks — tech pivots, personal tangents, topic returns.
+
+```
+Turn     Without Acervo   With Acervo   Savings   Graph
+─────    ──────────────   ───────────   ───────   ─────
+   1           17 tk           6 tk       65%     0 nodes
+  10          387 tk         303 tk       22%     8 nodes
+  25        1,023 tk         422 tk       59%    10 nodes
+  50        2,279 tk         464 tk       80%    13 nodes
+  75        3,643 tk         461 tk       87%    20 nodes
+ 100        5,157 tk         490 tk       90%    23 nodes
+```
+
+At turn 100, Acervo uses **490 tokens** where full history needs **5,157** — a **10.5x compression**. The graph has 23 nodes and 58 edges encoding everything Carlos said across 101 turns.
+
+### Results across all scenarios
+
+| Scenario | Turns | Avg Acervo | Avg Baseline | Savings | Context Hit | Nodes |
+|----------|------:|----------:|------------:|--------:|:----------:|------:|
+| Developer workflow | 50 | 276 tk | 867 tk | 68% | 94% | 32 |
+| Literature/comics | 50 | 199 tk | 911 tk | 78% | 96% | 34 |
+| Academic research | 50 | 323 tk | 987 tk | 67% | 98% | 29 |
+| Mixed domains | 50 | 187 tk | 918 tk | 80% | 84% | 32 |
+| SaaS founder (real) | 101 | 418 tk | 2,392 tk | 82% | 96% | 23 |
+| Product manager (real) | 59 | 341 tk | 1,791 tk | 81% | 95% | 15 |
+
+**Average across 360 turns: 76% token savings, 94% context hit rate.**
+
+To reproduce these results:
+
+```bash
+# Run benchmarks (requires LM Studio with acervo-extractor model)
+python -m tests.integration.run_benchmarks --format html
+
+# Generate report from existing data (no LLM needed)
+python -m tests.integration.export_report --tier full --open
+```
+
 ## How it works
 
 Acervo is a **context proxy** — it sits between your app and the LLM. Transparent, stateless, zero code changes required.
@@ -108,6 +198,14 @@ acervo serve         # Starts proxy on port 9470
 ```
 
 Point your app's `base_url` to `http://localhost:9470` — that's it. Acervo intercepts every request, enriches it with graph context, and forwards it to your LLM.
+
+### Dev mode (all services in one terminal)
+
+```bash
+acervo up --dev
+```
+
+Starts Ollama, the Acervo proxy, and Acervo Studio in a single terminal with tagged logs. Ctrl+C stops everything.
 
 ### 4. Or use as a library
 
@@ -281,6 +379,8 @@ Traditional systems use temporal layers — recent = hot, old = cold. Acervo use
 
 In 80% of turns, hot is enough.
 
+> **Note:** Progressive retrieval (automatic warm/cold escalation) is planned for v0.4. Currently, the hot layer is always injected and additional layers can be brought in via the SDK.
+
 ## Fine-tuned extraction model
 
 Acervo includes a fine-tuned model specifically trained for knowledge graph extraction:
@@ -330,6 +430,39 @@ acervo index /path/to/project \
 | `.html` | regex | component references, element IDs |
 | `.css` | regex | selectors, custom properties |
 | `.md` | heading parser | sections with hierarchy context |
+
+## Index documents
+
+Acervo can ingest text documents and link their content directly to the knowledge graph. Instead of global RAG search across all chunks, retrieval is **node-scoped** — only chunks belonging to activated graph nodes are retrieved.
+
+### CLI
+
+```bash
+acervo index --path ./docs/architecture.md       # single file
+acervo index --path ./docs/                       # all .md files in directory
+```
+
+### REST API
+
+```bash
+# Upload a document
+curl -X POST http://localhost:9470/acervo/documents \
+  -F "file=@architecture.md"
+
+# List indexed documents
+curl http://localhost:9470/acervo/documents
+
+# Delete a document (removes chunks + graph nodes)
+curl -X DELETE http://localhost:9470/acervo/documents/architecture
+```
+
+### How it works
+
+Each document is split into chunks (by heading and paragraph), embedded via Ollama, and stored in ChromaDB. A graph node is created for the document with `chunk_ids` pointing to its chunks. When the node is activated during a conversation, only its chunks are searched — not the entire vector store.
+
+A specificity classifier decides whether to retrieve chunks at all. Conceptual questions ("What does this module do?") get the node summary only (~80 tokens). Specific questions ("What's the exact auth endpoint?") get the relevant chunks (~200 tokens).
+
+Currently supports `.md` files. Additional formats (PDF, DOCX, plain text) planned for v0.4.
 
 ## Architecture
 
@@ -391,7 +524,7 @@ class LLMClient(Protocol):
 
 ## Project status
 
-v0.2.0 — [Changelog](./CHANGELOG.md)
+v0.3.0 — [Changelog](./CHANGELOG.md)
 
 | Feature | Status |
 |---------|--------|
@@ -410,11 +543,41 @@ v0.2.0 — [Changelog](./CHANGELOG.md)
 | `.acervo/` project data directory | ✅ Working |
 | `acervo index` — structural + semantic | ✅ Working |
 | REST API (`acervo serve`) | ✅ Working |
-| Reproducible benchmarks (100-turn comparison) | 🔜 v0.3 |
-| Progressive retrieval (hot → warm → cold) | 🔜 v0.3 |
-| Docker Compose (one-command setup) | 🔜 v0.3 |
-| Interactive demo (GitHub Pages) | 🔜 v0.3 |
-| Graph → Vector DB chunk refs | 🔜 v0.4 |
+| Reproducible benchmarks (360-turn, 6 scenarios) | ✅ Working |
+| Document ingestion with graph-linked chunks | ✅ Working |
+| Node-scoped chunk retrieval (vs global RAG) | ✅ Working |
+| Document management API (upload/list/delete) | ✅ Working |
+| `acervo up` — one-command dev stack | ✅ Working |
+| Graph inspection CLI (`acervo graph show/search/delete/merge`) | ✅ Working |
+| Specificity classifier (conceptual vs specific queries) | ✅ Working |
+| Configurable logging (`--log-level trace\|debug\|info`) | ✅ Working |
+| `acervo graph repair` — corruption detection + fix | ✅ Working |
+| Configurable timeouts per pipeline phase | ✅ Working |
+| Multi-format ingestion (`.txt`, `.pdf`, `.docx`) | 🔜 v0.4.0 |
+| MCP Server (Claude Desktop, Cursor, Windsurf) | 🔜 v0.5.0 |
+| Progressive retrieval (hot → warm → cold) | 🔜 v0.6.0 |
+| Docker Compose (one-command setup) | 🔜 v0.6.0 |
+| Multi-tenant graphs | 🔜 v0.7.0 |
+
+## Roadmap
+
+```
+v0.3.0  ████████  DONE    Conversation memory works (benchmarks, CLI, .md ingestion)
+v0.4.0  ████████  NEXT    Indexation works for real (4 domains, formats, fine-tune v2)
+v0.5.0  ████████          Usable from anywhere (MCP server, TS SDK, integrations)
+v0.6.0  ████████          Production-ready (Docker, metrics, progressive retrieval)
+v0.7.0  ████████          Ecosystem (multi-tenant, packs, Studio v2)
+```
+
+| Version | What it proves | Evidence produced |
+|---------|---------------|-------------------|
+| **v0.3.0** | Conversation memory | 76% savings, 94% context hits, scissors chart |
+| **v0.4.0** | Document indexation | Indexation scorecard, query recall per domain |
+| **v0.5.0** | Works in any tool | MCP server, TypeScript SDK, framework integrations |
+| **v0.6.0** | Deploy in production | Docker one-liner, Prometheus metrics |
+| **v0.7.0** | Scales to teams | Multi-tenant, knowledge packs, Studio v2 |
+
+Small versions, one theme per release, each with publishable benchmarks. Full details in the [Roadmap docs](https://sandyeveliz.github.io/acervo/roadmap/).
 
 ## Documentation
 
@@ -422,8 +585,10 @@ v0.2.0 — [Changelog](./CHANGELOG.md)
 - **[Getting Started](https://sandyeveliz.github.io/acervo/getting-started/)** — Installation, quick start, LLMClient protocol
 - **[Configuration](https://sandyeveliz.github.io/acervo/configuration/)** — SDK parameters, environment variables
 - **[Knowledge Layers](https://sandyeveliz.github.io/acervo/layers/)** — UNIVERSAL vs PERSONAL, node lifecycle, topic layers
+- **[Graph CLI](https://sandyeveliz.github.io/acervo/graph-cli/)** — Inspect, search, delete, merge graph nodes
+- **[Traces](https://sandyeveliz.github.io/acervo/traces/)** — Per-turn metrics, compression ratios, benchmarking
+- **[Document Ingestion](https://sandyeveliz.github.io/acervo/document-ingestion/)** — Indexing files, node-scoped retrieval, specificity classifier
 - **[Roadmap](https://sandyeveliz.github.io/acervo/roadmap/)** — Planned features
-- **[Blog series](https://sandyeveliz.github.io/acervo/blog/)** — Development journey, version by version
 
 ## Why "Acervo"?
 
