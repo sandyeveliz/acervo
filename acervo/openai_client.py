@@ -24,9 +24,10 @@ class OllamaEmbedder:
         vector = await embedder.embed("hello world")
     """
 
-    def __init__(self, base_url: str, model: str) -> None:
+    def __init__(self, base_url: str, model: str, timeout: int = 120) -> None:
         self._base_url = base_url.rstrip("/")
         self._model = model
+        self._timeout = timeout
 
     async def embed(self, text: str) -> list[float]:
         import asyncio
@@ -50,7 +51,7 @@ class OllamaEmbedder:
         payload = json.dumps({"model": self._model, "input": text}).encode()
         headers = {"Content-Type": "application/json"}
         req = Request(url, data=payload, headers=headers, method="POST")
-        with urlopen(req, timeout=120) as resp:
+        with urlopen(req, timeout=self._timeout) as resp:
             data = json.loads(resp.read())
         return data["embeddings"][0]
 
@@ -59,7 +60,7 @@ class OllamaEmbedder:
         payload = json.dumps({"model": self._model, "input": texts}).encode()
         headers = {"Content-Type": "application/json"}
         req = Request(url, data=payload, headers=headers, method="POST")
-        with urlopen(req, timeout=120) as resp:
+        with urlopen(req, timeout=self._timeout) as resp:
             data = json.loads(resp.read())
         return data["embeddings"]
 
@@ -81,10 +82,12 @@ class OpenAIClient:
         base_url: str,
         model: str,
         api_key: str = "",
+        timeout: int = 120,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._api_key = api_key
+        self._timeout = timeout
 
     async def chat(
         self,
@@ -120,7 +123,7 @@ class OpenAIClient:
             headers["Authorization"] = f"Bearer {self._api_key}"
 
         req = Request(url, data=payload, headers=headers, method="POST")
-        with urlopen(req, timeout=120) as resp:
+        with urlopen(req, timeout=self._timeout) as resp:
             data = json.loads(resp.read())
 
         return data["choices"][0]["message"]["content"]

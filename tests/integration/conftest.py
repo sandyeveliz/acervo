@@ -1,4 +1,7 @@
-"""Shared fixtures for integration tests — require a running LLM server."""
+"""Shared fixtures for E2E integration tests — require a running LLM server.
+
+Run with: pytest tests/integration/ -m integration -v -s
+"""
 
 from __future__ import annotations
 
@@ -13,15 +16,6 @@ from acervo import Acervo, OpenAIClient
 
 
 @pytest.fixture
-def clean_graph():
-    """Provide a clean temp directory for graph data, cleaned up after test."""
-    tmp = Path(tempfile.mkdtemp()) / "test_graph"
-    tmp.mkdir(parents=True, exist_ok=True)
-    yield tmp
-    shutil.rmtree(tmp.parent, ignore_errors=True)
-
-
-@pytest.fixture
 def llm_client():
     """Create an OpenAIClient from environment variables."""
     return OpenAIClient(
@@ -32,6 +26,16 @@ def llm_client():
 
 
 @pytest.fixture
-def memory(llm_client, clean_graph):
-    """Create an Acervo instance with real LLM and temp graph."""
-    return Acervo(llm=llm_client, owner="Sandy", persist_path=clean_graph)
+def e2e_memory(llm_client):
+    """Acervo instance with proper .acervo/ directory structure.
+
+    Mirrors the real layout so trace_path resolves correctly:
+    tmp/.acervo/data/graph  → persist_path
+    tmp/.acervo/traces/     → trace JSONL output
+    """
+    tmp = Path(tempfile.mkdtemp()) / ".acervo"
+    graph_path = tmp / "data" / "graph"
+    graph_path.mkdir(parents=True, exist_ok=True)
+    memory = Acervo(llm=llm_client, owner="Sandy", persist_path=graph_path)
+    yield memory
+    shutil.rmtree(tmp.parent, ignore_errors=True)

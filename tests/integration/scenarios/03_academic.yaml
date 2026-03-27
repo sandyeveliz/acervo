@@ -1,0 +1,299 @@
+name: academic_research
+category: academic
+description: "Academic scenario with NER thesis, databases, and ML/NLP"
+persona: "Lucia"
+persona_role: "CS Student"
+narrative_hook: "A computer science student discusses her thesis on NER, her courses, and ML research. Academic entities (papers, algorithms, professors) test extraction beyond casual conversation."
+
+turns:
+  # ── Phase 1: Student Introduction (turns 1-8) ──
+  - user_msg: "Soy Lucia, estudio Ingenieria en Computacion en la Universidad de Buenos Aires"
+    assistant_msg: "Hola Lucia! La UBA tiene una de las mejores carreras de computacion."
+    phase: intro
+    description: "Student intro"
+    expected_entities:
+      - label: "lucia"
+
+  - user_msg: "Estoy en cuarto anio, me faltan 8 materias para recibirme"
+    assistant_msg: "Ya estas en la recta final! Que materias te quedan?"
+    phase: intro
+    description: "Academic progress"
+
+  - user_msg: "Las mas importantes son Aprendizaje Automatico, Bases de Datos 2 y Sistemas Distribuidos"
+    assistant_msg: "Tres materias fundamentales. Aprendizaje Automatico es muy demandada."
+    phase: intro
+    description: "Remaining courses"
+
+  - user_msg: "Mi director de tesis es el Dr. Pablo Martinez, investigador del CONICET"
+    assistant_msg: "Tener un director del CONICET es excelente. En que area investiga?"
+    phase: intro
+    description: "Thesis advisor"
+    expected_entities:
+      - label: "conicet"
+
+  - user_msg: "El Dr. Martinez investiga en NLP, especialmente en procesamiento de texto en espaniol"
+    assistant_msg: "NLP en espaniol es un area con mucho potencial. Faltan recursos en nuestro idioma."
+    phase: intro
+    description: "Research area"
+
+  - user_msg: "Si, mi tesis va a ser sobre Named Entity Recognition para textos juridicos en espaniol"
+    assistant_msg: "NER juridico es super util. Los textos legales tienen entidades muy especificas."
+    phase: intro
+    description: "Thesis topic"
+
+  - user_msg: "Estoy usando Python con SpaCy y Hugging Face Transformers como herramientas principales"
+    assistant_msg: "SpaCy para el pipeline y Transformers para los modelos. Buen stack."
+    phase: intro
+    description: "Tools"
+    expected_entities:
+      - label: "spacy"
+
+  - user_msg: "El dataset lo estoy armando con sentencias de la Corte Suprema argentina"
+    assistant_msg: "Un corpus legal real es invaluable. Cuantas sentencias llevas anotadas?"
+    phase: intro
+    description: "Dataset"
+
+  # ── Phase 2: ML/NLP Deep Dive (turns 9-18) ──
+  - user_msg: "Llevo 500 sentencias anotadas. Uso Label Studio para la anotacion"
+    assistant_msg: "Label Studio es bueno para NER. 500 es un buen inicio. Cuantas entidades por sentencia?"
+    phase: deep_dive
+    description: "Annotation progress"
+    expected_entities:
+      - label: "label_studio"
+
+  - user_msg: "En promedio unas 15 entidades por sentencia. Los tipos son: Persona, Organizacion, Ley, Articulo, Fecha y Monto"
+    assistant_msg: "Buena ontologia. Ley y Articulo son especificos del dominio juridico."
+    phase: deep_dive
+    description: "Entity types"
+
+  - user_msg: "El modelo base que estoy usando es BETO, que es un BERT preentrenado en espaniol"
+    assistant_msg: "BETO es el estandar para NLP en espaniol. Lo vas a fine-tunear para NER?"
+    phase: deep_dive
+    description: "Base model"
+    expected_entities:
+      - label: "beto"
+
+  - user_msg: "Si, fine-tuning de BETO para token classification. Estoy usando la libreria de Transformers de Hugging Face"
+    assistant_msg: "Token classification con Transformers es directo. Que metricas usas?"
+    phase: deep_dive
+    description: "Fine-tuning approach"
+
+  - user_msg: "Uso F1-score por entidad, precision y recall. Ahora estoy en 0.82 de F1 macro"
+    assistant_msg: "0.82 es buen baseline. Donde esta fallando mas?"
+    phase: deep_dive
+    description: "Current metrics"
+
+  - user_msg: "Las entidades de Ley y Articulo son las mas dificiles, tienen formatos muy variados"
+    assistant_msg: "Si, 'Art. 14 bis CN' vs 'articulo catorce bis de la Constitucion Nacional'. Mucha variacion."
+    phase: deep_dive
+    description: "Challenges"
+
+  - user_msg: "Exacto. Estoy pensando en agregar reglas post-procesamiento con regex para esos casos"
+    assistant_msg: "Un enfoque hibrido ML + reglas funciona muy bien para entidades con formato conocido."
+    phase: deep_dive
+    description: "Hybrid approach"
+
+  - user_msg: "Tambien estoy evaluando usar CRF como capa final en vez del classifier lineal de BERT"
+    assistant_msg: "BERT + CRF mejora la consistencia de las secuencias BIO. Buena idea."
+    phase: deep_dive
+    description: "CRF layer"
+
+  - user_msg: "El paper de referencia es 'Named Entity Recognition in Spanish Legal Text' de Gonzalez et al 2023"
+    assistant_msg: "Ese paper es buena referencia. Comparan varios modelos pre-entrenados?"
+    phase: deep_dive
+    description: "Reference paper"
+
+  - user_msg: "Si, comparan BETO, RoBERTuito y un modelo multilingue. BETO gana para texto formal"
+    assistant_msg: "Tiene sentido, BETO fue entrenado con texto formal en espaniol."
+    phase: deep_dive
+    description: "Model comparison"
+
+  # ── Phase 3: Small Talk (turns 19-22) ──
+  - user_msg: "Uf, mucho NLP por hoy jaja. Necesito un descanso"
+    assistant_msg: "Jaja si, es denso. Que haces para descansar?"
+    phase: small_talk
+    description: "Break"
+    max_new_nodes: 1
+
+  - user_msg: "Juego videojuegos, estoy viciada con Zelda Tears of the Kingdom"
+    assistant_msg: "Tears of the Kingdom es increible. Tiene una fisica impresionante."
+    phase: small_talk
+    description: "Hobbies"
+    max_new_nodes: 2
+
+  - user_msg: "Si, llevo como 100 horas y todavia no termine la historia principal"
+    assistant_msg: "Es normal, Hyrule es enorme. Muchas cosas para explorar."
+    phase: small_talk
+    description: "Gaming"
+    max_new_nodes: 1
+
+  - user_msg: "Bueno, volvamos a lo academico que tengo parcial la semana que viene"
+    assistant_msg: "Dale, en que materia?"
+    phase: small_talk
+    description: "Transition back"
+    max_new_nodes: 1
+
+  # ── Phase 4: Databases (turns 23-32) ──
+  - user_msg: "En Bases de Datos 2. Estamos viendo bases de datos NoSQL y distribuidas"
+    assistant_msg: "BD2 es fascinante. Que engines estan viendo?"
+    phase: topic_change
+    description: "Switch to databases"
+
+  - user_msg: "Vimos MongoDB, Cassandra y Redis. Ahora estamos con el teorema CAP"
+    assistant_msg: "El teorema CAP es fundamental. Consistencia, Disponibilidad y Tolerancia a particiones."
+    phase: topic_change
+    description: "NoSQL databases"
+    expected_entities:
+      - label: "mongodb"
+      - label: "cassandra"
+      - label: "redis"
+
+  - user_msg: "MongoDB es CP, prioriza consistencia. Cassandra es AP, prioriza disponibilidad"
+    assistant_msg: "Exacto. Por eso Cassandra es mejor para sistemas que no pueden tener downtime."
+    phase: topic_change
+    description: "CAP classification"
+
+  - user_msg: "Tambien estamos viendo consenso distribuido con Raft y Paxos"
+    assistant_msg: "Raft es mas facil de entender que Paxos. Ambos resuelven el mismo problema."
+    phase: topic_change
+    description: "Consensus protocols"
+    expected_entities:
+      - label: "raft"
+
+  - user_msg: "Raft lo usa etcd que es el backend de Kubernetes para almacenar estado del cluster"
+    assistant_msg: "Si, etcd es critico para Kubernetes. Sin etcd, el cluster no funciona."
+    phase: topic_change
+    description: "Real-world usage"
+    expected_entities:
+      - label: "kubernetes"
+
+  - user_msg: "En el practico estamos implementando un key-value store distribuido con replicacion"
+    assistant_msg: "Excelente ejercicio. Usan algun framework o desde cero?"
+    phase: topic_change
+    description: "Practical exercise"
+
+  - user_msg: "Desde cero en Go, con gRPC para la comunicacion entre nodos"
+    assistant_msg: "Go y gRPC es la combinacion clasica para sistemas distribuidos."
+    phase: topic_change
+    description: "Implementation"
+    expected_entities:
+      - label: "go"
+
+  - user_msg: "Tenemos que implementar leader election, log replication y snapshots"
+    assistant_msg: "Los tres pilares de Raft. Leader election es lo mas complejo de hacer correcto."
+    phase: topic_change
+    description: "Raft components"
+
+  - user_msg: "Si, estamos testeando con Jepsen para verificar linearizabilidad"
+    assistant_msg: "Jepsen es el estandar para testing de sistemas distribuidos. Kyle Kingsbury es un crack."
+    phase: topic_change
+    description: "Testing"
+    expected_entities:
+      - label: "jepsen"
+
+  - user_msg: "El parcial va a ser sobre CAP, Raft y modelado de datos en Cassandra"
+    assistant_msg: "Estudia bien los trade-offs de cada approach. Eso es lo que siempre preguntan."
+    phase: topic_change
+    description: "Exam topics"
+
+  # ── Phase 5: Return to ML (turns 33-38) ──
+  - user_msg: "Volviendo a mi tesis de NER, se me ocurrio una idea para mejorar el modelo"
+    assistant_msg: "Dale, contame. Que idea tenes?"
+    phase: return
+    description: "Return to NER thesis"
+    checkpoint:
+      should_have_context: true
+      context_should_mention: ["Lucia"]
+
+  - user_msg: "Quiero usar data augmentation en el dataset juridico. Reemplazar entidades por otras del mismo tipo"
+    assistant_msg: "Entity replacement augmentation es efectivo para NER. Mantiene el contexto y varia las entidades."
+    phase: return
+    description: "Data augmentation"
+
+  - user_msg: "Tambien quiero probar con un modelo mas nuevo, RoBERTa en espaniol que salio hace poco"
+    assistant_msg: "MarIA de la BSC es un buen RoBERTa en espaniol. Entrenado con datos mas recientes que BETO."
+    phase: return
+    description: "New model"
+
+  - user_msg: "Si, MarIA! La quiero comparar con BETO. El Dr. Martinez me sugiero tambien probar con Llama fine-tuned"
+    assistant_msg: "Fine-tuning de Llama para NER es mas costoso pero puede dar mejores resultados."
+    phase: return
+    description: "Model comparison plan"
+    expected_entities:
+      - label: "maria"
+
+  - user_msg: "El problema es que Llama necesita GPU y en la UBA las maquinas no son muy potentes"
+    assistant_msg: "Podes usar Google Colab Pro o solicitar creditos de GPU en cloud."
+    phase: return
+    description: "Resource constraints"
+
+  - user_msg: "Si, el CONICET tiene convenio con Google Cloud para creditos de investigacion"
+    assistant_msg: "Perfecto, los creditos de GCP te darian acceso a A100s para fine-tuning."
+    phase: return
+    description: "Resource solution"
+
+  # ── Phase 6: Thesis Discussion (turns 39-46) ──
+  - user_msg: "Mi plan de tesis tiene 3 capitulos: estado del arte, experimentos y resultados"
+    assistant_msg: "Estructura clasica. Cuanto llevas del estado del arte?"
+    phase: new_domain
+    description: "Thesis structure"
+
+  - user_msg: "El estado del arte ya esta casi listo, llevo 30 paginas sobre NER y NLP en espaniol"
+    assistant_msg: "30 paginas de survey es solido. Cubriste los enfoques recientes con Transformers?"
+    phase: new_domain
+    description: "Literature review"
+
+  - user_msg: "Si, cubri desde CRF clasico hasta BERT, pasando por BiLSTM-CRF que fue el state of the art antes"
+    assistant_msg: "Buena progresion historica. BiLSTM-CRF fue dominante hasta 2018 con BERT."
+    phase: new_domain
+    description: "Historical survey"
+
+  - user_msg: "Los experimentos los planeo con 3 configuraciones: BETO baseline, BETO+CRF, y BETO+augmentation"
+    assistant_msg: "Tres configuraciones te dan una buena ablation study. Falta MarIA como cuarta?"
+    phase: new_domain
+    description: "Experiment design"
+
+  - user_msg: "Si, agrego MarIA como cuarta. Y si consigo GPU, Llama como quinta"
+    assistant_msg: "Cinco configuraciones es un estudio completo. Muy competitivo para publicar."
+    phase: new_domain
+    description: "Extended experiments"
+
+  - user_msg: "El Dr. Martinez quiere que apunte a publicar en la JAIIO, la conferencia de informatica argentina"
+    assistant_msg: "JAIIO es la conferencia principal en Argentina. Buena meta."
+    phase: new_domain
+    description: "Publication goal"
+    expected_entities:
+      - label: "jaiio"
+
+  - user_msg: "El deadline de JAIIO es en junio, asi que tengo que tener resultados para mayo"
+    assistant_msg: "Mayo para resultados es ajustado pero factible si ya tenes el dataset y el baseline."
+    phase: new_domain
+    description: "Timeline"
+
+  - user_msg: "Si, el plan es: abril para experimentos, mayo para analisis y escritura, junio para submit"
+    assistant_msg: "Un mes por fase es razonable. No dejes la escritura para el final."
+    phase: new_domain
+    description: "Schedule"
+
+  # ── Phase 7: Cross-References (turns 47-50) ──
+  - user_msg: "Es interesante como bases de datos y ML se conectan. Mi NER necesita una base para almacenar el corpus anotado"
+    assistant_msg: "Si, muchos usan MongoDB para almacenar datasets de NLP por la flexibilidad del schema."
+    phase: stress
+    description: "DB-ML connection"
+
+  - user_msg: "Si, estoy usando MongoDB para el corpus. Cada sentencia es un documento con sus anotaciones"
+    assistant_msg: "MongoDB para NLP es comun. Los documentos anidados mapean bien las anotaciones."
+    phase: stress
+    description: "MongoDB for NLP"
+
+  - user_msg: "Y para serving del modelo estoy pensando usar FastAPI con un Redis cache para predicciones frecuentes"
+    assistant_msg: "FastAPI + Redis es un stack de serving excelente. Baja latencia."
+    phase: stress
+    description: "Model serving"
+    expected_entities:
+      - label: "fastapi"
+
+  - user_msg: "Bueno, creo que te conte todo. Mi tesis, las materias que me faltan y el plan de publicacion"
+    assistant_msg: "Si, un panorama muy completo. Exitos con la JAIIO y las materias!"
+    phase: stress
+    description: "Summary"

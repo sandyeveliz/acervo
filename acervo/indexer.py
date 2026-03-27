@@ -230,9 +230,9 @@ class Indexer:
 
                     enrichment = await self._enricher.enrich_file(structure, content)
 
-                    # Store embeddings in vector DB
+                    # Store embeddings in vector DB + link chunk_ids to graph nodes
                     if enrichment.chunks and self._vector_store:
-                        await self._store_embeddings(enrichment.chunks)
+                        await self._store_and_link_chunks(structure, enrichment.chunks)
 
                     # Attach summaries to graph nodes
                     if enrichment.summaries:
@@ -324,21 +324,50 @@ class Indexer:
                 edge_type="structural",
             )
 
-    # ── Storage: embeddings ──
+    # ── Storage: embeddings + chunk linkage ──
 
-    async def _store_embeddings(self, chunks: list[ChunkEmbedding]) -> None:
-        """Store chunk embeddings in the vector store."""
-        if not self._vector_store:
+    async def _store_and_link_chunks(
+        self,
+        structure: FileStructure,
+        chunks: list[ChunkEmbedding],
+    ) -> None:
+        """Store chunk embeddings in vector DB and link chunk_ids to graph nodes."""
+        if not self._vector_store or not chunks:
             return
 
-        for chunk in chunks:
-            try:
-                await self._vector_store.index_file_chunks(
-                    chunk.file_path,
-                    [chunk.content],
-                )
-            except Exception as e:
-                log.warning("Vector store error for %s: %s", chunk.file_path, e)
+        file_id = _make_id(structure.file_path)
+
+        try:
+            # Store ALL chunks for this file in one call (fixes the bug where
+            # per-chunk calls to index_file_chunks removed previous chunks)
+            stored_ids = await self._vector_store.index_file_chunks(
+                file_path=chunks[0].file_path,
+                chunks=[c.content for c in chunks],
+                chunk_ids=[c.chunk_id for c in chunks],
+                embeddings=[c.embedding for c in chunks],
+                extra_metadata={"file_id": file_id},
+            )
+
+            # Link ALL chunk_ids to the file node
+            all_chunk_ids = [c.chunk_id for c in chunks]
+            self._graph.link_chunks(file_id, all_chunk_ids)
+
+            # Link chunk_ids to section/symbol nodes by line range overlap
+            for unit in structure.units:
+                node_id = make_symbol_id(structure.file_path, unit.name, unit.parent)
+                matching_ids = [
+                    c.chunk_id for c in chunks
+                    if c.line_start >= unit.start_line and c.line_end <= unit.end_line
+                ]
+                if matching_ids:
+                    self._graph.link_chunks(node_id, matching_ids)
+
+            log.info(
+                "Stored %d chunks and linked to %s (%d sections)",
+                len(stored_ids), structure.file_path, len(structure.units),
+            )
+        except Exception as e:
+            log.warning("Chunk storage/linkage error for %s: %s", structure.file_path, e)
 
     # ── Storage: semantic summaries ──
 

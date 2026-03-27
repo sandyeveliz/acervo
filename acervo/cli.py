@@ -168,6 +168,25 @@ def cmd_index(args: argparse.Namespace) -> None:
 
     graph = TopicGraph(project.graph_path)
 
+    # Set up vector store (for chunk storage + linkage)
+    vector_store = None
+    if embedder:
+        try:
+            from acervo.vector_store import ChromaVectorStore
+            vectordb_path = project.acervo_dir / "data" / "vectordb"
+            vectordb_path.mkdir(parents=True, exist_ok=True)
+            embed_batch_fn = getattr(embedder, "embed_batch", None)
+            vector_store = ChromaVectorStore(
+                persist_path=str(vectordb_path),
+                embed_fn=embedder.embed,
+                embed_batch_fn=embed_batch_fn,
+            )
+            print("Vector store: enabled")
+        except ImportError:
+            print("Vector store: disabled (chromadb not installed)")
+        except Exception as e:
+            print(f"Vector store: disabled ({e})")
+
     # Progress callback
     def on_event(event: object) -> None:
         if isinstance(event, IndexingStarted):
@@ -187,6 +206,7 @@ def cmd_index(args: argparse.Namespace) -> None:
         graph=graph,
         llm=llm,
         embedder=embedder,
+        vector_store=vector_store,
         on_event=on_event,
     )
 
@@ -206,7 +226,8 @@ def cmd_index(args: argparse.Namespace) -> None:
     print(f"  Graph:       {result.total_nodes} nodes, {result.total_edges} edges")
     print(f"  Dependencies: {result.dependency_edges} import edges")
     if result.total_chunks:
-        print(f"  Embeddings:  {result.total_chunks} chunks")
+        nodes_with_chunks = len(graph.get_nodes_with_chunks())
+        print(f"  Chunks:      {result.total_chunks} chunks → {nodes_with_chunks} nodes linked")
     if result.total_summaries:
         print(f"  Summaries:   {result.total_summaries} semantic summaries")
     if result.errors:
@@ -289,6 +310,12 @@ def cmd_status(args: argparse.Namespace) -> None:
     else:
         print("\nNo stale files.")
 
+    # Dependency status (quick health check)
+    if config.has_services_config():
+        from acervo.services import check_dependencies, format_dep_check
+        deps = check_dependencies(config)
+        print()
+        print(format_dep_check(deps))
 
 def cmd_serve(args: argparse.Namespace) -> None:
     """Start the transparent LLM proxy server."""
@@ -310,6 +337,76 @@ def cmd_serve(args: argparse.Namespace) -> None:
         asyncio.run(proxy.start(host=args.host, port=port))
     except KeyboardInterrupt:
         pass
+
+
+def cmd_up(args: argparse.Namespace) -> None:
+    """Start Acervo proxy (default) or full dev stack (--dev)."""
+    _load_env(args.env)
+    project = _require_project()
+    config = project.config
+
+    if args.dev:
+        # Dev mode: all services with multiplexed logs
+        from acervo.services import DevRunner
+        runner = DevRunner(config, project.acervo_dir)
+        try:
+            asyncio.run(runner.run())
+        except KeyboardInterrupt:
+            pass
+        return
+
+    # Default mode: proxy only, with dependency check
+    from acervo.services import check_dependencies, format_dep_check, _banner
+    from acervo.proxy import AcervoProxy
+
+    port = args.port or config.proxy.port
+    target = args.target or config.proxy.target
+    config.proxy.port = port
+    config.proxy.target = target
+
+    print(_banner(dev=False))
+    deps = check_dependencies(config)
+    print(format_dep_check(deps))
+    print()
+
+    proxy = AcervoProxy(config, project.config_path)
+    try:
+        asyncio.run(proxy.start(host=args.host, port=port))
+    except KeyboardInterrupt:
+        pass
+
+
+def cmd_graph(args: argparse.Namespace) -> None:
+    """Graph inspection and editing commands."""
+    from acervo.graph import TopicGraph
+    from acervo.graph_cli import (
+        cmd_graph_show, cmd_graph_search, cmd_graph_delete, cmd_graph_merge,
+    )
+
+    project = _require_project()
+    graph = TopicGraph(project.graph_path)
+
+    action = args.graph_action
+    if action == "show":
+        cmd_graph_show(graph, args.entity_id, args.kind, args.json)
+    elif action == "search":
+        cmd_graph_search(graph, args.query, args.kind, args.json)
+    elif action == "delete":
+        cmd_graph_delete(graph, args.entity_id, args.yes)
+    elif action == "merge":
+        cmd_graph_merge(graph, args.keep_id, args.absorb_id, args.yes)
+    elif action == "repair":
+        report = graph.repair()
+        total = sum(report.values())
+        if total == 0:
+            print("Graph is healthy — no repairs needed.")
+        else:
+            print(f"Repaired graph: {report['removed_nodes']} bad nodes removed, "
+                  f"{report['removed_edges']} orphan edges removed, "
+                  f"{report['deduped_edges']} duplicate edges removed, "
+                  f"{report['fixed_fields']} missing fields fixed.")
+    else:
+        args._graph_parser.print_help()
 
 
 def cmd_config(args: argparse.Namespace) -> None:
@@ -365,13 +462,20 @@ def _scan_workspace(project: AcervoProject) -> list[Path]:
 
 def main() -> None:
     """CLI entry point."""
-    logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
+    from acervo.log_config import setup_logging
 
     parser = argparse.ArgumentParser(
         prog="acervo",
         description="Acervo — context proxy for AI agents",
     )
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging")
+    parser.add_argument(
+        "--log-level",
+        choices=["trace", "debug", "info", "warning", "error"],
+        default="warning",
+        help="Log verbosity (default: warning)",
+    )
+    parser.add_argument("-v", "--verbose", action="store_true", help="Shorthand for --log-level debug")
+    parser.add_argument("--no-color", action="store_true", help="Disable colored log output")
     sub = parser.add_subparsers(dest="command")
 
     # init
@@ -416,6 +520,52 @@ def main() -> None:
     serve_p.add_argument("--env", default=".env", help="Path to .env file")
     serve_p.set_defaults(func=cmd_serve)
 
+    # trace
+    trace_p = sub.add_parser("trace", help="Show per-turn trace data")
+    trace_p.add_argument("action", nargs="?", default="show", choices=["show"], help="Action (default: show)")
+    trace_p.add_argument("--session", default=None, help="Session ID (default: latest)")
+    trace_p.set_defaults(func=cmd_trace)
+
+    # up
+    up_p = sub.add_parser("up", help="Start Acervo proxy (or full stack with --dev)")
+    up_p.add_argument("--dev", action="store_true", help="Dev mode: start all services with tagged logs")
+    up_p.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
+    up_p.add_argument("--port", type=int, default=None, help="Proxy port (default: from config, 9470)")
+    up_p.add_argument("--target", default=None, help="Upstream API URL (default: from config)")
+    up_p.add_argument("--env", default=".env", help="Path to .env file")
+    up_p.set_defaults(func=cmd_up)
+
+    # graph
+    graph_p = sub.add_parser("graph", help="Inspect and edit the knowledge graph")
+    graph_p.set_defaults(func=cmd_graph, _graph_parser=graph_p)
+    graph_sub = graph_p.add_subparsers(dest="graph_action")
+
+    # graph show [entity_id]
+    graph_show_p = graph_sub.add_parser("show", help="List nodes or show node detail")
+    graph_show_p.add_argument("entity_id", nargs="?", default=None, help="Node ID for detail view")
+    graph_show_p.add_argument("--kind", default=None, help="Filter by kind (entity, file, symbol, section)")
+    graph_show_p.add_argument("--json", action="store_true", help="JSON output")
+
+    # graph search <query>
+    graph_search_p = graph_sub.add_parser("search", help="Search nodes by label and facts")
+    graph_search_p.add_argument("query", help="Search text")
+    graph_search_p.add_argument("--kind", default=None, help="Filter by kind")
+    graph_search_p.add_argument("--json", action="store_true", help="JSON output")
+
+    # graph delete <entity_id>
+    graph_delete_p = graph_sub.add_parser("delete", help="Delete a node and its edges")
+    graph_delete_p.add_argument("entity_id", help="Node ID to delete")
+    graph_delete_p.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
+
+    # graph merge <keep_id> <absorb_id>
+    graph_merge_p = graph_sub.add_parser("merge", help="Merge two nodes (keep first, absorb second)")
+    graph_merge_p.add_argument("keep_id", help="Node ID to keep")
+    graph_merge_p.add_argument("absorb_id", help="Node ID to absorb (will be deleted)")
+    graph_merge_p.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
+
+    # graph repair
+    graph_sub.add_parser("repair", help="Detect and fix graph corruption")
+
     # config
     config_p = sub.add_parser("config", help="Get or set config values")
     config_p.add_argument("action", choices=["get", "set"], help="Action: get or set")
@@ -425,8 +575,11 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+    log_level = args.log_level
+    if args.verbose and log_level == "warning":
+        log_level = "debug"
+    color = not args.no_color
+    setup_logging(level=log_level, color=color)
 
     if hasattr(args, "func"):
         args.func(args)

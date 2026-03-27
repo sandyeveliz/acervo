@@ -31,9 +31,12 @@ log = logging.getLogger(__name__)
 # ── Fixed system prompt for the fine-tuned extractor model ──
 
 _SYSTEM_PROMPT = (
-    "You are a knowledge extractor for a personal knowledge graph. "
+    "You are a strict knowledge extractor for a personal knowledge graph. "
     "Analyze the conversation and return a single JSON object with topic "
     "classification, entities, relations, and facts. "
+    "Only extract entities that are EXPLICITLY named in the conversation. "
+    "Do not infer entities, relations, or facts that are not directly stated. "
+    "If an entity is referenced by nickname or shortened name, use ONLY that form. "
     "Output valid JSON only, no markdown, no explanation."
 )
 
@@ -232,6 +235,22 @@ class S1Unified:
 
         raw = _clean_response(raw_response)
         result = _parse_s1_response(raw)
+
+        # Retry once with lower temperature if JSON parse failed
+        if result.extraction == ExtractionResult() and result.topic.action == "same" and result.topic.label is None:
+            obj = _parse_first_json(raw, "object")
+            if not isinstance(obj, dict):
+                log.info("S1 Unified: retrying with temperature=0.0 after JSON parse failure")
+                try:
+                    raw_response = await self._llm.chat(
+                        messages,
+                        temperature=0.0,
+                        max_tokens=2048,
+                    )
+                    raw = _clean_response(raw_response)
+                    result = _parse_s1_response(raw)
+                except Exception as e:
+                    log.warning("S1 Unified retry failed: %s", e)
 
         # Validate extraction against conversation text
         combined_text = f"{user_msg} {prev_assistant_msg}"

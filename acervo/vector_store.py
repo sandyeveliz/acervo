@@ -7,6 +7,7 @@ chromadb is an optional dependency — only imported when this module is used.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Callable, Awaitable
 
 log = logging.getLogger(__name__)
@@ -14,6 +15,16 @@ log = logging.getLogger(__name__)
 # Chunk size for splitting long file content
 _CHUNK_SIZE = 500  # characters
 _CHUNK_OVERLAP = 50
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Compute cosine similarity between two vectors."""
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(x * x for x in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
 
 
 def _chunk_text(text: str, size: int = _CHUNK_SIZE, overlap: int = _CHUNK_OVERLAP) -> list[str]:
@@ -135,36 +146,119 @@ class ChromaVectorStore:
         )
         log.info("Indexed %d facts for node '%s'", len(ids), label)
 
-    async def index_file_chunks(self, file_path: str, chunks: list[str]) -> None:
-        """Embed and index chunks from a file."""
+    async def index_file_chunks(
+        self,
+        file_path: str,
+        chunks: list[str],
+        chunk_ids: list[str] | None = None,
+        embeddings: list[list[float]] | None = None,
+        extra_metadata: dict | None = None,
+    ) -> list[str]:
+        """Embed and index chunks from a file.
+
+        Args:
+            file_path: Source file path.
+            chunks: Chunk text content.
+            chunk_ids: Use these as ChromaDB IDs (instead of auto-generated).
+            embeddings: Pre-computed embeddings (skip re-embedding).
+            extra_metadata: Extra metadata merged into each chunk's metadata.
+
+        Returns:
+            List of stored chunk IDs.
+        """
         if not chunks:
-            return
+            return []
         # Remove old chunks for this file
         self.remove_file(file_path)
 
         documents = [chunk for chunk in chunks if chunk.strip()]
         if not documents:
-            return
+            return []
 
         normalized = file_path.replace("\\", "/")
-        file_id = normalized.replace("/", "_").replace(".", "_")
 
-        # Batch embed all chunks in one HTTP call
-        if self._embed_batch:
-            embeddings = await self._embed_batch(documents)
+        # Use provided embeddings or compute them
+        if embeddings:
+            vecs = embeddings
+        elif self._embed_batch:
+            vecs = await self._embed_batch(documents)
         else:
-            embeddings = [await self._embed(doc) for doc in documents]
+            vecs = [await self._embed(doc) for doc in documents]
 
-        ids = [f"{file_id}_c{i}" for i in range(len(documents))]
+        # Use provided chunk_ids or generate auto IDs
+        if chunk_ids:
+            ids = chunk_ids[:len(documents)]
+        else:
+            file_id = normalized.replace("/", "_").replace(".", "_")
+            ids = [f"{file_id}_c{i}" for i in range(len(documents))]
+
         metadatas = [{"file_path": normalized, "chunk_index": i} for i in range(len(documents))]
+        if extra_metadata:
+            for m in metadatas:
+                m.update(extra_metadata)
 
         self._files.add(
             ids=ids,
             documents=documents,
-            embeddings=embeddings,
+            embeddings=vecs,
             metadatas=metadatas,
         )
         log.info("Indexed %d chunks for file '%s'", len(ids), file_path)
+        return ids
+
+    async def search_by_chunk_ids(
+        self,
+        chunk_ids: list[str],
+        query_embedding: list[float],
+        n_results: int = 3,
+    ) -> list[dict]:
+        """Retrieve chunks by IDs and rank by cosine similarity to query.
+
+        Fetches the specified chunks from ChromaDB, then ranks them against
+        the query embedding. Efficient for small sets (typical: 3-30 chunks per node).
+        """
+        if not chunk_ids:
+            return []
+
+        try:
+            results = self._files.get(
+                ids=chunk_ids,
+                include=["documents", "metadatas", "embeddings"],
+            )
+        except Exception as e:
+            log.warning("search_by_chunk_ids get failed: %s", e)
+            return []
+
+        if not results or not results.get("documents"):
+            return []
+
+        # Rank by cosine similarity
+        scored: list[dict] = []
+        embeddings = results.get("embeddings")
+        metadatas = results.get("metadatas")
+        for i, doc in enumerate(results["documents"]):
+            meta = metadatas[i] if metadatas is not None else {}
+            emb = embeddings[i] if embeddings is not None else None
+            score = _cosine_similarity(query_embedding, list(emb)) if emb is not None else 0.0
+            scored.append({
+                "text": doc,
+                "chunk_id": results["ids"][i],
+                "file_path": meta.get("file_path", ""),
+                "source": "node_scoped_chunk",
+                "score": score,
+            })
+
+        scored.sort(key=lambda r: r["score"], reverse=True)
+        return scored[:n_results]
+
+    def remove_by_chunk_ids(self, chunk_ids: list[str]) -> None:
+        """Remove specific chunks by their IDs."""
+        if not chunk_ids:
+            return
+        try:
+            self._files.delete(ids=chunk_ids)
+        except Exception as e:
+            log.warning("remove_by_chunk_ids failed: %s", e)
 
     def remove_node(self, node_id: str) -> None:
         """Remove all indexed facts for a node."""

@@ -41,7 +41,7 @@ tree-sitter = [
 ]
 docs = ["mkdocs-material"]
 dev = [
-    "pytest", "pytest-asyncio", "mkdocs-material", "aiohttp>=3.9",
+    "pytest", "pytest-asyncio", "pyyaml", "mkdocs-material", "aiohttp>=3.9",
     "tree-sitter>=0.23", "tree-sitter-python>=0.23",
     "tree-sitter-javascript>=0.23", "tree-sitter-typescript>=0.23",
     "tree-sitter-html>=0.23", "tree-sitter-css>=0.23",
@@ -57,6 +57,9 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 markers = [
     "integration: requires a running LLM server (deselect with -m 'not integration')",
+    "benchmark: comparative benchmarks with/without Acervo",
+    "quick: fast scenarios (01-04) for dev iteration (~15 min)",
+    "full: long-running scenarios (05-06) for publishable reports (~1 hour)",
 ]
 asyncio_mode = "auto"
 testpaths = ["tests"]
