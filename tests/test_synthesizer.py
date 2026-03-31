@@ -23,55 +23,50 @@ def test_synthesize_empty_graph():
     assert result == ""
 
 
-def test_synthesize_hot_node_with_facts():
-    """Hot nodes with facts are included in context."""
+def test_synthesize_active_node_with_facts():
+    """Active nodes with facts are included in context."""
     graph = _make_graph()
     graph.upsert_entities(
         entities=[("Sandy", "Person")],
         facts=[("Sandy", "Sandy vive en Cipolletti", "user")],
     )
-    # upsert sets status to "hot"
-    result = synthesize(graph, "Sandy")
+    # Pass Sandy's ID as active
+    result = synthesize(graph, "Sandy", active_node_ids={"sandy"})
     assert "Sandy" in result
     assert "Cipolletti" in result
 
 
-def test_synthesize_cold_node_excluded():
-    """Cold nodes are not included in context."""
+def test_synthesize_inactive_node_excluded():
+    """Nodes not in active set are excluded (unless message-relevant fallback)."""
     graph = _make_graph()
     graph.upsert_entities(
         entities=[("Sandy", "Person")],
         facts=[("Sandy", "Sandy vive en Cipolletti", "user")],
     )
-    # Cycle twice: hot -> warm -> cold
-    graph.cycle_status()
-    graph.cycle_status()
-
-    result = synthesize(graph, "something else")
+    # Empty active set, message doesn't mention Sandy
+    result = synthesize(graph, "something else", active_node_ids=set())
     assert "Sandy" not in result
 
 
-def test_synthesize_warm_node_only_if_mentioned():
-    """Warm nodes only included if the message mentions them."""
+def test_synthesize_fallback_relevance():
+    """Without active_node_ids, falls back to message-based relevance."""
     graph = _make_graph()
     graph.upsert_entities(
         entities=[("River Plate", "Organization")],
         facts=[("River Plate", "Club de futbol argentino", "user")],
     )
-    # Cycle once: hot -> warm
-    graph.cycle_status()
-
-    # Not mentioned -> not included
+    # No active_node_ids → fallback to relevance matching
+    # Not mentioned → not included
     result_no_mention = synthesize(graph, "something else")
     assert "River" not in result_no_mention
 
-    # Mentioned -> included
+    # Mentioned → included via fallback
     result_mentioned = synthesize(graph, "que sabes de River Plate")
     assert "River" in result_mentioned
 
 
 def test_synthesize_neighbor_traversal():
-    """Neighbors of hot nodes with facts are included."""
+    """Neighbors of active nodes with facts are included."""
     graph = _make_graph()
     graph.upsert_entities(
         entities=[("Sandy", "Person"), ("Cipolletti", "Place")],
@@ -81,8 +76,8 @@ def test_synthesize_neighbor_traversal():
             ("Cipolletti", "Ciudad en Rio Negro", "user"),
         ],
     )
-    result = synthesize(graph, "Sandy")
-    # Sandy is hot -> Cipolletti is a neighbor with facts -> both included
+    result = synthesize(graph, "Sandy", active_node_ids={"sandy"})
+    # Sandy is active -> Cipolletti is a neighbor with facts -> both included
     assert "Sandy" in result
     assert "Cipolletti" in result
 

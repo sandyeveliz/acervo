@@ -86,10 +86,12 @@ class SemanticEnricher:
         llm: LLMClient | None = None,
         embedder: Embedder | None = None,
         concurrency: int = 4,
+        content_type: str = "auto",
     ) -> None:
         self._llm = llm
         self._embedder = embedder
         self._concurrency = concurrency
+        self._content_type = content_type
 
     async def enrich_file(
         self,
@@ -103,6 +105,9 @@ class SemanticEnricher:
             return EnrichmentResult(
                 file_path=structure.file_path, chunks=[], summaries=[],
             )
+
+        # Resolve content type once per batch (auto-detection uses chunk stats)
+        self._effective_content_type = self._resolve_content_type(chunks)
 
         # Run embeddings and summaries in parallel
         embed_task = self._generate_embeddings(chunks)
@@ -311,11 +316,35 @@ class SemanticEnricher:
         raw = await asyncio.gather(*tasks)
         return [r for r in raw if r is not None]
 
-    async def _summarize_chunk(self, chunk: Chunk) -> SemanticSummary:
-        """Call the 3B LLM to generate a semantic summary for one chunk."""
-        prompt = f"""Analyze this code chunk and provide:
+    def _resolve_content_type(self, chunks: list[Chunk]) -> str:
+        """Determine content type. If 'auto', detect from chunk languages."""
+        if self._content_type != "auto":
+            return self._content_type
+        if not chunks:
+            return "code"
+        markdown_count = sum(1 for c in chunks if c.language == "markdown")
+        return "prose" if markdown_count / len(chunks) > 0.7 else "code"
+
+    def _build_summary_prompt(self, chunk: Chunk, content_type: str) -> str:
+        """Build the LLM prompt for semantic summarization."""
+        if content_type == "prose":
+            return f"""Analyze this text passage and provide:
+1. A 1-2 sentence summary of what happens or what it covers
+2. A flat list of topic strings: characters, locations, themes, plot elements, time periods, objects, or concepts mentioned
+3. Any relationships to other parts of the work (e.g., "introduces character X", "references events from chapter Y", "continues the theme of Z")
+
+File: {chunk.file_path}
+Section: {chunk.entity_name} ({chunk.entity_kind})
+
+Text:
+{chunk.content[:3000]}
+
+Respond ONLY with valid JSON, no markdown. Topics must be plain strings, not objects:
+{{"summary": "one sentence", "topics": ["Harry Potter", "Hogwarts", "magic"], "implicit_relations": ["introduces X", "references Y"]}}"""
+
+        return f"""Analyze this code chunk and provide:
 1. A 1-2 sentence summary of what it does
-2. A list of semantic topics (e.g., authentication, database, CRUD, validation, routing, UI rendering)
+2. A flat list of topic strings (e.g., authentication, database, CRUD, validation, routing, UI rendering)
 3. Any implicit relationships not visible from imports (e.g., "this middleware protects these routes by convention", "this is called when the user clicks submit")
 
 File: {chunk.file_path}
@@ -325,11 +354,25 @@ Entity: {chunk.entity_name} ({chunk.entity_kind})
 Code:
 {chunk.content[:3000]}
 
-Respond in JSON format:
-{{"summary": "...", "topics": ["...", "..."], "implicit_relations": ["...", "..."]}}"""
+Respond ONLY with valid JSON, no markdown. Topics must be plain strings, not objects:
+{{"summary": "one sentence", "topics": ["auth", "database"], "implicit_relations": ["calls X", "used by Y"]}}"""
+
+    _ENRICHER_SYSTEM_PROMPT = (
+        "You are a strict semantic analyzer. "
+        "Analyze text or code and return a single JSON object with summary, topics, and implicit_relations. "
+        "Topics must be a flat list of plain strings — never objects or nested structures. "
+        "Output valid JSON only, no markdown, no explanation."
+    )
+
+    async def _summarize_chunk(self, chunk: Chunk) -> SemanticSummary:
+        """Call the LLM to generate a semantic summary for one chunk."""
+        prompt = self._build_summary_prompt(chunk, self._effective_content_type)
 
         response = await self._llm.chat(
-            [{"role": "user", "content": prompt}],
+            [
+                {"role": "system", "content": self._ENRICHER_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
             temperature=0.0,
             max_tokens=300,
         )

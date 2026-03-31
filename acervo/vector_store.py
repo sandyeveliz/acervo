@@ -279,6 +279,81 @@ class ChromaVectorStore:
         except Exception:
             pass
 
+    # -- Read-only inspection methods (no embedding needed) --
+
+    def get_collection_stats(self) -> dict:
+        """Return chunk/fact counts from both collections."""
+        return {
+            "facts_count": self._facts.count(),
+            "files_count": self._files.count(),
+        }
+
+    def get_all_file_chunks(self, file_path: str | None = None) -> list[dict]:
+        """Retrieve all file chunks, optionally filtered by file_path.
+
+        Returns list of {chunk_id, file_path, chunk_index, content}.
+        No embedding needed — uses ChromaDB get().
+        """
+        kwargs: dict = {"include": ["documents", "metadatas"]}
+        if file_path:
+            normalized = file_path.replace("\\", "/")
+            kwargs["where"] = {"file_path": normalized}
+
+        try:
+            results = self._files.get(**kwargs)
+        except Exception as e:
+            log.warning("get_all_file_chunks failed: %s", e)
+            return []
+
+        if not results or not results.get("ids"):
+            return []
+
+        chunks = []
+        for i, chunk_id in enumerate(results["ids"]):
+            meta = results["metadatas"][i] if results.get("metadatas") else {}
+            doc = results["documents"][i] if results.get("documents") else ""
+            chunks.append({
+                "chunk_id": chunk_id,
+                "file_path": meta.get("file_path", ""),
+                "chunk_index": meta.get("chunk_index", 0),
+                "content": doc,
+            })
+
+        chunks.sort(key=lambda c: (c["file_path"], c["chunk_index"]))
+        return chunks
+
+    def get_chunks_by_ids(self, chunk_ids: list[str]) -> list[dict]:
+        """Retrieve chunks by their IDs without ranking (no embedding needed).
+
+        Returns list of {chunk_id, file_path, chunk_index, content}.
+        """
+        if not chunk_ids:
+            return []
+
+        try:
+            results = self._files.get(
+                ids=chunk_ids,
+                include=["documents", "metadatas"],
+            )
+        except Exception as e:
+            log.warning("get_chunks_by_ids failed: %s", e)
+            return []
+
+        if not results or not results.get("ids"):
+            return []
+
+        chunks = []
+        for i, chunk_id in enumerate(results["ids"]):
+            meta = results["metadatas"][i] if results.get("metadatas") else {}
+            doc = results["documents"][i] if results.get("documents") else ""
+            chunks.append({
+                "chunk_id": chunk_id,
+                "file_path": meta.get("file_path", ""),
+                "chunk_index": meta.get("chunk_index", 0),
+                "content": doc,
+            })
+        return chunks
+
     @staticmethod
     def chunk_text(text: str) -> list[str]:
         """Public access to chunking utility."""

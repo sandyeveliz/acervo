@@ -76,8 +76,8 @@ async def test_materialize_returns_context():
 
 
 @pytest.mark.asyncio
-async def test_cycle_status_demotes():
-    """cycle_status demotes hot -> warm -> cold."""
+async def test_find_active_node_ids():
+    """_find_active_node_ids returns IDs of mentioned nodes."""
     response = json.dumps({
         "entities": [{"name": "Sandy", "type": "persona"}],
         "relations": [],
@@ -86,15 +86,17 @@ async def test_cycle_status_demotes():
     memory = _make_acervo(response)
     await memory.commit("Me llamo Sandy", "")
 
-    # After commit with user facts, node is "hot"
+    # Node exists but no runtime status on the node
     node = memory.graph.get_node("sandy")
-    assert node["status"] == "hot"
+    assert "status" not in node or node.get("status") not in ("hot", "warm", "cold")
 
-    memory.cycle_status()
-    assert node["status"] == "warm"
+    # Activation is ephemeral — returned as a set, not stored on node
+    active = memory._find_active_node_ids("Sandy", "none")
+    assert "sandy" in active
 
-    memory.cycle_status()
-    assert node["status"] == "cold"
+    # Different message — Sandy not mentioned
+    active2 = memory._find_active_node_ids("hello world", "none")
+    assert "sandy" not in active2
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,11 @@
 """Context Synthesizer — builds a compact context paragraph from graph nodes.
 
-Receives hot+warm nodes and the current message, returns a short paragraph
-that the LLM reads as context. No LLM calls — pure template logic.
+Receives active node IDs (determined by the caller) and the current message,
+returns a short paragraph that the LLM reads as context. No LLM calls — pure
+template logic.
+
+Node activation (what used to be hot/warm/cold status) is now the caller's
+responsibility. The synthesizer just renders whichever nodes it's told to.
 """
 
 from __future__ import annotations
@@ -16,10 +20,19 @@ _IDENTITY_PATTERNS = re.compile(
 )
 
 
-def synthesize(graph: TopicGraph, user_message: str) -> str:
-    """Build a compact context paragraph from hot and warm graph nodes.
+def synthesize(
+    graph: TopicGraph,
+    user_message: str,
+    active_node_ids: set[str] | None = None,
+) -> str:
+    """Build a compact context paragraph from active graph nodes.
 
-    Hot nodes always included. Warm nodes only if relevant to the message.
+    Args:
+        graph: The knowledge graph.
+        user_message: Current user message (used for relevance filtering).
+        active_node_ids: Set of node IDs to include. If None, falls back to
+            message-based relevance matching across all entity nodes.
+
     Returns an empty string if there's nothing relevant to inject.
     """
     parts: list[str] = []
@@ -29,30 +42,37 @@ def synthesize(graph: TopicGraph, user_message: str) -> str:
     if identity:
         parts.append(f"Note: in previous sessions the user identified as {identity}.")
 
-    hot_nodes = graph.get_nodes_by_status("hot")
-    warm_nodes = graph.get_nodes_by_status("warm")
+    # Determine which nodes to consider
+    has_explicit_set = active_node_ids is not None
+    if has_explicit_set:
+        candidate_nodes = graph.get_nodes_by_ids(active_node_ids)
+    else:
+        # Fallback: match all nodes by relevance to the message
+        candidate_nodes = graph.get_all_nodes()
 
-    if not hot_nodes and not warm_nodes and not parts:
+    if not candidate_nodes and not parts:
         return ""
 
     sections: list[str] = []
     included_ids: set[str] = set()
     msg_words = set(user_message.lower().split())
 
-    # Hot nodes: only include if they have facts or are mentioned in the message
-    for node in hot_nodes:
+    # Include nodes based on context:
+    # - With explicit active set: include if has facts OR is mentioned
+    # - Fallback mode: only include if mentioned (stricter — avoids dumping everything)
+    for node in candidate_nodes:
         label = node.get("label", "").lower()
         has_facts = bool(node.get("facts"))
         mentioned = label in user_message.lower() or any(
             len(w) >= 4 and label.startswith(w) for w in msg_words
         )
-        if has_facts or mentioned:
+        if (has_explicit_set and (has_facts or mentioned)) or (not has_explicit_set and mentioned):
             section = _render_node(node, graph)
             if section:
                 sections.append(section)
                 included_ids.add(node.get("id", ""))
 
-    # Neighbor traversal: for each included hot node, pull 1-level neighbors
+    # Neighbor traversal: for each included node, pull 1-level neighbors
     # that have facts. This brings related context without the user needing
     # to name every entity explicitly.
     neighbor_ids = _get_neighbor_ids(included_ids, graph)
@@ -65,16 +85,6 @@ def synthesize(graph: TopicGraph, user_message: str) -> str:
             if section:
                 sections.append(section)
                 included_ids.add(nid)
-
-    # Warm nodes: only if explicitly mentioned in the message
-    for node in warm_nodes:
-        if node.get("id", "") in included_ids:
-            continue
-        if _node_relevant(node, msg_words):
-            section = _render_node(node, graph)
-            if section:
-                sections.append(section)
-                included_ids.add(node.get("id", ""))
 
     if sections:
         parts.extend(sections)
@@ -116,25 +126,12 @@ def _find_user_identity(graph: TopicGraph) -> str | None:
     return None
 
 
-def _node_relevant(node: dict, msg_words: set[str]) -> bool:
-    """Check if a warm node is relevant to the user's message."""
-    label = node.get("label", "").lower()
-    # Check if any word from the label appears in the message
-    label_words = set(label.split())
-    if label_words & msg_words:
-        return True
-    # Check if any fact content matches a message word
-    for f in node.get("facts", []):
-        fact_words = set(f.get("fact", "").lower().split())
-        if len(fact_words & msg_words) >= 2:  # At least 2 words overlap
-            return True
-    return False
-
 
 def _render_node(node: dict, graph: TopicGraph) -> str:
     """Render a single node as a compact text block."""
     label = node.get("label", "?")
     ntype = node.get("type", "?")
+    kind = node.get("kind", "entity")
     session_count = node.get("session_count", 1)
 
     # Header
@@ -143,6 +140,16 @@ def _render_node(node: dict, graph: TopicGraph) -> str:
     # Session history indicator
     if session_count > 1:
         parts.append(f"Mentioned in {session_count} previous sessions.")
+
+    # For indexed nodes: show summary from attributes if no facts exist
+    if kind in ("file", "section", "symbol") and not node.get("facts"):
+        summary = node.get("attributes", {}).get("summary", "")
+        if summary:
+            parts.append(f"Summary: {summary}")
+        # Show file path for context
+        file_path = node.get("attributes", {}).get("file_path") or node.get("attributes", {}).get("path")
+        if file_path:
+            parts.append(f"File: {file_path}")
 
     # Facts grouped by source
     by_source: dict[str, list[str]] = {}
@@ -172,6 +179,10 @@ def _render_node(node: dict, graph: TopicGraph) -> str:
         parts.append("Relations:")
         for rel_label, rel_type in relations:
             parts.append(f"- {rel_type}: {rel_label}")
+
+    # Only return if we have more than just the header
+    if len(parts) <= 1:
+        return ""
 
     return "\n".join(parts)
 

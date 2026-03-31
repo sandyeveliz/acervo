@@ -21,7 +21,7 @@ from acervo.graph import TopicGraph, _make_id
 log = logging.getLogger(__name__)
 
 # Supported extensions for structural parsing
-_STRUCTURAL_EXTENSIONS = {".md", ".py", ".ts", ".tsx", ".js", ".jsx"}
+_STRUCTURAL_EXTENSIONS = {".md", ".py", ".ts", ".tsx", ".js", ".jsx", ".epub"}
 
 
 @dataclass
@@ -55,10 +55,10 @@ class FileIngestor:
         """Ingest a file: structural parse + LLM extraction."""
         from acervo.extractor import TextExtractor
 
-        content = file_path.read_text(encoding="utf-8")
         relative = str(file_path.relative_to(workspace_root)).replace("\\", "/")
         query = file_path.stem.replace("-", " ").replace("_", " ")
         is_markdown = file_path.suffix.lower() == ".md"
+        is_epub = file_path.suffix.lower() == ".epub"
 
         # Phase 1: Structural parsing (if parser available)
         symbols_created = 0
@@ -74,14 +74,21 @@ class FileIngestor:
                 log.info("File unchanged, skipping: %s", relative)
                 return IngestResult(file=relative, skipped=True)
 
+        # Read content (epub provides full_text from structural parse)
+        if structure and structure.full_text:
+            content = structure.full_text
+        else:
+            content = file_path.read_text(encoding="utf-8")
+
         # Phase 2: LLM extraction
         extractor = TextExtractor(self._llm)
         total_entities = 0
         total_facts = 0
         total_relations = 0
 
-        if is_markdown and structure and structure.units:
-            # Per-section extraction for markdown (better quality)
+        is_prose = is_markdown or is_epub
+        if is_prose and structure and structure.units:
+            # Per-section extraction for markdown/epub (better quality)
             lines = content.split("\n")
             for unit in structure.units:
                 section_text = "\n".join(lines[unit.start_line - 1 : unit.end_line])
@@ -101,7 +108,7 @@ class FileIngestor:
                     total_entities += len(result.entities)
                     total_facts += len(result.facts)
                     total_relations += len(result.relations)
-        elif is_markdown:
+        elif is_prose:
             # No structural parser — whole-file extraction (original flow)
             result = await extractor.extract(content, query=query)
             if result.entities:
@@ -122,7 +129,7 @@ class FileIngestor:
         self._graph.save()
 
         # Index file chunks into vector store if available
-        if self._vector_store and is_markdown:
+        if self._vector_store and is_prose:
             try:
                 from acervo.vector_store import ChromaVectorStore
                 chunks = ChromaVectorStore.chunk_text(content)

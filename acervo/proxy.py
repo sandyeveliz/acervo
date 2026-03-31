@@ -56,7 +56,9 @@ class AcervoProxy:
         self._app.router.add_get("/acervo/status", self._handle_status)
         self._app.router.add_get("/acervo/changelog", self._handle_changelog)
         self._app.router.add_post("/acervo/reset", self._handle_reset)
+        self._app.router.add_post("/acervo/reload-graph", self._handle_reload_graph)
         self._app.router.add_post("/acervo/clear", self._handle_clear)
+        self._app.router.add_post("/acervo/switch-project", self._handle_switch_project)
         self._app.router.add_get("/acervo/last-turn", self._handle_last_turn)
         self._app.router.add_get("/acervo/last-request", self._handle_last_request)
         self._app.router.add_get("/acervo/traces", self._handle_traces_list)
@@ -283,12 +285,14 @@ class AcervoProxy:
     async def _handle_status(self, request: web.Request) -> web.Response:
         """Return Acervo proxy status."""
         stats = self._acervo.get_graph_stats() if self._acervo else {}
+        project_root = str(self._config_path.parent.parent)
         return web.json_response({
             "status": "active" if self._acervo else "pass-through",
             "turns": self._turn_count,
             "changelog_entries": len(self._changelog),
             "target": self._config.proxy.target or "(from X-Forward-To header)",
             "graph": stats,
+            "project_path": project_root,
         })
 
     async def _handle_changelog(self, request: web.Request) -> web.Response:
@@ -305,6 +309,20 @@ class AcervoProxy:
         # Full reinit — rebuilds facade, topic detector, metrics, graph from disk
         await self._init_acervo()
         return web.json_response({"status": "reset"})
+
+    async def _handle_reload_graph(self, request: web.Request) -> web.Response:
+        """Reload graph from disk without resetting conversation state.
+
+        Called after external indexing writes new data to nodes.json/edges.json.
+        The proxy's in-memory graph would otherwise be stale (and overwrite the
+        new data on the next save()).
+        """
+        if self._acervo:
+            self._acervo.graph.reload()
+            stats = self._acervo.get_graph_stats()
+            log.info("Graph reloaded: %s", stats)
+            return web.json_response({"status": "reloaded", "graph": stats})
+        return web.json_response({"status": "no_acervo"}, status=503)
 
     async def _handle_clear(self, request: web.Request) -> web.Response:
         """Clear ALL Acervo data (graph + vectordb) and reinitialize clean.
@@ -346,6 +364,50 @@ class AcervoProxy:
             "status": "cleared",
             "deleted": deleted,
             "skipped": skipped,
+        })
+
+    async def _handle_switch_project(self, request: web.Request) -> web.Response:
+        """Switch the proxy to a different project's graph and config.
+
+        Body: {"project_path": "/absolute/path/to/project"}
+        Re-initializes the Acervo facade with the new project's .acervo/ directory.
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+
+        project_path = body.get("project_path", "")
+        if not project_path:
+            return web.json_response({"error": "project_path required"}, status=400)
+
+        new_root = Path(project_path)
+        config_path = new_root / ".acervo" / "config.toml"
+        if not config_path.exists():
+            return web.json_response(
+                {"error": f"No .acervo/config.toml at {new_root}"}, status=400,
+            )
+
+        # Update config path and reload
+        self._config_path = config_path
+        self._reload_config()
+
+        # Reset conversation state
+        self._changelog.clear()
+        self._turn_count = 0
+        self._pending_context_msgs = None
+        self._last_forwarded_body = None
+        self._last_enrichment = {}
+
+        # Re-initialize Acervo with new project
+        await self._init_acervo()
+
+        stats = self._acervo.get_graph_stats() if self._acervo else {}
+        log.info("Switched to project: %s (%s)", new_root, stats)
+        return web.json_response({
+            "status": "switched",
+            "project_path": str(new_root),
+            "graph": stats,
         })
 
     async def _handle_last_turn(self, request: web.Request) -> web.Response:
@@ -765,6 +827,10 @@ class AcervoProxy:
                 "debug": prep.debug,
             })
 
+            log.info(
+                "prepare() returned: warm_content=%d chars, warm_tokens=%d, topic=%s, stages=%s",
+                len(prep.warm_content), prep.warm_tokens, prep.topic, prep.stages,
+            )
             if not prep.warm_content:
                 log.info("No context to inject (topic=%s)", prep.topic)
                 return body
@@ -805,7 +871,7 @@ class AcervoProxy:
             })
             log.info("Enriched: +%dtk, topic=%s", prep.warm_tokens, prep.topic)
         except Exception as e:
-            log.warning("Enrichment failed: %s", e, exc_info=True)
+            log.error("Enrichment CRASHED: %s", e, exc_info=True)
 
         return body
 

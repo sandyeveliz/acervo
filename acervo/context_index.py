@@ -81,10 +81,13 @@ class ContextIndex:
         Returns:
             (context_messages, hot_tokens, warm_tokens, total_tokens)
         """
-        if len(history) < 2:
+        if len(history) < 2 and not warm_override:
             total = sum(count_tokens(m["content"]) for m in history)
             return list(history), total, 0, total
 
+        # Ensure at least a placeholder system message for the stack builder
+        if not history:
+            history = [{"role": "system", "content": ""}]
         system_msg = history[0]
         conversation = history[1:]
         current_user_msg = conversation[-1] if conversation else None
