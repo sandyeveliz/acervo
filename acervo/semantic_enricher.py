@@ -125,10 +125,14 @@ class SemanticEnricher:
         self, structure: FileStructure, content: str,
     ) -> list[Chunk]:
         """Create logical chunks from a file's structural units."""
-        lines = content.split("\n")
+        # For binary formats, use full_text (epub/pdf store extracted text there)
+        text = structure.full_text if structure.full_text else content
+        lines = text.split("\n")
 
         if structure.language == "markdown":
             return self._chunk_markdown(structure, lines)
+        if structure.language in ("epub", "pdf", "plaintext"):
+            return self._chunk_prose(structure, lines)
         return self._chunk_code(structure, lines)
 
     def _chunk_code(
@@ -223,7 +227,12 @@ class SemanticEnricher:
     def _chunk_markdown(
         self, structure: FileStructure, lines: list[str],
     ) -> list[Chunk]:
-        """Create chunks from markdown heading sections."""
+        """Create chunks from markdown heading sections.
+
+        Small sections become single chunks. Large sections (>2000 chars) are
+        split at paragraph boundaries, same as prose chunking.
+        """
+        max_chars = _MAX_CHUNK_TOKENS * 4
         chunks: list[Chunk] = []
 
         for unit in structure.units:
@@ -231,22 +240,149 @@ class SemanticEnricher:
             if len(section_text.strip()) < 20:
                 continue
 
-            # Build heading hierarchy for context
             hierarchy = unit.name
             if unit.parent:
                 hierarchy = f"{unit.parent} > {unit.name}"
 
-            chunks.append(Chunk(
-                chunk_id=str(uuid.uuid4())[:12],
+            # Small section — keep as one chunk
+            if len(section_text) <= max_chars:
+                chunks.append(Chunk(
+                    chunk_id=str(uuid.uuid4())[:12],
+                    file_path=structure.file_path,
+                    entity_name=hierarchy,
+                    entity_kind="section",
+                    line_start=unit.start_line,
+                    line_end=unit.end_line,
+                    content=section_text,
+                    language="markdown",
+                    parent=unit.parent,
+                ))
+                continue
+
+            # Large section — split at paragraph boundaries
+            # Reuse the prose chunking logic via a temporary structure
+            temp = FileStructure(
                 file_path=structure.file_path,
-                entity_name=hierarchy,
-                entity_kind="section",
-                line_start=unit.start_line,
-                line_end=unit.end_line,
-                content=section_text,
                 language="markdown",
-                parent=unit.parent,
-            ))
+                content_hash="",
+                units=[unit],
+                total_lines=unit.end_line - unit.start_line + 1,
+            )
+            sub_chunks = self._chunk_prose(temp, lines)
+            # Preserve hierarchy in entity_name
+            for sc in sub_chunks:
+                sc.entity_name = hierarchy
+            chunks.extend(sub_chunks)
+
+        return chunks
+
+    def _chunk_prose(
+        self, structure: FileStructure, lines: list[str],
+    ) -> list[Chunk]:
+        """Split prose content (epub, pdf, txt) into paragraph-cluster chunks.
+
+        Unlike markdown chunking (one chunk per heading section), this splits
+        each section into ~500-token chunks at paragraph boundaries (blank lines).
+        This fixes the under-chunking problem where entire book chapters became
+        single 20k+ char chunks with one embedding vector.
+        """
+        max_chars = _MAX_CHUNK_TOKENS * 4  # ~2000 chars per chunk
+        chunks: list[Chunk] = []
+
+        for unit in structure.units:
+            section_lines = lines[unit.start_line - 1 : unit.end_line]
+            section_text = "\n".join(section_lines)
+
+            if len(section_text.strip()) < 20:
+                continue
+
+            # If section is small enough, keep as one chunk
+            if len(section_text) <= max_chars:
+                chunks.append(Chunk(
+                    chunk_id=str(uuid.uuid4())[:12],
+                    file_path=structure.file_path,
+                    entity_name=unit.name,
+                    entity_kind="section",
+                    line_start=unit.start_line,
+                    line_end=unit.end_line,
+                    content=section_text,
+                    language=structure.language,
+                    parent=unit.parent,
+                ))
+                continue
+
+            # Split into paragraphs (blank-line separated), then cluster
+            paragraphs: list[tuple[int, int, str]] = []  # (start, end, text)
+            para_start = 0
+            para_lines: list[str] = []
+
+            for i, line in enumerate(section_lines):
+                if not line.strip() and para_lines:
+                    para_text = "\n".join(para_lines)
+                    if para_text.strip():
+                        paragraphs.append((
+                            unit.start_line + para_start,
+                            unit.start_line + i - 1,
+                            para_text,
+                        ))
+                    para_start = i + 1
+                    para_lines = []
+                else:
+                    para_lines.append(line)
+
+            # Last paragraph
+            if para_lines:
+                para_text = "\n".join(para_lines)
+                if para_text.strip():
+                    paragraphs.append((
+                        unit.start_line + para_start,
+                        unit.end_line,
+                        para_text,
+                    ))
+
+            # Cluster paragraphs into chunks of ~max_chars
+            cluster_paras: list[tuple[int, int, str]] = []
+            cluster_chars = 0
+
+            for para_s, para_e, para_t in paragraphs:
+                if cluster_chars + len(para_t) > max_chars and cluster_paras:
+                    # Flush current cluster
+                    c_start = cluster_paras[0][0]
+                    c_end = cluster_paras[-1][1]
+                    c_text = "\n\n".join(p[2] for p in cluster_paras)
+                    chunks.append(Chunk(
+                        chunk_id=str(uuid.uuid4())[:12],
+                        file_path=structure.file_path,
+                        entity_name=unit.name,
+                        entity_kind="section",
+                        line_start=c_start,
+                        line_end=c_end,
+                        content=c_text,
+                        language=structure.language,
+                        parent=unit.parent,
+                    ))
+                    cluster_paras = []
+                    cluster_chars = 0
+
+                cluster_paras.append((para_s, para_e, para_t))
+                cluster_chars += len(para_t)
+
+            # Flush remaining
+            if cluster_paras:
+                c_start = cluster_paras[0][0]
+                c_end = cluster_paras[-1][1]
+                c_text = "\n\n".join(p[2] for p in cluster_paras)
+                chunks.append(Chunk(
+                    chunk_id=str(uuid.uuid4())[:12],
+                    file_path=structure.file_path,
+                    entity_name=unit.name,
+                    entity_kind="section",
+                    line_start=c_start,
+                    line_end=c_end,
+                    content=c_text,
+                    language=structure.language,
+                    parent=unit.parent,
+                ))
 
         return chunks
 
