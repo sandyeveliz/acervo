@@ -26,10 +26,13 @@ from acervo.graph import TopicGraph
 
 # ── Fixtures ──
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_FIXTURES = _REPO_ROOT / "tests" / "fixtures"
+
 PROJECT_PATHS = {
-    "p1": Path("D:/Development/project-tests/p1-todo-app"),
-    "p2": Path("D:/Development/project-tests/p2-books"),
-    "p4": Path("D:/Development/project-tests/p4-project-docs"),
+    "p1": _FIXTURES / "p1-todo-app",
+    "p2": _FIXTURES / "p2-literature",
+    "p3": _FIXTURES / "p3-project-docs",
 }
 
 
@@ -59,8 +62,8 @@ def p2_graph():
 
 
 @pytest.fixture
-def p4_graph():
-    return _load_graph("p4")
+def p3_graph():
+    return _load_graph("p3")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -178,20 +181,20 @@ class TestSynthesizeP1:
 
 
 class TestIndexP2:
-    """Validate indexation output for P2 books project."""
+    """Validate indexation output for P2 literature project (Sherlock Holmes)."""
 
-    def test_file_nodes_for_each_book(self, p2_graph):
+    def test_file_nodes(self, p2_graph):
         by_kind = _get_nodes_by_kind(p2_graph)
         files = by_kind.get("file", [])
-        assert len(files) == 7, (
-            f"Expected 7 file nodes (7 HP books), got {len(files)}"
+        assert len(files) >= 1, (
+            f"Expected >=1 file node (epub), got {len(files)}"
         )
 
     def test_section_nodes_for_chapters(self, p2_graph):
         by_kind = _get_nodes_by_kind(p2_graph)
         sections = by_kind.get("section", [])
-        assert len(sections) >= 200, (
-            f"Expected >=200 section nodes (chapter headings), got {len(sections)}"
+        assert len(sections) >= 10, (
+            f"Expected >=10 section nodes (story chapters), got {len(sections)}"
         )
 
     def test_summaries_generated(self, p2_graph):
@@ -199,8 +202,8 @@ class TestIndexP2:
             1 for n in p2_graph.get_all_nodes()
             if n.get("attributes", {}).get("summary")
         )
-        assert with_summary >= 200, (
-            f"Expected >=200 nodes with LLM summaries, got {with_summary}"
+        assert with_summary >= 5, (
+            f"Expected >=5 nodes with LLM summaries, got {with_summary}"
         )
 
     def test_chunk_ids_linked(self, p2_graph):
@@ -208,56 +211,50 @@ class TestIndexP2:
             len(n.get("chunk_ids", []))
             for n in p2_graph.get_all_nodes()
         )
-        assert total >= 1000, (
-            f"Expected >=1000 total chunk_ids (epub paragraphs), got {total}"
-        )
-
-    def test_cross_file_edges(self, p2_graph):
-        """Books should have cross-file semantic edges (shared topics)."""
-        assert p2_graph.edge_count >= 500, (
-            f"Expected >=500 edges (cross-chapter links), got {p2_graph.edge_count}"
+        assert total >= 50, (
+            f"Expected >=50 total chunk_ids, got {total}"
         )
 
 
 class TestCurateP2:
-    """Validate curation output for P2 books project."""
+    """Validate curation output for P2 literature (Sherlock Holmes)."""
 
     def test_character_entities(self, p2_graph):
-        """Curation should extract HP characters as entities."""
+        """Curation should extract Sherlock Holmes characters as entities."""
         by_kind = _get_nodes_by_kind(p2_graph)
         entities = by_kind.get("entity", [])
         labels = [e.get("label", "").lower() for e in entities]
-        expected = ["harry", "hermione", "ron", "dumbledore", "voldemort"]
+        expected = ["holmes", "watson", "adler", "irene", "moriarty", "lestrade"]
         found = [c for c in expected if any(c in l for l in labels)]
         assert len(found) >= 2, (
             f"Expected character entities {expected}. "
             f"Found entities: {labels[:20]}. "
-            f"DIAGNOSIS: Curate didn't extract characters from HP books."
+            f"DIAGNOSIS: Curate didn't extract characters from Sherlock Holmes."
         )
 
-    def test_series_relation(self, p2_graph):
-        """Curation should discover the books form a series."""
+    def test_location_entities(self, p2_graph):
+        """Curation should extract locations from Sherlock Holmes."""
         by_kind = _get_nodes_by_kind(p2_graph)
         entities = by_kind.get("entity", [])
         labels = [e.get("label", "").lower() for e in entities]
-        series_terms = ["saga", "series", "collection", "harry potter"]
-        found = [t for t in series_terms if any(t in l for l in labels)]
+        expected = ["baker street", "london"]
+        found = [l for l in expected if any(l in el for el in labels)]
         if not found:
             pytest.xfail(
-                f"No series/saga entity found. Entities: {labels[:20]}. "
-                f"Curate may need better prompting for book collections."
+                f"No location entities found. Entities: {labels[:20]}. "
+                f"Curate may need better prompting for literature."
             )
 
 
 class TestSynthesizeP2:
-    """Validate synthesis output for P2 books project."""
+    """Validate synthesis output for P2 literature (Sherlock Holmes)."""
 
     def test_synthesis_exists(self, p2_graph):
         by_kind = _get_nodes_by_kind(p2_graph)
         synthesis = by_kind.get("synthesis", [])
         assert len(synthesis) >= 1, "No synthesis nodes"
 
-    def test_synthesis_mentions_books(self, p2_graph):
+    def test_synthesis_mentions_sherlock(self, p2_graph):
         by_kind = _get_nodes_by_kind(p2_graph)
         synthesis = by_kind.get("synthesis", [])
         overview = next(
@@ -265,52 +262,38 @@ class TestSynthesizeP2:
         )
         assert overview is not None
         summary = overview.get("attributes", {}).get("summary", "").lower()
-        assert "harry potter" in summary, (
-            f"Synthesis doesn't mention Harry Potter. Summary: {summary[:200]}"
-        )
-
-    def test_synthesis_mentions_count(self, p2_graph):
-        by_kind = _get_nodes_by_kind(p2_graph)
-        overview = next(
-            (s for s in _get_nodes_by_kind(p2_graph).get("synthesis", [])
-             if "overview" in s.get("id", "")),
-            None,
-        )
-        if overview is None:
-            pytest.skip("No synthesis overview")
-        summary = overview.get("attributes", {}).get("summary", "").lower()
-        has_count = "7" in summary or "seven" in summary or "siete" in summary
-        assert has_count, (
-            f"Synthesis doesn't mention book count (7). Summary: {summary[:200]}"
+        has_sherlock = "sherlock" in summary or "holmes" in summary or "conan doyle" in summary
+        assert has_sherlock, (
+            f"Synthesis doesn't mention Sherlock Holmes. Summary: {summary[:200]}"
         )
 
 
 # ══════════════════════════════════════════════════════════════
-# P4 — PM Docs (markdown project)
+# P3 — PM Docs (markdown project)
 # ══════════════════════════════════════════════════════════════
 
 
-class TestIndexP4:
-    """Validate indexation output for P4 PM docs."""
+class TestIndexP3:
+    """Validate indexation output for P3 PM docs."""
 
-    def test_file_nodes(self, p4_graph):
-        by_kind = _get_nodes_by_kind(p4_graph)
+    def test_file_nodes(self, p3_graph):
+        by_kind = _get_nodes_by_kind(p3_graph)
         files = by_kind.get("file", [])
         assert len(files) >= 5, f"Expected >=5 file nodes, got {len(files)}"
 
-    def test_section_nodes(self, p4_graph):
-        by_kind = _get_nodes_by_kind(p4_graph)
+    def test_section_nodes(self, p3_graph):
+        by_kind = _get_nodes_by_kind(p3_graph)
         sections = by_kind.get("section", [])
         assert len(sections) >= 30, (
             f"Expected >=30 section nodes from markdown headings, got {len(sections)}"
         )
 
 
-class TestCurateP4:
-    """Validate curation output for P4 PM docs."""
+class TestCurateP3:
+    """Validate curation output for P3 PM docs."""
 
-    def test_entities_extracted(self, p4_graph):
-        by_kind = _get_nodes_by_kind(p4_graph)
+    def test_entities_extracted(self, p3_graph):
+        by_kind = _get_nodes_by_kind(p3_graph)
         entities = by_kind.get("entity", [])
         entity_info = [
             f"{e.get('label')} (type={e.get('type')})"
@@ -324,16 +307,16 @@ class TestCurateP4:
         )
 
 
-class TestSynthesizeP4:
-    """Validate synthesis output for P4 PM docs."""
+class TestSynthesizeP3:
+    """Validate synthesis output for P3 PM docs."""
 
-    def test_synthesis_exists(self, p4_graph):
-        by_kind = _get_nodes_by_kind(p4_graph)
+    def test_synthesis_exists(self, p3_graph):
+        by_kind = _get_nodes_by_kind(p3_graph)
         synthesis = by_kind.get("synthesis", [])
         assert len(synthesis) >= 1, "No synthesis nodes"
 
-    def test_module_summaries(self, p4_graph):
-        by_kind = _get_nodes_by_kind(p4_graph)
+    def test_module_summaries(self, p3_graph):
+        by_kind = _get_nodes_by_kind(p3_graph)
         synthesis = by_kind.get("synthesis", [])
         modules = [s for s in synthesis if "module" in s.get("id", "")]
         assert len(modules) >= 1, (

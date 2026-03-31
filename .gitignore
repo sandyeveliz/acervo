@@ -45,6 +45,9 @@ dmypy.json
 .ipynb_checkpoints/
 *.ipynb
 
+# Acervo project data (generated, not source)
+.acervo/
+
 # Runtime data
 data/
 *.db
