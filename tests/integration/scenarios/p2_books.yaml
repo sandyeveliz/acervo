@@ -1,0 +1,30 @@
+name: p2_books
+category: indexed_project
+description: "Test context retrieval for a book library (Harry Potter epub collection)"
+project_path: "D:/Development/project-tests/p2-books"
+
+questions:
+  - text: "Cuantos libros tenemos?"
+    intent: overview
+    expect_in_context:
+      - "harry potter"
+    expect_not_in_context:
+      - "CAPITULO 12"
+      - "CAPITULO 3"
+    expect_answer_contains:
+      - "7"
+
+  - text: "What are the main themes of the book collection?"
+    intent: overview
+    expect_answer_contains:
+      - "Voldemort"
+
+  - text: "Who is Dobby?"
+    intent: specific
+    expect_answer_contains:
+      - "elf"
+
+  - text: "What happens in the first chapter of the first book?"
+    intent: specific
+    expect_answer_contains:
+      - "Dursley"

@@ -1,0 +1,27 @@
+name: p4_pm_docs
+category: indexed_project
+description: "Test context retrieval for project management docs"
+project_path: "D:/Development/project-tests/p4-project-docs"
+
+questions:
+  - text: "What is the overall project status?"
+    intent: overview
+    expect_in_context:
+      - "project"
+    expect_answer_contains:
+      - "sprint"
+
+  - text: "What issues are currently open?"
+    intent: specific
+    expect_answer_contains:
+      - "issue"
+
+  - text: "What is the tech stack?"
+    intent: specific
+    expect_answer_contains:
+      - "React"
+
+  - text: "What are the deadlines?"
+    intent: specific
+    expect_answer_contains:
+      - "2026"
