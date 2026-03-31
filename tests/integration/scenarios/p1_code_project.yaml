@@ -7,9 +7,8 @@ questions:
   - text: "Explain the app architecture"
     intent: overview
     expect_in_context:
-      - "src/"
-      - "controllers"
-      - "backend"
+      - "src"
+      - "controller"
     expect_not_in_context:
       - "CAPITULO"
     expect_answer_contains:

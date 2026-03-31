@@ -200,7 +200,7 @@ def json_report(results: list[ProjectBenchmarkResult], path: Path) -> None:
             q["warm_content_preview"] = q["warm_content"][:200]
             del q["warm_content"]
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"\nJSON report: {path}")
 
 
