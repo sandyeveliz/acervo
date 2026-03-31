@@ -32,6 +32,7 @@ Changelog = "https://github.com/sandyeveliz/acervo/blob/main/CHANGELOG.md"
 proxy = ["aiohttp>=3.9"]
 vector = ["chromadb>=0.5"]
 epub = ["ebooklib>=0.18", "beautifulsoup4>=4.12", "lxml>=4.9"]
+pdf = ["PyMuPDF>=1.24"]
 tree-sitter = [
     "tree-sitter>=0.23",
     "tree-sitter-python>=0.23",

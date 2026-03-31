@@ -106,7 +106,8 @@ DEFAULT_EXCLUDES: set[str] = {
 }
 
 DEFAULT_EXTENSIONS: set[str] = {
-    ".ts", ".tsx", ".js", ".jsx", ".py", ".md", ".html", ".css", ".epub",
+    ".ts", ".tsx", ".js", ".jsx", ".py", ".md", ".html", ".css",
+    ".epub", ".txt", ".pdf",
 }
 
 

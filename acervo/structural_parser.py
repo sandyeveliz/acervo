@@ -88,6 +88,8 @@ _LANG_MAP: dict[str, str] = {
     ".html": "html",
     ".css": "css",
     ".epub": "epub",
+    ".txt": "plaintext",
+    ".pdf": "pdf",
 }
 
 
@@ -154,6 +156,8 @@ class StructuralParser:
         # Binary formats get their own parse path
         if language == "epub":
             return self._parse_epub_file(file_path, relative)
+        if language == "pdf":
+            return self._parse_pdf_file(file_path, relative)
 
         content = file_path.read_text(encoding="utf-8")
         content_hash = hashlib.sha256(content.encode()).hexdigest()
@@ -178,6 +182,8 @@ class StructuralParser:
             units = self._parse_html(content)
         elif language == "css":
             units = self._parse_css(content)
+        elif language == "plaintext":
+            units = self._parse_plaintext(content)
 
         for u in units:
             u.language = language
@@ -435,6 +441,132 @@ class StructuralParser:
         return FileStructure(
             file_path=relative,
             language="epub",
+            content_hash=content_hash,
+            units=units,
+            total_lines=total_lines,
+            full_text=full_text,
+        )
+
+    # ── Plain text parsing ──
+
+    def _parse_plaintext(self, content: str) -> list[StructuralUnit]:
+        """Split plain text into sections by blank-line-separated paragraphs.
+
+        Groups consecutive paragraphs into ~50-line sections to avoid
+        one-unit-per-paragraph granularity.
+        """
+        lines = content.split("\n")
+        sections: list[StructuralUnit] = []
+        section_start = 0
+        section_lines: list[str] = []
+        section_idx = 1
+
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            section_lines.append(line)
+
+            # Split on double blank lines or every ~50 lines
+            is_double_blank = (
+                not stripped
+                and i > 0
+                and not lines[i - 1].strip()
+            )
+            is_long = len(section_lines) >= 50
+
+            if (is_double_blank or is_long) and len(section_lines) > 2:
+                # Use first non-empty line as title
+                title = next(
+                    (l.strip()[:80] for l in section_lines if l.strip()),
+                    f"Section {section_idx}",
+                )
+                sections.append(StructuralUnit(
+                    name=title,
+                    unit_type="section",
+                    start_line=section_start + 1,
+                    end_line=i + 1,
+                    language="plaintext",
+                    signature=title,
+                ))
+                section_idx += 1
+                section_start = i + 1
+                section_lines = []
+
+        # Remaining lines
+        if section_lines and any(l.strip() for l in section_lines):
+            title = next(
+                (l.strip()[:80] for l in section_lines if l.strip()),
+                f"Section {section_idx}",
+            )
+            sections.append(StructuralUnit(
+                name=title,
+                unit_type="section",
+                start_line=section_start + 1,
+                end_line=len(lines),
+                language="plaintext",
+                signature=title,
+            ))
+
+        return sections
+
+    # ── PDF parsing ──
+
+    def _parse_pdf_file(self, file_path: Path, relative: str) -> FileStructure:
+        """Extract text and structure from a PDF using PyMuPDF (fitz).
+
+        Falls back to page-based sectioning if no headings are detected.
+        """
+        try:
+            import fitz  # PyMuPDF
+        except ImportError:
+            raise ImportError(
+                "PyMuPDF is required for PDF parsing. Install with: "
+                "pip install PyMuPDF  (or: pip install acervo[pdf])"
+            )
+
+        doc = fitz.open(str(file_path))
+        content_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+
+        all_text_parts: list[str] = []
+        units: list[StructuralUnit] = []
+        cumulative_line = 1
+
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            text = page.get_text("text")
+            if not text or not text.strip():
+                continue
+
+            lines = text.split("\n")
+            line_count = len(lines)
+            start_line = cumulative_line
+            end_line = cumulative_line + line_count - 1
+
+            # Use first non-empty line as section title
+            title = next(
+                (l.strip()[:80] for l in lines if l.strip()),
+                f"Page {page_num + 1}",
+            )
+
+            units.append(StructuralUnit(
+                name=title,
+                unit_type="section",
+                start_line=start_line,
+                end_line=end_line,
+                language="pdf",
+                signature=f"# Page {page_num + 1}: {title}",
+            ))
+
+            all_text_parts.append(text)
+            cumulative_line = end_line + 1
+
+        doc.close()
+
+        full_text = "\n".join(all_text_parts)
+        total_lines = full_text.count("\n") + 1 if full_text else 0
+
+        return FileStructure(
+            file_path=relative,
+            language="pdf",
             content_hash=content_hash,
             units=units,
             total_lines=total_lines,
