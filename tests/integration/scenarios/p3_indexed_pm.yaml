@@ -1,0 +1,81 @@
+name: p3_indexed_pm
+category: indexed_project
+project_path_key: p3
+description: "15-turn conversation over PM documentation"
+persona: "Sandy"
+
+turns:
+  # Phase 1: Overview
+  - user_msg: "List all the project documents"
+    assistant_msg: "The project has a README, ROADMAP, PROGRESS report, sprint docs, issues, and architecture decisions."
+    phase: overview
+    expect_intent: overview
+
+  - user_msg: "What project is this about?"
+    assistant_msg: "It's a Todo App project managed with sprints and architecture decision records."
+    phase: overview
+
+  # Phase 2: Specific
+  - user_msg: "What issues are open?"
+    assistant_msg: "There are several issues tracked including bugs and feature requests."
+    phase: specific
+    expect_in_context: ["issue"]
+
+  - user_msg: "What's the current sprint?"
+    assistant_msg: "Sprint 1 focuses on the foundation: setup, basic CRUD, and authentication."
+    phase: specific
+    expect_in_context: ["sprint"]
+
+  - user_msg: "What tech decisions have been made?"
+    assistant_msg: "ADR-001 chose SQLite for the database, ADR-002 chose JWT for authentication."
+    phase: specific
+    expect_in_context: ["decision"]
+
+  # Phase 3: Topic change
+  - user_msg: "Tell me about the roadmap"
+    assistant_msg: "The roadmap outlines versions from v0.1.0 through v0.3.0 with increasing features."
+    phase: topic_change
+    expect_in_context: ["roadmap"]
+
+  - user_msg: "What are the milestones?"
+    assistant_msg: "Key milestones include basic CRUD, filters, and mobile support."
+    phase: specific
+
+  # Phase 4: Small talk
+  - user_msg: "Thanks for the overview"
+    assistant_msg: "You're welcome! Let me know what else you'd like to explore."
+    phase: small_talk
+
+  # Phase 5: Return
+  - user_msg: "Back to the issues, what's the highest priority one?"
+    assistant_msg: "ISSUE-004 about token expiry causing silent logout is high priority."
+    phase: return
+    expect_in_context: ["issue"]
+
+  - user_msg: "What about the database decision?"
+    assistant_msg: "ADR-001 evaluated SQLite vs PostgreSQL and chose SQLite for simplicity."
+    phase: specific
+
+  # Phase 6: Negative
+  - user_msg: "Is there a CI/CD pipeline documented?"
+    assistant_msg: "I don't see CI/CD pipeline documentation in the indexed files."
+    phase: negative
+
+  # Phase 7: Cross-reference
+  - user_msg: "How does the sprint relate to the roadmap?"
+    assistant_msg: "Sprint 1 covers the v0.1.0 milestone from the roadmap."
+    phase: cross_ref
+
+  - user_msg: "What progress has been made?"
+    assistant_msg: "The PROGRESS file tracks completed tasks and blockers for each sprint."
+    phase: specific
+    expect_in_context: ["progress"]
+
+  - user_msg: "What's the deadline for the next version?"
+    assistant_msg: "The roadmap targets specific dates for each version release."
+    phase: specific
+
+  - user_msg: "Give me the overall project status"
+    assistant_msg: "The project is in Sprint 1, building the foundation with SQLite and JWT auth."
+    phase: overview
+    expect_intent: overview
