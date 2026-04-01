@@ -200,9 +200,42 @@ Acervo only stores explicit statements. If the user didn't say it, it doesn't ge
 
 ---
 
+## Indexing Projects
+
+Acervo can index entire projects, extracting structure and knowledge:
+
+```bash
+acervo init /path/to/project
+acervo index /path/to/project     # structural + semantic indexing
+acervo curate /path/to/project    # LLM extracts entities from indexed files
+acervo synthesize /path/to/project # LLM generates project overview
+```
+
+### Supported formats
+
+| Format | Install | What it extracts |
+|--------|---------|-----------------|
+| `.ts` `.tsx` `.js` `.jsx` `.py` | `pip install acervo[tree-sitter]` | Functions, classes, imports, symbols |
+| `.md` | (included) | Sections by heading hierarchy |
+| `.epub` | `pip install acervo[epub]` | Chapters, characters, locations |
+| `.pdf` | `pip install acervo[pdf]` | Pages as sections, paragraph chunking |
+| `.txt` | (included) | Paragraph-based sections |
+
+### Inspecting chunks
+
+```bash
+acervo chunks stats              # chunk count, avg size, distribution
+acervo chunks list               # all chunks with metadata
+acervo chunks show <chunk-id>    # full chunk content
+acervo chunks search "auth"      # semantic search across chunks
+```
+
+---
+
 ## Next Steps
 
 - [Configuration](configuration.md) — full config reference
 - [Graph CLI](graph-cli.md) — inspect and edit the knowledge graph
 - [Traces](traces.md) — per-turn trace data for debugging
-- [Document Ingestion](document-ingestion.md) — index markdown files into the graph
+- [Document Ingestion](document-ingestion.md) — index files into the graph
+- [Benchmark Guide](benchmark-guide.md) — run benchmarks and understand scoring

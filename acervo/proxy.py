@@ -582,7 +582,7 @@ class AcervoProxy:
         filename = field.filename or "document.md"
         if not filename.endswith(".md"):
             return web.json_response(
-                {"error": "only .md files supported in v0.3.0"}, status=400,
+                {"error": "only .md files supported in v0.4.0"}, status=400,
             )
 
         content = await field.read(decode=True)

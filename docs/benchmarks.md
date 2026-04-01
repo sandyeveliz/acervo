@@ -1,18 +1,62 @@
 # Benchmark Reports
 
-Acervo runs a full benchmark suite on every release to measure context efficiency,
-token savings, and entity extraction quality. Each report covers 6 scenarios
-(360 turns) testing different knowledge domains.
+Acervo runs benchmarks on every release to measure context quality, token efficiency,
+and entity extraction. Two benchmark types:
+
+- **Conversation benchmarks** (v0.2-v0.3): 360 turns across 6 scenarios measuring token savings and context hit rates.
+- **Indexed project benchmarks** (v0.4+): 55 turns across 3 projects with 5-category scoring (RESOLVE/GROUND/RECALL/FOCUS/ADAPT) and agent efficiency comparison.
 
 ## Reports by Version
 
-| Version | Date | Scenarios | Turns | Avg Savings | Report |
-|---------|------|-----------|-------|-------------|--------|
-| **v0.2.2-3** | 2026-03-27 | 6 | 360 | 76.1% | [Full Report](benchmarks/v0.2.2-3/) |
-| v0.2.2-2 | 2026-03-27 | 6 | 360 | 76.1% | [Full Report](benchmarks/v0.2.2-2/) |
-| v0.2.2-1 | 2026-03-27 | 6 | 360 | 76.1% | [Full Report](benchmarks/v0.2.2-1/) |
+| Version | Date | Type | Turns | Key Result | Report |
+|---------|------|------|-------|------------|--------|
+| **v0.4.0** | 2026-04-01 | Indexed project | 55 | 100% RESOLVE, 12.1x efficiency | [Full Report](benchmarks/v0.4.0/) |
+| v0.2.2-3 | 2026-03-27 | Conversation | 360 | 76.1% savings | [Full Report](benchmarks/v0.2.2-3/) |
+| v0.2.2-2 | 2026-03-27 | Conversation | 360 | 76.1% savings | [Full Report](benchmarks/v0.2.2-2/) |
+| v0.2.2-1 | 2026-03-27 | Conversation | 360 | 76.1% savings | [Full Report](benchmarks/v0.2.2-1/) |
 
-## Scenarios
+## v0.4.0 — Indexed Project Benchmarks
+
+### Category Scores
+
+| Category | What it proves | Score |
+|----------|---------------|-------|
+| RESOLVE  | Answers questions requiring project context | 100% |
+| GROUND   | Prevents hallucination with verified data | 92% |
+| RECALL   | Remembers user-stated facts across turns | 67% |
+| FOCUS    | Sends only relevant context, respects budget | 100% |
+| ADAPT    | Handles topic changes cleanly | 100% |
+
+### Approach Comparison (RESOLVE, 13 turns)
+
+| Approach | Can Answer | Avg Input Tokens | Avg Steps |
+|----------|-----------|-----------------|-----------|
+| Stateless LLM | 8% | -- | -- |
+| Agent + Tools | 100% | 7,462 | 2.8 |
+| **Acervo** | **100%** | **616** | **0** |
+
+> **12.1x fewer tokens** than an agent approach for the same questions.
+
+### Component Health
+
+| Component | Score |
+|-----------|-------|
+| S1 Intent | 78% |
+| S2 Activation | 56% |
+| S3 Budget | 32% |
+| S3 Quality | 81% |
+
+### Test Projects
+
+| Project | Domain | Content |
+|---------|--------|---------|
+| P1 — TODO App | Source code | 31 TypeScript/React files |
+| P2 — Literature | Prose | Sherlock Holmes epub (public domain) |
+| P3 — PM Docs | Project management | 11 markdown files |
+
+For detailed methodology, see the [Benchmark Guide](benchmark-guide.md).
+
+## v0.2.x — Conversation Benchmarks
 
 | # | Scenario | Turns | Description |
 |---|----------|-------|-------------|
@@ -23,24 +67,15 @@ token savings, and entity extraction quality. Each report covers 6 scenarios
 | 5 | SaaS Founder (100t) | 60 | Long-form business context, metrics, strategy |
 | 6 | Product Manager | 60 | Real-world PM workflow, stakeholder tracking |
 
-## How to Read the Reports
-
-Each report includes:
-
-- **Summary cards** -- total turns, token savings, entity counts
-- **Token usage charts** -- context vs naive accumulation per turn
-- **Scorecard** -- per-scenario pass/fail on key metrics
-- **Entity extraction** -- precision, recall, and F1 for the knowledge graph
-- **Turn-by-turn evidence** -- expandable details for every conversation turn
-
-## Generating New Reports
+## Generating Reports
 
 ```bash
-# Run full benchmark suite
-python -m tests.integration.run_benchmarks --format html
+# Indexed project benchmarks (v0.4+, requires LM Studio + Ollama)
+pytest tests/integration/test_benchmarks.py -v -s
 
-# Export from existing JSON results
+# Conversation benchmarks (v0.2-v0.3)
+python -m tests.integration.run_benchmarks --format html
 python -m tests.integration.export_report --tier full --open
 ```
 
-After generating, copy the report to `docs/benchmarks/vX.Y.Z/index.html` and update this page.
+After generating, copy reports to `docs/benchmarks/vX.Y.Z/` and update this page.

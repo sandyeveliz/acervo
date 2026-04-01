@@ -1,6 +1,6 @@
 [project]
 name = "acervo"
-version = "0.3.0"
+version = "0.4.0"
 description = "Context proxy for AI agents. Enriches LLM context from a knowledge graph, extracts knowledge from responses."
 readme = "README.md"
 license = {text = "Apache-2.0"}

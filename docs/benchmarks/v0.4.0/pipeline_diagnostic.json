@@ -1,0 +1,95 @@
+{
+  "generated_at": "2026-04-01T12:07:27.553153",
+  "projects": {
+    "p1": {
+      "nodes": 235,
+      "edges": 1163,
+      "files": 31,
+      "sections": 38,
+      "symbols": 134,
+      "folders": 17,
+      "entities": 11,
+      "entity_labels": [
+        "Express.js",
+        "SQLite",
+        "JWT",
+        "Nuxt",
+        "Tailwind CSS",
+        "Auth Module",
+        "React",
+        "MongoDB",
+        "Docker",
+        "middleware",
+        "Middleware (`backend/src/middleware/`)"
+      ],
+      "synthesis": 4,
+      "synthesis_ids": [
+        "synthesis:project_overview",
+        "synthesis:module_backend",
+        "synthesis:module_docs",
+        "synthesis:module_frontend"
+      ],
+      "chunks": 350,
+      "summaries": 172
+    },
+    "p2": {
+      "nodes": 43,
+      "edges": 126,
+      "files": 1,
+      "sections": 33,
+      "symbols": 0,
+      "folders": 0,
+      "entities": 8,
+      "entity_labels": [
+        "The Adventures of Sherlock Holmes",
+        "Sherlock Holmes",
+        "John Watson",
+        "Baker Street",
+        "Irene Adler",
+        "Dr. Watson",
+        "A Scandal in Bohemia",
+        "Professor Moriarty"
+      ],
+      "synthesis": 1,
+      "synthesis_ids": [
+        "synthesis:project_overview"
+      ],
+      "chunks": 2056,
+      "summaries": 34
+    },
+    "p3": {
+      "nodes": 116,
+      "edges": 383,
+      "files": 11,
+      "sections": 84,
+      "symbols": 0,
+      "folders": 3,
+      "entities": 14,
+      "entity_labels": [
+        "Todo App",
+        "Svelte",
+        "Express.js",
+        "SQLite",
+        "PostgreSQL",
+        "JWT",
+        "Docker Compose",
+        "GitHub Actions",
+        "Sandy",
+        "Ron Weasley",
+        "Sprint 1",
+        "Backlog",
+        "Martin",
+        "Tech Stack"
+      ],
+      "synthesis": 4,
+      "synthesis_ids": [
+        "synthesis:project_overview",
+        "synthesis:module_decisions",
+        "synthesis:module_issues",
+        "synthesis:module__root_"
+      ],
+      "chunks": 160,
+      "summaries": 84
+    }
+  }
+}

@@ -24,7 +24,7 @@ from acervo.config import AcervoConfig
 
 log = logging.getLogger(__name__)
 
-_VERSION = "0.3.0"
+_VERSION = "0.4.0"
 
 # -- ANSI colors --
 

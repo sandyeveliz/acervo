@@ -20,6 +20,7 @@ nav:
   - Configuration: configuration.md
   - Layers: layers.md
   - Benchmarks: benchmarks.md
+  - Benchmark Guide: benchmark-guide.md
   - Roadmap: roadmap.md
   - Contributing: contributing.md
 
