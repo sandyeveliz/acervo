@@ -15,6 +15,15 @@ turns:
       context_contains: ["todo"]
     effectiveness:
       stateless_can_answer: false
+    agent_comparison:
+      stateless: { can_answer: false }
+      agent_with_tools:
+        steps: 2
+        tools: ["list_directory", "read_file"]
+        estimated_input_tokens: 4000
+        estimated_output_tokens: 150
+      acervo:
+        expected_warm_tokens: 300
 
   - turn: 2
     user: "What documents are available?"
@@ -29,6 +38,15 @@ turns:
       warm_tokens_max: 400
     effectiveness:
       stateless_can_answer: false
+    agent_comparison:
+      stateless: { can_answer: false }
+      agent_with_tools:
+        steps: 1
+        tools: ["list_directory"]
+        estimated_input_tokens: 2000
+        estimated_output_tokens: 150
+      acervo:
+        expected_warm_tokens: 300
 
   - turn: 3
     user: "What issues are currently open?"
@@ -54,6 +72,15 @@ turns:
     s3:
       context_contains_any: ["express", "sqlite", "jwt"]
       context_not_contains: ["django", "mongodb"]
+    agent_comparison:
+      stateless: { can_answer: false }
+      agent_with_tools:
+        steps: 3
+        tools: ["file_search", "read_file", "read_file"]
+        estimated_input_tokens: 5000
+        estimated_output_tokens: 200
+      acervo:
+        expected_warm_tokens: 400
 
   - turn: 5
     user: "What's in the current sprint?"
@@ -91,6 +118,15 @@ turns:
       context_contains_any: ["milestone", "phase", "version"]
     effectiveness:
       stateless_can_answer: false
+    agent_comparison:
+      stateless: { can_answer: false }
+      agent_with_tools:
+        steps: 3
+        tools: ["file_search", "read_file", "read_file"]
+        estimated_input_tokens: 6000
+        estimated_output_tokens: 200
+      acervo:
+        expected_warm_tokens: 400
 
   - turn: 8
     user: "The client wants the MVP ready by end of Q2"
@@ -141,6 +177,15 @@ turns:
       activate_files_containing: ["decision"]
     s3:
       context_contains_any: ["sqlite", "decision"]
+    agent_comparison:
+      stateless: { can_answer: false }
+      agent_with_tools:
+        steps: 3
+        tools: ["file_search", "read_file", "read_file"]
+        estimated_input_tokens: 5500
+        estimated_output_tokens: 200
+      acervo:
+        expected_warm_tokens: 400
 
   - turn: 13
     user: "Who are the developers working on this?"
@@ -150,6 +195,15 @@ turns:
       context_contains_any: ["sandy", "martin"]
     effectiveness:
       stateless_can_answer: false
+    agent_comparison:
+      stateless: { can_answer: false }
+      agent_with_tools:
+        steps: 4
+        tools: ["file_search", "read_file", "read_file", "read_file"]
+        estimated_input_tokens: 7000
+        estimated_output_tokens: 150
+      acervo:
+        expected_warm_tokens: 300
 
   - turn: 14
     user: "What was the deadline I mentioned?"
@@ -162,6 +216,15 @@ turns:
     user: "Is there a CI/CD pipeline set up?"
     category: GROUND
     assistant_sim: "I don't see CI/CD pipeline documentation in the project files."
+    agent_comparison:
+      stateless: { can_answer: false }
+      agent_with_tools:
+        steps: 2
+        tools: ["file_search", "list_directory"]
+        estimated_input_tokens: 3500
+        estimated_output_tokens: 150
+      acervo:
+        expected_warm_tokens: 200
 
   - turn: 16
     user: "Which issues are related to the current sprint?"
@@ -173,6 +236,15 @@ turns:
       context_contains_any: ["sprint", "issue"]
     effectiveness:
       stateless_can_answer: false
+    agent_comparison:
+      stateless: { can_answer: false }
+      agent_with_tools:
+        steps: 5
+        tools: ["file_search", "read_file", "read_file", "read_file", "read_file"]
+        estimated_input_tokens: 9000
+        estimated_output_tokens: 300
+      acervo:
+        expected_warm_tokens: 500
 
   - turn: 17
     user: "What progress has been made so far?"
@@ -201,6 +273,15 @@ turns:
     assistant_sim: "I don't see anyone named Ron Weasley in the project documentation."
     s3:
       context_not_contains: ["weasley", "ron weasley"]
+    agent_comparison:
+      stateless: { can_answer: false }
+      agent_with_tools:
+        steps: 2
+        tools: ["file_search", "file_search"]
+        estimated_input_tokens: 3000
+        estimated_output_tokens: 100
+      acervo:
+        expected_warm_tokens: 150
 
   - turn: 20
     user: "Give me a final summary of the project status"

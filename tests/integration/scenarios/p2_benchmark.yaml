@@ -16,6 +16,15 @@ turns:
       context_contains_any: ["sherlock", "holmes", "conan doyle"]
     effectiveness:
       stateless_can_answer: false
+    agent_comparison:
+      stateless: { can_answer: false }
+      agent_with_tools:
+        steps: 3
+        tools: ["list_directory", "read_file", "read_file"]
+        estimated_input_tokens: 12000
+        estimated_output_tokens: 200
+      acervo:
+        expected_warm_tokens: 300
 
   - turn: 2
     user: "How many stories does it contain?"
@@ -27,6 +36,15 @@ turns:
       warm_tokens_max: 300
     effectiveness:
       stateless_can_answer: false
+    agent_comparison:
+      stateless: { can_answer: false }
+      agent_with_tools:
+        steps: 2
+        tools: ["read_file", "read_file"]
+        estimated_input_tokens: 15000
+        estimated_output_tokens: 150
+      acervo:
+        expected_warm_tokens: 300
 
   - turn: 3
     user: "Who is Sherlock Holmes?"
@@ -36,6 +54,15 @@ turns:
       expected_intent: specific
     s3:
       context_contains_any: ["holmes", "detective", "baker street"]
+    agent_comparison:
+      stateless: { can_answer: true, note: "general knowledge" }
+      agent_with_tools:
+        steps: 2
+        tools: ["file_search", "read_file"]
+        estimated_input_tokens: 8000
+        estimated_output_tokens: 200
+      acervo:
+        expected_warm_tokens: 400
 
   - turn: 4
     user: "Tell me about Dr. Watson"
@@ -68,6 +95,15 @@ turns:
       expected_intent: specific
     s3:
       context_contains_any: ["adler", "irene"]
+    agent_comparison:
+      stateless: { can_answer: true, note: "general knowledge" }
+      agent_with_tools:
+        steps: 2
+        tools: ["file_search", "read_file"]
+        estimated_input_tokens: 10000
+        estimated_output_tokens: 200
+      acervo:
+        expected_warm_tokens: 400
 
   - turn: 7
     user: "What about The Red-Headed League? What's that story about?"
@@ -108,6 +144,15 @@ turns:
     user: "Does Professor Moriarty appear in these stories?"
     category: GROUND
     assistant_sim: "Moriarty is not a major character in The Adventures of Sherlock Holmes."
+    agent_comparison:
+      stateless: { can_answer: false, note: "needs project-specific knowledge" }
+      agent_with_tools:
+        steps: 2
+        tools: ["file_search", "file_search"]
+        estimated_input_tokens: 5000
+        estimated_output_tokens: 150
+      acervo:
+        expected_warm_tokens: 200
 
   - turn: 12
     user: "Where does Holmes live?"
@@ -117,6 +162,15 @@ turns:
       context_contains_any: ["baker", "street", "221b"]
     effectiveness:
       stateless_can_answer: false
+    agent_comparison:
+      stateless: { can_answer: true, note: "general knowledge but not project-grounded" }
+      agent_with_tools:
+        steps: 2
+        tools: ["file_search", "read_file"]
+        estimated_input_tokens: 10000
+        estimated_output_tokens: 150
+      acervo:
+        expected_warm_tokens: 300
 
   - turn: 13
     user: "What did I say about Holmes's method earlier?"
@@ -140,3 +194,12 @@ turns:
     assistant_sim: "Yes, The Adventures of Sherlock Holmes was written by Sir Arthur Conan Doyle."
     s3:
       context_contains_any: ["conan doyle", "arthur"]
+    agent_comparison:
+      stateless: { can_answer: true, note: "general knowledge" }
+      agent_with_tools:
+        steps: 1
+        tools: ["read_file"]
+        estimated_input_tokens: 5000
+        estimated_output_tokens: 100
+      acervo:
+        expected_warm_tokens: 200

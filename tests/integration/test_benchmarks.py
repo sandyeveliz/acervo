@@ -43,6 +43,19 @@ COMPONENTS = ["s1_intent", "s2_activation", "s3_budget", "s3_quality"]
 
 
 @dataclass
+class AgentComparisonData:
+    """Per-turn agent comparison: what would other approaches cost?"""
+    stateless_can_answer: bool = False
+    stateless_note: str = ""
+    agent_steps: int = 0
+    agent_tools: list[str] = field(default_factory=list)
+    agent_input_tokens: int = 0
+    agent_output_tokens: int = 0
+    acervo_expected_warm: int = 0
+    acervo_actual_warm: int = 0
+
+
+@dataclass
 class TurnCheck:
     turn: int
     category: str
@@ -74,6 +87,9 @@ class TurnCheck:
     # Public effectiveness
     effectiveness_passed: bool = True
 
+    # Agent comparison
+    agent_comparison: AgentComparisonData | None = None
+
     # Failures detail
     failures: list[str] = field(default_factory=list)
 
@@ -88,6 +104,9 @@ class BenchmarkResult:
     s1_failures: list[dict] = field(default_factory=list)
     turns: list[TurnCheck] = field(default_factory=list)
     per_project: dict[str, dict] = field(default_factory=dict)
+    # Agent comparison aggregates
+    resolve_scorecard: dict[str, dict] = field(default_factory=dict)
+    efficiency_chart: list[dict] = field(default_factory=list)
 
 
 # ── YAML loader ──
@@ -313,6 +332,23 @@ async def _run_benchmark(scenario_name: str) -> list[TurnCheck]:
         # Effectiveness check
         _check_effectiveness(turn_spec, tc)
 
+        # Agent comparison data
+        ac_spec = turn_spec.get("agent_comparison")
+        if ac_spec:
+            stateless = ac_spec.get("stateless", {})
+            agent = ac_spec.get("agent_with_tools", {})
+            acervo_spec = ac_spec.get("acervo", {})
+            tc.agent_comparison = AgentComparisonData(
+                stateless_can_answer=stateless.get("can_answer", False),
+                stateless_note=stateless.get("note", ""),
+                agent_steps=agent.get("steps", 0),
+                agent_tools=agent.get("tools", []),
+                agent_input_tokens=agent.get("estimated_input_tokens", 0),
+                agent_output_tokens=agent.get("estimated_output_tokens", 0),
+                acervo_expected_warm=acervo_spec.get("expected_warm_tokens", 0),
+                acervo_actual_warm=tc.warm_tokens,
+            )
+
         results.append(tc)
 
         # Update history
@@ -382,7 +418,80 @@ def _compute_scores(all_turns: list[TurnCheck]) -> BenchmarkResult:
         if t.s1_intent_passed is False
     ]
 
+    # Agent comparison: RESOLVE scorecard + efficiency chart
+    compared = [t for t in all_turns if t.agent_comparison is not None]
+    if compared:
+        _compute_agent_comparison(compared, result)
+
     return result
+
+
+def _compute_agent_comparison(
+    turns: list[TurnCheck], result: BenchmarkResult
+) -> None:
+    """Build RESOLVE scorecard and efficiency chart from agent_comparison data."""
+    # Group by category
+    by_cat: dict[str, list[TurnCheck]] = defaultdict(list)
+    for t in turns:
+        by_cat[t.category].append(t)
+
+    # RESOLVE scorecard: Stateless vs Agent+Tools vs Acervo
+    for cat in ["RESOLVE", "GROUND"]:
+        cat_turns = by_cat.get(cat, [])
+        if not cat_turns:
+            continue
+        n = len(cat_turns)
+        stateless_answers = sum(
+            1 for t in cat_turns if t.agent_comparison.stateless_can_answer
+        )
+        agent_total_input = sum(t.agent_comparison.agent_input_tokens for t in cat_turns)
+        agent_total_output = sum(t.agent_comparison.agent_output_tokens for t in cat_turns)
+        agent_total_steps = sum(t.agent_comparison.agent_steps for t in cat_turns)
+        acervo_total_warm = sum(t.warm_tokens for t in cat_turns)
+        acervo_effective = sum(1 for t in cat_turns if t.effectiveness_passed)
+
+        result.resolve_scorecard[cat] = {
+            "turns": n,
+            "stateless": {
+                "can_answer": stateless_answers,
+                "pct": round(stateless_answers / n * 100),
+            },
+            "agent_with_tools": {
+                "can_answer": n,  # agent can always answer with tools
+                "total_steps": agent_total_steps,
+                "avg_steps": round(agent_total_steps / n, 1),
+                "total_input_tokens": agent_total_input,
+                "avg_input_tokens": round(agent_total_input / n),
+                "total_output_tokens": agent_total_output,
+            },
+            "acervo": {
+                "can_answer": acervo_effective,
+                "pct": round(acervo_effective / n * 100),
+                "total_warm_tokens": acervo_total_warm,
+                "avg_warm_tokens": round(acervo_total_warm / n),
+            },
+            "efficiency_ratio": (
+                round(agent_total_input / acervo_total_warm, 1)
+                if acervo_total_warm > 0 else 0
+            ),
+        }
+
+    # Per-turn efficiency chart data (the "killer chart")
+    for t in turns:
+        ac = t.agent_comparison
+        result.efficiency_chart.append({
+            "turn": t.turn,
+            "category": t.category,
+            "user_msg": t.user_msg,
+            "stateless_can_answer": ac.stateless_can_answer,
+            "agent_input_tokens": ac.agent_input_tokens,
+            "agent_steps": ac.agent_steps,
+            "acervo_warm_tokens": t.warm_tokens,
+            "ratio": (
+                round(ac.agent_input_tokens / t.warm_tokens, 1)
+                if t.warm_tokens > 0 else 0
+            ),
+        })
 
 
 # ── Reports ──
@@ -439,14 +548,53 @@ def _print_diagnostic(r: BenchmarkResult) -> None:
                 print(f"       {f}")
 
 
+def _print_scorecard(r: BenchmarkResult) -> None:
+    if not r.resolve_scorecard:
+        return
+    print(f"\n  APPROACH COMPARISON")
+    print(f"  {'=' * 60}")
+    for cat, data in r.resolve_scorecard.items():
+        n = data["turns"]
+        st = data["stateless"]
+        ag = data["agent_with_tools"]
+        ac = data["acervo"]
+        ratio = data["efficiency_ratio"]
+
+        print(f"\n  {cat} ({n} turns)")
+        print(f"  {'-' * 55}")
+        print(f"  {'Approach':20s} {'Answers':>8s} {'Avg Tokens':>12s} {'Avg Steps':>10s}")
+        print(f"  {'-' * 55}")
+        print(f"  {'Stateless LLM':20s} {st['pct']:>7.0f}% {'--':>12s} {'--':>10s}")
+        print(f"  {'Agent + Tools':20s} {'100':>7s}% {ag['avg_input_tokens']:>12,d} {ag['avg_steps']:>10.1f}")
+        print(f"  {'Acervo':20s} {ac['pct']:>7.0f}% {ac['avg_warm_tokens']:>12,d} {'0':>10s}")
+        print(f"  {'-' * 55}")
+        print(f"  Efficiency ratio: {ratio}x fewer tokens than agent")
+
+    # Killer chart: per-turn token comparison
+    if r.efficiency_chart:
+        print(f"\n  EFFICIENCY CHART (Agent tokens vs Acervo tokens)")
+        print(f"  {'-' * 65}")
+        print(f"  {'Turn':>4s}  {'Cat':8s} {'Agent':>7s} {'Acervo':>7s} {'Ratio':>6s}  Question")
+        print(f"  {'-' * 65}")
+        for row in r.efficiency_chart:
+            bar = "#" * min(int(row["ratio"]), 30) if row["ratio"] > 0 else "-"
+            print(
+                f"  {row['turn']:4d}  {row['category']:8s} "
+                f"{row['agent_input_tokens']:>7,d} {row['acervo_warm_tokens']:>7,d} "
+                f"{row['ratio']:>5.1f}x  {row['user_msg'][:35]}"
+            )
+
+
 def _export_reports(r: BenchmarkResult) -> None:
     _REPORTS.mkdir(parents=True, exist_ok=True)
 
-    # Public JSON
+    # Public JSON (includes scorecard + efficiency)
     public = {
         "version": r.version,
         "total_turns": r.total_turns,
         "scores": r.category_scores,
+        "resolve_scorecard": r.resolve_scorecard,
+        "efficiency_chart": r.efficiency_chart,
     }
     (_REPORTS / "benchmark_public.json").write_text(
         json.dumps(public, indent=2), encoding="utf-8"
@@ -454,7 +602,6 @@ def _export_reports(r: BenchmarkResult) -> None:
 
     # Diagnostic JSON
     diag = asdict(r)
-    # Trim warm content from turns to keep size reasonable
     for t in diag.get("turns", []):
         t.pop("warm_content", None)
     (_REPORTS / "benchmark_diagnostic.json").write_text(
@@ -467,11 +614,58 @@ def _export_reports(r: BenchmarkResult) -> None:
         f"",
         f"**{r.total_turns} turns** across 3 projects",
         f"",
+        f"## Category Scores",
+        f"",
         f"| Category | Score |",
         f"|----------|-------|",
     ]
     for cat in CATEGORIES:
         lines.append(f"| {cat} | {r.category_scores.get(cat, 0):.0f}% |")
+
+    # Approach comparison table
+    if r.resolve_scorecard:
+        lines.append(f"")
+        lines.append(f"## Approach Comparison")
+        lines.append(f"")
+        lines.append(f"How Acervo compares to a stateless LLM and an agent with tools:")
+        lines.append(f"")
+        for cat, data in r.resolve_scorecard.items():
+            st = data["stateless"]
+            ag = data["agent_with_tools"]
+            ac = data["acervo"]
+            ratio = data["efficiency_ratio"]
+            lines.append(f"### {cat} ({data['turns']} turns)")
+            lines.append(f"")
+            lines.append(f"| Approach | Can Answer | Avg Input Tokens | Avg Steps |")
+            lines.append(f"|----------|-----------|-----------------|-----------|")
+            lines.append(f"| Stateless LLM | {st['pct']}% | -- | -- |")
+            lines.append(
+                f"| Agent + Tools | 100% | "
+                f"{ag['avg_input_tokens']:,} | {ag['avg_steps']} |"
+            )
+            lines.append(
+                f"| **Acervo** | **{ac['pct']}%** | "
+                f"**{ac['avg_warm_tokens']:,}** | **0** |"
+            )
+            lines.append(f"")
+            lines.append(f"> **{ratio}x** fewer tokens than agent approach")
+            lines.append(f"")
+
+    # Efficiency chart
+    if r.efficiency_chart:
+        lines.append(f"## Efficiency Chart")
+        lines.append(f"")
+        lines.append(f"Per-turn token comparison (Agent vs Acervo):")
+        lines.append(f"")
+        lines.append(f"| Turn | Category | Agent Tokens | Acervo Tokens | Ratio | Question |")
+        lines.append(f"|------|----------|-------------|--------------|-------|----------|")
+        for row in r.efficiency_chart:
+            lines.append(
+                f"| {row['turn']} | {row['category']} | "
+                f"{row['agent_input_tokens']:,} | {row['acervo_warm_tokens']:,} | "
+                f"{row['ratio']}x | {row['user_msg']} |"
+            )
+
     (_REPORTS / "benchmark_public.md").write_text(
         "\n".join(lines), encoding="utf-8"
     )
@@ -492,11 +686,64 @@ def _export_reports(r: BenchmarkResult) -> None:
     dlines.append(f"## S1 Failures: {len(r.s1_failures)}")
     for f in r.s1_failures:
         dlines.append(f"- Turn {f['turn']}: expected={f['expected']}, got={f['actual']}")
+
+    # Cross-matrix in diagnostic
+    if r.matrix:
+        dlines.append(f"")
+        dlines.append(f"## Cross-Matrix (Category x Component)")
+        dlines.append(f"")
+        dlines.append(
+            f"| Category | S1 Intent | S2 Activation | S3 Budget | S3 Quality | Score |"
+        )
+        dlines.append(f"|----------|-----------|---------------|-----------|------------|-------|")
+        for cat in CATEGORIES:
+            if cat not in r.matrix:
+                continue
+            m = r.matrix[cat]
+            row_vals = []
+            for c in COMPONENTS:
+                v = m.get(c, -1)
+                row_vals.append(f"{v:.0f}%" if v >= 0 else "n/a")
+            dlines.append(
+                f"| {cat} | {' | '.join(row_vals)} | {m.get('score', 0):.0f}% |"
+            )
+
     (_REPORTS / "benchmark_diagnostic.md").write_text(
         "\n".join(dlines), encoding="utf-8"
     )
 
+    # Version history (append to versions.json)
+    _update_version_history(r)
+
     print(f"\n  Reports: {_REPORTS}/benchmark_*.json|md")
+
+
+def _update_version_history(r: BenchmarkResult) -> None:
+    """Append current result to version history for cross-version comparison."""
+    history_path = _REPORTS / "version_history.json"
+    history: list[dict] = []
+    if history_path.exists():
+        try:
+            history = json.loads(history_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, ValueError):
+            history = []
+
+    entry = {
+        "version": r.version,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "total_turns": r.total_turns,
+        "category_scores": r.category_scores,
+        "component_scores": r.component_scores,
+        "resolve_scorecard": r.resolve_scorecard,
+    }
+
+    # Replace existing entry for same version or append
+    history = [h for h in history if h.get("version") != r.version]
+    history.append(entry)
+
+    history_path.write_text(
+        json.dumps(history, indent=2), encoding="utf-8"
+    )
 
 
 # ── Tests ──
@@ -520,6 +767,7 @@ class TestBenchmarks:
 
         _print_public(result)
         _print_diagnostic(result)
+        _print_scorecard(result)
         _export_reports(result)
 
         # Soft assertions — this is a benchmark, not a gate

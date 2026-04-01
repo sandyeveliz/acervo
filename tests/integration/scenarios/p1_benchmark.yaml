@@ -17,6 +17,15 @@ turns:
       context_contains: ["files"]
     effectiveness:
       stateless_can_answer: false
+    agent_comparison:
+      stateless: { can_answer: false }
+      agent_with_tools:
+        steps: 2
+        tools: ["list_directory", "list_directory"]
+        estimated_input_tokens: 3500
+        estimated_output_tokens: 200
+      acervo:
+        expected_warm_tokens: 300
 
   - turn: 2
     user: "What technologies does this project use?"
@@ -33,6 +42,15 @@ turns:
       context_not_contains: ["nuxt", "mongodb", "angular", "django"]
     effectiveness:
       stateless_can_answer: false
+    agent_comparison:
+      stateless: { can_answer: false }
+      agent_with_tools:
+        steps: 4
+        tools: ["list_directory", "read_file", "read_file", "read_file"]
+        estimated_input_tokens: 8000
+        estimated_output_tokens: 300
+      acervo:
+        expected_warm_tokens: 300
 
   - turn: 3
     user: "How does authentication work in this app?"
@@ -78,6 +96,15 @@ turns:
       context_contains_any: ["route", "endpoint", "get", "post"]
     effectiveness:
       stateless_can_answer: false
+    agent_comparison:
+      stateless: { can_answer: false }
+      agent_with_tools:
+        steps: 3
+        tools: ["file_search", "read_file", "read_file"]
+        estimated_input_tokens: 6000
+        estimated_output_tokens: 250
+      acervo:
+        expected_warm_tokens: 500
 
   - turn: 6
     user: "Interesting, this is a well-structured project"
@@ -158,6 +185,15 @@ turns:
       context_contains_any: ["api", "fetch", "http", "client"]
     effectiveness:
       stateless_can_answer: false
+    agent_comparison:
+      stateless: { can_answer: false }
+      agent_with_tools:
+        steps: 4
+        tools: ["file_search", "read_file", "read_file", "read_file"]
+        estimated_input_tokens: 9000
+        estimated_output_tokens: 300
+      acervo:
+        expected_warm_tokens: 500
 
   - turn: 14
     user: "Does this project use GraphQL?"
@@ -165,6 +201,15 @@ turns:
     assistant_sim: "No, the project uses REST endpoints, not GraphQL."
     s3:
       context_not_contains: ["graphql"]
+    agent_comparison:
+      stateless: { can_answer: false }
+      agent_with_tools:
+        steps: 2
+        tools: ["file_search", "file_search"]
+        estimated_input_tokens: 4000
+        estimated_output_tokens: 150
+      acervo:
+        expected_warm_tokens: 200
 
   - turn: 15
     user: "Is there a Python backend?"
@@ -172,6 +217,15 @@ turns:
     assistant_sim: "No, the backend is written in TypeScript using Express.js."
     s3:
       context_not_contains: ["python", "django", "flask"]
+    agent_comparison:
+      stateless: { can_answer: false }
+      agent_with_tools:
+        steps: 2
+        tools: ["list_directory", "file_search"]
+        estimated_input_tokens: 3500
+        estimated_output_tokens: 150
+      acervo:
+        expected_warm_tokens: 200
 
   - turn: 16
     user: "What data models are defined?"
@@ -183,6 +237,15 @@ turns:
       activate_files_containing: ["model"]
     effectiveness:
       stateless_can_answer: false
+    agent_comparison:
+      stateless: { can_answer: false }
+      agent_with_tools:
+        steps: 3
+        tools: ["file_search", "read_file", "read_file"]
+        estimated_input_tokens: 7000
+        estimated_output_tokens: 250
+      acervo:
+        expected_warm_tokens: 400
 
   - turn: 17
     user: "Give me a high-level summary of the whole project"
@@ -206,6 +269,15 @@ turns:
       activate_files_containing: ["error", "middleware"]
     effectiveness:
       stateless_can_answer: false
+    agent_comparison:
+      stateless: { can_answer: false }
+      agent_with_tools:
+        steps: 3
+        tools: ["file_search", "read_file", "read_file"]
+        estimated_input_tokens: 6500
+        estimated_output_tokens: 250
+      acervo:
+        expected_warm_tokens: 400
 
   - turn: 19
     user: "Ok, I think I understand the project now"
