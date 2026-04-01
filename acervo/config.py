@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 class ModelConfig:
     """Configuration for the utility model used by Acervo's pipeline."""
 
-    name: str = "qwen3.5-9b"
+    name: str = "acervo-extractor-qwen3.5-9b"
     url: str = "http://localhost:1234/v1"
     api_key: str = ""
 
@@ -58,9 +58,9 @@ class ChangelogConfig:
 class EmbeddingsConfig:
     """Configuration for the embeddings model (optional, used for topic detection L2)."""
 
-    url: str = ""
-    model: str = ""
-    api_key: str = ""
+    url: str = "http://localhost:11434"
+    model: str = "qwen3-embedding"
+    api_key: str = "ollama-key"
 
     def resolve(self) -> EmbeddingsConfig:
         """Return a copy with env var overrides applied."""
@@ -363,7 +363,8 @@ owner = "{self.owner}"
 description = "{self.description}"
 
 [acervo.model]
-# Utility model for Acervo's internal pipeline (extraction, planning, etc.)
+# Single model for everything — fine-tuned Qwen3.5-9B handles chat + extraction.
+# Behavior is determined by the system prompt, not the model.
 name = "{self.model.name}"
 url = "{self.model.url}"
 # api_key = "{self.model.api_key}"
