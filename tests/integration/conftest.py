@@ -71,7 +71,9 @@ def _ensure_indexed(project_path: Path) -> None:
         if content and content != "[]":
             return  # Already has data, skip
 
-    log.info("Auto-indexing fixture: %s", project_path.name)
+    print(f"\n{'='*60}")
+    print(f"  AUTO-INDEXING: {project_path.name}")
+    print(f"{'='*60}")
 
     from acervo.project import init_project, load_project
     from acervo.graph import TopicGraph
@@ -118,40 +120,45 @@ def _ensure_indexed(project_path: Path) -> None:
     result = asyncio.get_event_loop().run_until_complete(
         indexer.index(project.workspace_root, extensions=project.extensions)
     )
-    log.info(
-        "  Indexed: %d files, %d nodes, %d edges in %.1fs",
-        result.files_analyzed, result.total_nodes, result.total_edges,
-        result.duration_seconds,
-    )
+    print(f"  INDEX: {result.files_analyzed} files, {result.total_nodes} nodes, "
+          f"{result.total_edges} edges ({result.duration_seconds:.1f}s)")
 
     # Curate
     try:
         from acervo.curator import curate_graph
         asyncio.get_event_loop().run_until_complete(curate_graph(graph, llm))
         graph.save()
-        log.info("  Curated: %d nodes", graph.node_count)
+        entities = sum(1 for n in graph.get_all_nodes() if n.get("kind") == "entity")
+        print(f"  CURATE: {graph.node_count} nodes, {entities} entities")
     except Exception as e:
-        log.warning("  Curate failed: %s", e)
+        print(f"  CURATE: FAILED — {e}")
 
     # Synthesize
     try:
         from acervo.graph_synthesizer import synthesize_graph
         asyncio.get_event_loop().run_until_complete(synthesize_graph(graph, llm))
         graph.save()
-        log.info("  Synthesized: %d nodes", graph.node_count)
+        synth = sum(1 for n in graph.get_all_nodes() if n.get("kind") == "synthesis")
+        print(f"  SYNTHESIZE: {graph.node_count} nodes, {synth} synthesis nodes")
     except Exception as e:
-        log.warning("  Synthesize failed: %s", e)
+        print(f"  SYNTHESIZE: FAILED — {e}")
 
 
 def pytest_configure(config):
     """Auto-index fixture projects before any tests run."""
+    # Enable logging so progress is visible during indexation
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)-7s %(message)s",
+        force=True,
+    )
+
     if not _FIXTURES.exists():
         return
 
     for project_dir in sorted(_FIXTURES.iterdir()):
         if not project_dir.is_dir() or project_dir.name.startswith("."):
             continue
-        # Only process p1, p2, p3 directories
         if not project_dir.name.startswith("p"):
             continue
         try:

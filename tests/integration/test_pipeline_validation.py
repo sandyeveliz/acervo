@@ -11,8 +11,10 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import sys
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -383,4 +385,47 @@ class TestPipelineSummary:
 
         lines.append("")
         lines.append("=" * 65)
-        print("\n".join(lines))
+        report_text = "\n".join(lines)
+        print(report_text)
+
+        # Export reports
+        reports_dir = _REPO_ROOT / "tests" / "integration" / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+
+        # Write JSON report
+        report_data = {"generated_at": datetime.now().isoformat(), "projects": {}}
+        for key, path in PROJECT_PATHS.items():
+            graph_path = path / ".acervo" / "data" / "graph"
+            if not graph_path.exists():
+                report_data["projects"][key] = {"status": "not_initialized"}
+                continue
+            g = TopicGraph(graph_path)
+            by_kind = _get_nodes_by_kind(g)
+            report_data["projects"][key] = {
+                "nodes": g.node_count,
+                "edges": g.edge_count,
+                "files": len(by_kind.get("file", [])),
+                "sections": len(by_kind.get("section", [])),
+                "symbols": len(by_kind.get("symbol", [])),
+                "folders": len(by_kind.get("folder", [])),
+                "entities": len(by_kind.get("entity", [])),
+                "entity_labels": [e.get("label") for e in by_kind.get("entity", [])],
+                "synthesis": len(by_kind.get("synthesis", [])),
+                "synthesis_ids": [s.get("id") for s in by_kind.get("synthesis", [])],
+                "chunks": sum(len(n.get("chunk_ids", [])) for n in g.get_all_nodes()),
+                "summaries": sum(1 for n in g.get_all_nodes() if n.get("attributes", {}).get("summary")),
+            }
+
+        json_path = reports_dir / "pipeline_diagnostic.json"
+        json_path.write_text(
+            json.dumps(report_data, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        # Write Markdown report
+        md_path = reports_dir / "pipeline_diagnostic.md"
+        md_path.write_text(report_text, encoding="utf-8")
+
+        print(f"\n  Reports saved to:")
+        print(f"    {json_path}")
+        print(f"    {md_path}")
