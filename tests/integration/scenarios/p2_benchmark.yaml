@@ -1,0 +1,142 @@
+name: p2_benchmark
+project_fixture: p2-literature
+
+turns:
+  - turn: 1
+    user: "What is this book about?"
+    category: RESOLVE
+    assistant_sim: "This is The Adventures of Sherlock Holmes by Arthur Conan Doyle, a collection of detective stories."
+    s1:
+      expected_intent: overview
+    s2:
+      activate_kinds: [synthesis, file]
+      not_activate_kinds: [section]
+    s3:
+      warm_tokens_max: 300
+      context_contains_any: ["sherlock", "holmes", "conan doyle"]
+    effectiveness:
+      stateless_can_answer: false
+
+  - turn: 2
+    user: "How many stories does it contain?"
+    category: RESOLVE
+    assistant_sim: "The collection contains 12 short stories."
+    s1:
+      expected_intent: overview
+    s3:
+      warm_tokens_max: 300
+    effectiveness:
+      stateless_can_answer: false
+
+  - turn: 3
+    user: "Who is Sherlock Holmes?"
+    category: GROUND
+    assistant_sim: "Sherlock Holmes is a consulting detective living at 221B Baker Street, known for his deductive reasoning."
+    s1:
+      expected_intent: specific
+    s3:
+      context_contains_any: ["holmes", "detective", "baker street"]
+
+  - turn: 4
+    user: "Tell me about Dr. Watson"
+    category: FOCUS
+    assistant_sim: "Dr. John Watson is Holmes's companion and the narrator of the stories."
+    s1:
+      expected_intent: specific
+    s2:
+      max_nodes: 10
+    s3:
+      warm_tokens_max: 600
+      context_contains_any: ["watson", "doctor", "john"]
+
+  - turn: 5
+    user: "What happens in A Scandal in Bohemia?"
+    category: FOCUS
+    assistant_sim: "A Scandal in Bohemia involves the King of Bohemia hiring Holmes to recover a photograph from Irene Adler."
+    s1:
+      expected_intent: specific
+    s3:
+      warm_tokens_min: 100
+      warm_tokens_max: 600
+      context_contains_any: ["scandal", "bohemia", "adler"]
+
+  - turn: 6
+    user: "Who is Irene Adler?"
+    category: GROUND
+    assistant_sim: "Irene Adler is a woman who outsmarts Holmes in A Scandal in Bohemia."
+    s1:
+      expected_intent: specific
+    s3:
+      context_contains_any: ["adler", "irene"]
+
+  - turn: 7
+    user: "What about The Red-Headed League? What's that story about?"
+    category: ADAPT
+    assistant_sim: "The Red-Headed League is about Jabez Wilson who joins a league for red-haired men, which turns out to be a cover for a bank robbery."
+    s1:
+      expected_intent: specific
+    s3:
+      context_contains_any: ["red-headed", "league"]
+      context_not_contains: ["adler", "bohemia"]
+
+  - turn: 8
+    user: "These are great detective stories"
+    category: FOCUS
+    assistant_sim: "Indeed, Conan Doyle's stories are classics of the detective genre."
+    s1:
+      expected_intent: chat
+    s3:
+      warm_tokens_max: 150
+
+  - turn: 9
+    user: "Going back to Irene Adler, why is she important?"
+    category: ADAPT
+    assistant_sim: "Irene Adler is significant because she's one of the few people to outsmart Holmes."
+    s1:
+      expected_intent: specific
+    s3:
+      context_contains_any: ["adler", "irene", "scandal"]
+
+  - turn: 10
+    user: "I think Holmes's deduction method is similar to scientific hypothesis testing"
+    category: RECALL
+    assistant_sim: "That's an interesting comparison. Holmes does follow a systematic approach."
+    s1_5:
+      should_extract_fact_containing: "deduction"
+
+  - turn: 11
+    user: "Does Professor Moriarty appear in these stories?"
+    category: GROUND
+    assistant_sim: "Moriarty is not a major character in The Adventures of Sherlock Holmes."
+
+  - turn: 12
+    user: "Where does Holmes live?"
+    category: RESOLVE
+    assistant_sim: "Holmes lives at 221B Baker Street, London."
+    s3:
+      context_contains_any: ["baker", "street", "221b"]
+    effectiveness:
+      stateless_can_answer: false
+
+  - turn: 13
+    user: "What did I say about Holmes's method earlier?"
+    category: RECALL
+    assistant_sim: "You compared his deduction method to scientific hypothesis testing."
+    s3:
+      context_contains_any: ["deduction", "scientific", "hypothesis"]
+
+  - turn: 14
+    user: "Overall, what themes run through these stories?"
+    category: ADAPT
+    assistant_sim: "The stories explore themes of justice, deduction, and the contrast between appearance and reality."
+    s1:
+      expected_intent: overview
+    s3:
+      warm_tokens_max: 400
+
+  - turn: 15
+    user: "So this is by Arthur Conan Doyle, right?"
+    category: GROUND
+    assistant_sim: "Yes, The Adventures of Sherlock Holmes was written by Sir Arthur Conan Doyle."
+    s3:
+      context_contains_any: ["conan doyle", "arthur"]

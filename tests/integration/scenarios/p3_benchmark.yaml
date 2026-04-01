@@ -1,0 +1,215 @@
+name: p3_benchmark
+project_fixture: p3-project-docs
+
+turns:
+  - turn: 1
+    user: "What project is documented here?"
+    category: RESOLVE
+    assistant_sim: "This is documentation for a Todo App project."
+    s1:
+      expected_intent: overview
+    s2:
+      activate_kinds: [synthesis]
+    s3:
+      warm_tokens_max: 300
+      context_contains: ["todo"]
+    effectiveness:
+      stateless_can_answer: false
+
+  - turn: 2
+    user: "What documents are available?"
+    category: RESOLVE
+    assistant_sim: "There are documents for roadmap, progress, sprints, issues, and architecture decisions."
+    s1:
+      expected_intent: overview
+    s2:
+      activate_kinds: [file, folder, synthesis]
+      not_activate_kinds: [section]
+    s3:
+      warm_tokens_max: 400
+    effectiveness:
+      stateless_can_answer: false
+
+  - turn: 3
+    user: "What issues are currently open?"
+    category: FOCUS
+    assistant_sim: "There are open issues for authentication, database migration, and UI improvements."
+    s1:
+      expected_intent: specific
+    s2:
+      activate_files_containing: ["issue"]
+      not_activate_files_containing: ["roadmap", "decision"]
+      max_nodes: 8
+    s3:
+      warm_tokens_min: 100
+      warm_tokens_max: 600
+      context_contains_any: ["issue", "open", "bug"]
+
+  - turn: 4
+    user: "What's the tech stack for this project?"
+    category: GROUND
+    assistant_sim: "The project uses Express.js, SQLite, and JWT for the backend."
+    s1:
+      expected_intent: specific
+    s3:
+      context_contains_any: ["express", "sqlite", "jwt"]
+      context_not_contains: ["django", "mongodb"]
+
+  - turn: 5
+    user: "What's in the current sprint?"
+    category: FOCUS
+    assistant_sim: "Sprint 1 includes auth implementation, basic CRUD, and database setup."
+    s1:
+      expected_intent: specific
+    s2:
+      activate_files_containing: ["sprint"]
+      max_nodes: 6
+    s3:
+      warm_tokens_max: 600
+      context_contains_any: ["sprint"]
+
+  - turn: 6
+    user: "Tell me about the roadmap instead"
+    category: ADAPT
+    assistant_sim: "The roadmap outlines phases from MVP to full features."
+    s1:
+      expected_intent: specific
+    s2:
+      activate_files_containing: ["roadmap"]
+      not_activate_files_containing: ["sprint", "issue"]
+    s3:
+      context_contains: ["roadmap"]
+      context_not_contains: ["sprint"]
+
+  - turn: 7
+    user: "What milestones are defined?"
+    category: RESOLVE
+    assistant_sim: "Milestones include MVP launch, beta testing, and full release."
+    s1:
+      expected_intent: specific
+    s3:
+      context_contains_any: ["milestone", "phase", "version"]
+    effectiveness:
+      stateless_can_answer: false
+
+  - turn: 8
+    user: "The client wants the MVP ready by end of Q2"
+    category: RECALL
+    assistant_sim: "Understood, Q2 deadline for the MVP noted."
+    s1_5:
+      should_extract_entity: "MVP"
+
+  - turn: 9
+    user: "Thanks for the overview"
+    category: FOCUS
+    assistant_sim: "You're welcome!"
+    s1:
+      expected_intent: chat
+    s3:
+      warm_tokens_max: 150
+
+  - turn: 10
+    user: "Back to the issues, what's the highest priority one?"
+    category: ADAPT
+    assistant_sim: "The authentication issue is the highest priority."
+    s1:
+      expected_intent: specific
+    s2:
+      activate_files_containing: ["issue"]
+    s3:
+      context_contains_any: ["issue", "priority"]
+
+  - turn: 11
+    user: "What's the auth issue specifically?"
+    category: FOCUS
+    assistant_sim: "The auth issue involves implementing JWT-based login and registration."
+    s1:
+      expected_intent: specific
+    s2:
+      max_nodes: 6
+    s3:
+      warm_tokens_max: 600
+      context_contains: ["auth"]
+
+  - turn: 12
+    user: "Why was SQLite chosen over PostgreSQL?"
+    category: GROUND
+    assistant_sim: "SQLite was chosen for simplicity during MVP. PostgreSQL migration is planned later."
+    s1:
+      expected_intent: specific
+    s2:
+      activate_files_containing: ["decision"]
+    s3:
+      context_contains_any: ["sqlite", "decision"]
+
+  - turn: 13
+    user: "Who are the developers working on this?"
+    category: RESOLVE
+    assistant_sim: "Sandy and Martin are the developers on this project."
+    s3:
+      context_contains_any: ["sandy", "martin"]
+    effectiveness:
+      stateless_can_answer: false
+
+  - turn: 14
+    user: "What was the deadline I mentioned?"
+    category: RECALL
+    assistant_sim: "You mentioned the client wants the MVP ready by end of Q2."
+    s3:
+      context_contains_any: ["q2", "mvp", "deadline"]
+
+  - turn: 15
+    user: "Is there a CI/CD pipeline set up?"
+    category: GROUND
+    assistant_sim: "I don't see CI/CD pipeline documentation in the project files."
+
+  - turn: 16
+    user: "Which issues are related to the current sprint?"
+    category: RESOLVE
+    assistant_sim: "The auth and database issues are part of Sprint 1."
+    s1:
+      expected_intent: specific
+    s3:
+      context_contains_any: ["sprint", "issue"]
+    effectiveness:
+      stateless_can_answer: false
+
+  - turn: 17
+    user: "What progress has been made so far?"
+    category: FOCUS
+    assistant_sim: "Authentication is partially complete, database schema is done."
+    s1:
+      expected_intent: specific
+    s2:
+      activate_files_containing: ["progress"]
+    s3:
+      warm_tokens_max: 600
+
+  - turn: 18
+    user: "Let's look at the architecture decisions"
+    category: ADAPT
+    assistant_sim: "The architecture decisions cover database choice, auth strategy, and framework selection."
+    s1:
+      expected_intent: specific
+    s2:
+      activate_files_containing: ["decision"]
+      not_activate_files_containing: ["sprint", "progress"]
+
+  - turn: 19
+    user: "Is Ron Weasley part of this project?"
+    category: GROUND
+    assistant_sim: "I don't see anyone named Ron Weasley in the project documentation."
+    s3:
+      context_not_contains: ["weasley", "ron weasley"]
+
+  - turn: 20
+    user: "Give me a final summary of the project status"
+    category: FOCUS
+    assistant_sim: "The Todo App is in Sprint 1 with auth and database as priority items."
+    s1:
+      expected_intent: overview
+    s2:
+      activate_kinds: [synthesis]
+      not_activate_kinds: [section]
+    s3:
+      warm_tokens_max: 300

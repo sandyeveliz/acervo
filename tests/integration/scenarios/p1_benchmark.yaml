@@ -1,0 +1,225 @@
+name: p1_benchmark
+project_fixture: p1-todo-app
+
+turns:
+  - turn: 1
+    user: "How many files does this project have?"
+    category: RESOLVE
+    assistant_sim: "The project has 31 files across multiple directories."
+    s1:
+      expected_intent: overview
+    s2:
+      activate_kinds: [file, folder, synthesis]
+      not_activate_kinds: [section, symbol]
+      max_nodes: 15
+    s3:
+      warm_tokens_max: 300
+      context_contains: ["files"]
+    effectiveness:
+      stateless_can_answer: false
+
+  - turn: 2
+    user: "What technologies does this project use?"
+    category: GROUND
+    assistant_sim: "The project uses Express.js for the backend, React for the frontend, SQLite for the database, and JWT for authentication."
+    s1:
+      expected_intent: overview
+    s2:
+      activate_kinds: [synthesis, entity]
+      max_nodes: 10
+    s3:
+      warm_tokens_max: 300
+      context_contains_any: ["express", "sqlite", "jwt", "react"]
+      context_not_contains: ["nuxt", "mongodb", "angular", "django"]
+    effectiveness:
+      stateless_can_answer: false
+
+  - turn: 3
+    user: "How does authentication work in this app?"
+    category: FOCUS
+    assistant_sim: "Authentication uses JWT tokens. The auth middleware validates tokens on protected routes."
+    s1:
+      expected_intent: specific
+    s2:
+      activate_files_containing: ["auth"]
+      not_activate_files_containing: ["todo", "styles", "index"]
+      min_nodes: 2
+      max_nodes: 8
+    s3:
+      warm_tokens_min: 100
+      warm_tokens_max: 600
+      context_contains: ["auth", "jwt"]
+      context_not_contains: ["todo.controller", "styles"]
+
+  - turn: 4
+    user: "What database does it use and how is it configured?"
+    category: FOCUS
+    assistant_sim: "The app uses SQLite. The database configuration is in config/database.ts."
+    s1:
+      expected_intent: specific
+    s2:
+      activate_files_containing: ["database", "config"]
+      min_nodes: 1
+      max_nodes: 6
+    s3:
+      warm_tokens_max: 600
+      context_contains: ["sqlite", "database"]
+
+  - turn: 5
+    user: "What routes does the API define?"
+    category: RESOLVE
+    assistant_sim: "The API defines routes for todo CRUD operations and authentication."
+    s1:
+      expected_intent: specific
+    s2:
+      activate_files_containing: ["route"]
+      min_nodes: 1
+    s3:
+      context_contains_any: ["route", "endpoint", "get", "post"]
+    effectiveness:
+      stateless_can_answer: false
+
+  - turn: 6
+    user: "Interesting, this is a well-structured project"
+    category: FOCUS
+    assistant_sim: "Thanks! Yes, it follows common patterns for Express+React apps."
+    s1:
+      expected_intent: chat
+    s3:
+      warm_tokens_max: 150
+
+  - turn: 7
+    user: "Let's look at the frontend. What components does it have?"
+    category: ADAPT
+    assistant_sim: "The frontend has components for todo list, todo item, and forms."
+    s1:
+      expected_intent: specific
+    s2:
+      activate_files_containing: ["component", "frontend"]
+      not_activate_files_containing: ["controller", "middleware", "model"]
+    s3:
+      context_contains_any: ["component", "react"]
+      context_not_contains: ["express", "middleware", "sqlite"]
+
+  - turn: 8
+    user: "What React hooks does the app use?"
+    category: FOCUS
+    assistant_sim: "The app uses custom hooks for data fetching and state management."
+    s1:
+      expected_intent: specific
+    s2:
+      activate_files_containing: ["hook", "use"]
+      max_nodes: 8
+    s3:
+      warm_tokens_max: 600
+      context_contains_any: ["hook", "use"]
+
+  - turn: 9
+    user: "By the way, the lead developer is Alice and she started in January"
+    category: RECALL
+    assistant_sim: "Got it, Alice is the lead developer since January."
+    s1_5:
+      should_extract_entity: "alice"
+
+  - turn: 10
+    user: "What's in the config directory?"
+    category: ADAPT
+    assistant_sim: "The config directory contains database and environment settings."
+    s1:
+      expected_intent: specific
+    s2:
+      activate_files_containing: ["config"]
+
+  - turn: 11
+    user: "Going back to authentication, what middleware does it use?"
+    category: ADAPT
+    assistant_sim: "The auth middleware validates JWT tokens on incoming requests."
+    s1:
+      expected_intent: specific
+    s2:
+      activate_files_containing: ["auth", "middleware"]
+    s3:
+      context_contains: ["middleware", "auth"]
+
+  - turn: 12
+    user: "Who is the lead developer of this project?"
+    category: RECALL
+    assistant_sim: "Alice is the lead developer, she started in January."
+    s3:
+      context_contains: ["alice"]
+
+  - turn: 13
+    user: "How does the frontend communicate with the backend?"
+    category: RESOLVE
+    assistant_sim: "The frontend uses an API client to make HTTP requests to the Express backend."
+    s1:
+      expected_intent: specific
+    s3:
+      context_contains_any: ["api", "fetch", "http", "client"]
+    effectiveness:
+      stateless_can_answer: false
+
+  - turn: 14
+    user: "Does this project use GraphQL?"
+    category: GROUND
+    assistant_sim: "No, the project uses REST endpoints, not GraphQL."
+    s3:
+      context_not_contains: ["graphql"]
+
+  - turn: 15
+    user: "Is there a Python backend?"
+    category: GROUND
+    assistant_sim: "No, the backend is written in TypeScript using Express.js."
+    s3:
+      context_not_contains: ["python", "django", "flask"]
+
+  - turn: 16
+    user: "What data models are defined?"
+    category: RESOLVE
+    assistant_sim: "The app defines a Todo model and a User model."
+    s1:
+      expected_intent: specific
+    s2:
+      activate_files_containing: ["model"]
+    effectiveness:
+      stateless_can_answer: false
+
+  - turn: 17
+    user: "Give me a high-level summary of the whole project"
+    category: FOCUS
+    assistant_sim: "This is a full-stack TODO app with React frontend, Express backend, SQLite database, and JWT authentication."
+    s1:
+      expected_intent: overview
+    s2:
+      activate_kinds: [synthesis]
+      not_activate_kinds: [symbol]
+    s3:
+      warm_tokens_max: 300
+
+  - turn: 18
+    user: "What error handling does the API have?"
+    category: RESOLVE
+    assistant_sim: "The API has error middleware that catches errors and returns formatted responses."
+    s1:
+      expected_intent: specific
+    s2:
+      activate_files_containing: ["error", "middleware"]
+    effectiveness:
+      stateless_can_answer: false
+
+  - turn: 19
+    user: "Ok, I think I understand the project now"
+    category: FOCUS
+    assistant_sim: "Great! Let me know if you have any other questions."
+    s1:
+      expected_intent: chat
+    s3:
+      warm_tokens_max: 150
+
+  - turn: 20
+    user: "Just to confirm, this is a React and Express app with SQLite, right?"
+    category: GROUND
+    assistant_sim: "Yes, that's correct. React frontend, Express backend, SQLite database."
+    s3:
+      context_contains_any: ["react", "express", "sqlite"]
+      context_not_contains: ["mongodb", "nuxt", "angular"]
