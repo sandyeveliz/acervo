@@ -22,6 +22,7 @@ from typing import Callable
 from acervo.graph import TopicGraph, _make_id
 from acervo.layers import Layer
 from acervo.llm import LLMClient
+from acervo.ontology import map_extractor_type
 
 log = logging.getLogger(__name__)
 
@@ -257,11 +258,11 @@ def _apply_curation(graph: TopicGraph, parsed: dict) -> dict:
     relations = parsed.get("relations", [])
     facts = parsed.get("facts", [])
 
-    # Create new entities
+    # Create new entities (map lowercase types to ontology-capitalized)
     entity_pairs = []
     for e in entities:
         name = e.get("name", "")
-        etype = e.get("type", "concept")
+        etype = map_extractor_type(e.get("type", "concept"))
         if name:
             entity_pairs.append((name, etype))
 

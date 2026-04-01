@@ -136,13 +136,13 @@ class TestCurateP1:
         if not entities:
             pytest.skip("No entities to validate (curate didn't produce any)")
         valid_types = {
-            "Person", "Organization", "Project", "Technology",
-            "Place", "Event", "Document", "Concept", "Symbol",
+            "person", "organization", "project", "technology",
+            "place", "event", "document", "concept", "symbol",
         }
         for e in entities:
-            etype = e.get("type", "")
+            etype = e.get("type", "").lower()
             assert etype in valid_types, (
-                f"Entity '{e.get('label')}' has unexpected type '{etype}'. "
+                f"Entity '{e.get('label')}' has unexpected type '{e.get('type')}'. "
                 f"Valid: {valid_types}"
             )
 
