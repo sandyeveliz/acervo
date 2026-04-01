@@ -28,38 +28,33 @@ log = logging.getLogger(__name__)
 BATCH_SIZE = 10
 MAX_SUMMARY_LEN = 200
 
+_CURATION_SYSTEM = """\
+You are a knowledge graph curator. You analyze project files and extract entities, relationships, and facts. Always respond with valid JSON only — no markdown, no explanation."""
+
 _CURATION_PROMPT = """\
-You are analyzing a collection of files in a project. For each file I provide:
-- File name and path
-- Summary (if available)
-- Section/chapter titles
+Analyze these project files and extract:
 
-Your job: discover meaningful relationships BETWEEN these files. Look for:
-1. **Series/saga ordering**: Which files are sequels, prequels, or parts of a series?
-2. **Shared elements**: Characters, themes, locations, or concepts that appear across files.
-3. **Hierarchical grouping**: Create parent entities (e.g., "Harry Potter Saga", "API Documentation") that group related files.
-4. **Authorship**: If you can identify a common author or creator.
-5. **Thematic connections**: Files that share topics, genres, or subject matter.
+1. **Named entities** found in or implied by the files — people, technologies, concepts, locations, organizations. Be specific: extract "Express.js", "SQLite", "JWT", "Sherlock Holmes", "Baker Street", etc.
+2. **Relationships** between entities and files — which technology is used by which module, which character appears in which chapter, which component depends on another.
+3. **Facts** — concrete claims grounded in the file names, paths, summaries, and sections.
 
-IMPORTANT:
-- Only create relationships you are confident about based on the file names, summaries, and section titles.
-- Use the node IDs provided (not labels) when referencing existing files.
-- For new entities (like a saga or author), provide a descriptive name and appropriate type.
+RULES:
+- Extract at least 3-5 entities per batch (technologies, people, concepts, locations)
+- Use node IDs (provided in parentheses) when referencing existing files
+- For new entities, use descriptive names and appropriate types
 
-Return ONLY valid JSON (no markdown, no explanation):
+Return ONLY this JSON (no extra text):
 {{
   "entities": [
-    {{"name": "Entity Name", "type": "concept|document|person|organization|event"}}
+    {{"name": "Entity Name", "type": "person|technology|concept|location|organization|document|event"}}
   ],
   "relations": [
-    {{"source": "node_id_or_new_name", "target": "node_id_or_new_name", "relation": "verb_phrase"}}
+    {{"source": "node_id_or_entity_name", "target": "node_id_or_entity_name", "relation": "uses_technology|created_by|appears_in|part_of|related_to|documented_in|depends_on|shares_theme_with"}}
   ],
   "facts": [
-    {{"entity": "node_id_or_name", "fact": "specific claim", "source": "curation"}}
+    {{"entity": "node_id_or_entity_name", "fact": "specific factual claim", "source": "curation"}}
   ]
 }}
-
-Valid relation types: part_of, sequel_of, prequel_of, created_by, shares_characters_with, shares_theme_with, related_to, contains, member_of, located_in, documented_in
 
 FILES:
 {files_block}
@@ -118,8 +113,11 @@ async def curate_graph(
             prompt = _CURATION_PROMPT.format(files_block=files_block)
 
             response = await llm.chat(
-                [{"role": "user", "content": prompt}],
-                temperature=0.1,
+                [
+                    {"role": "system", "content": _CURATION_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
                 max_tokens=2048,
             )
 
@@ -197,16 +195,29 @@ def _build_files_block(batch: list[dict], graph: TopicGraph) -> str:
         if summary:
             lines.append(f"Summary: {summary[:MAX_SUMMARY_LEN]}")
 
-        # Get child sections via CONTAINS edges
+        # Get child sections and their summaries via CONTAINS edges
         section_labels: list[str] = []
+        child_summaries: list[str] = []
         for edge in graph.get_edges_for(nid):
             if edge.get("relation") == "contains":
                 child_id = edge["target"] if edge["source"] == nid else edge["source"]
                 child = graph.get_node(child_id)
-                if child and child.get("kind") == "section":
-                    section_labels.append(child.get("label", ""))
+                if child and child.get("kind") in ("section", "symbol"):
+                    child_label = child.get("label", "")
+                    section_labels.append(child_label)
+                    # Include child summaries for richer context
+                    child_summary = child.get("attributes", {}).get("summary", "")
+                    if child_summary:
+                        child_summaries.append(f"{child_label}: {child_summary[:100]}")
+                    # Include facts from children
+                    for fact in child.get("facts", [])[:2]:
+                        fact_text = fact.get("fact", "") if isinstance(fact, dict) else str(fact)
+                        if fact_text:
+                            child_summaries.append(f"{child_label}: {fact_text[:100]}")
         if section_labels:
-            lines.append("Sections: " + ", ".join(section_labels[:15]))
+            lines.append("Sections: " + ", ".join(section_labels[:20]))
+        if child_summaries:
+            lines.append("Details:\n  " + "\n  ".join(child_summaries[:10]))
 
         parts.append("\n".join(lines))
 
