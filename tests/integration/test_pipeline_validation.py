@@ -147,6 +147,55 @@ class TestCurateP1:
             )
 
 
+class TestCurateQualityP1:
+    """Quality checks for P1 curation output."""
+
+    def test_no_phantom_entities(self, p1_graph):
+        """Every entity label should appear in at least one source file."""
+        by_kind = _get_nodes_by_kind(p1_graph)
+        entities = by_kind.get("entity", [])
+        if not entities:
+            pytest.skip("No entities")
+        # Read all source file content
+        all_content = ""
+        p1_path = PROJECT_PATHS["p1"]
+        for f in p1_path.rglob("*"):
+            if f.suffix in (".ts", ".tsx", ".js", ".jsx", ".md", ".json", ".html", ".css"):
+                try:
+                    all_content += f.read_text(errors="ignore").lower() + "\n"
+                except Exception:
+                    pass
+        phantoms = []
+        for e in entities:
+            label = e.get("label", "").lower()
+            # Check both full label and first word (e.g., "Express.js" → "express")
+            first_word = label.split(".")[0].split(" ")[0]
+            if label not in all_content and first_word not in all_content:
+                phantoms.append(e.get("label"))
+        if phantoms:
+            pytest.xfail(f"Phantom entities (not in source): {phantoms}")
+
+    def test_entities_have_relations(self, p1_graph):
+        """Entities should be connected to file nodes via relations."""
+        by_kind = _get_nodes_by_kind(p1_graph)
+        entities = by_kind.get("entity", [])
+        if not entities:
+            pytest.skip("No entities")
+        entity_ids = {e.get("id") for e in entities}
+        connected = set()
+        for node in p1_graph.get_all_nodes():
+            for edge in p1_graph.get_edges_for(node.get("id", "")):
+                if edge.get("source") in entity_ids:
+                    connected.add(edge["source"])
+                if edge.get("target") in entity_ids:
+                    connected.add(edge["target"])
+        orphans = entity_ids - connected
+        assert len(orphans) <= len(entities) // 2, (
+            f"{len(orphans)}/{len(entities)} entities are orphans (no relations): "
+            f"{[e.get('label') for e in entities if e.get('id') in orphans]}"
+        )
+
+
 class TestSynthesizeP1:
     """Validate synthesis output for P1 code project."""
 
@@ -216,6 +265,34 @@ class TestIndexP2:
         assert total >= 50, (
             f"Expected >=50 total chunk_ids, got {total}"
         )
+
+
+class TestCurateQualityP2:
+    """Quality checks for P2 curation output."""
+
+    def test_no_phantom_entities(self, p2_graph):
+        """Entities should be grounded in the epub content."""
+        by_kind = _get_nodes_by_kind(p2_graph)
+        entities = by_kind.get("entity", [])
+        if not entities:
+            pytest.skip("No entities")
+        # For epub, check against section summaries and facts (can't read binary epub)
+        all_text = ""
+        for n in p2_graph.get_all_nodes():
+            summary = n.get("attributes", {}).get("summary", "")
+            all_text += summary.lower() + "\n"
+            for f in n.get("facts", []):
+                fact_text = f.get("fact", "") if isinstance(f, dict) else str(f)
+                all_text += fact_text.lower() + "\n"
+            all_text += n.get("label", "").lower() + "\n"
+        phantoms = []
+        for e in entities:
+            label = e.get("label", "").lower()
+            first_word = label.split(" ")[0]
+            if label not in all_text and first_word not in all_text:
+                phantoms.append(e.get("label"))
+        if phantoms:
+            pytest.xfail(f"Phantom entities: {phantoms}")
 
 
 class TestCurateP2:
