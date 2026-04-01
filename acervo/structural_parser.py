@@ -73,6 +73,7 @@ class FileStructure:
     imports: list[Import] = field(default_factory=list)
     exports: list[Export] = field(default_factory=list)
     total_lines: int = 0
+    full_text: str = ""  # For binary formats (epub): flattened plaintext
 
 
 # ── Language detection ──
@@ -86,11 +87,41 @@ _LANG_MAP: dict[str, str] = {
     ".md": "markdown",
     ".html": "html",
     ".css": "css",
+    ".epub": "epub",
+    ".txt": "plaintext",
+    ".pdf": "pdf",
 }
 
 
 def _detect_language(file_path: Path) -> str:
     return _LANG_MAP.get(file_path.suffix.lower(), "unknown")
+
+
+# ── EPUB helpers ──
+
+def _epub_html_to_text(soup: Any) -> str:
+    """Convert parsed HTML from an EPUB document item to markdown-style text.
+
+    Preserves heading hierarchy as markdown markers (# / ## / ###) so the
+    downstream section detector can find chapter/sub-section boundaries.
+    """
+    # Replace heading tags with markdown markers before extracting text
+    for level in range(1, 7):
+        for tag in soup.find_all(f"h{level}"):
+            prefix = "#" * level
+            tag.replace_with(f"\n{prefix} {tag.get_text(strip=True)}\n")
+
+    # Replace paragraph and div breaks with newlines
+    for tag in soup.find_all(["p", "div", "br"]):
+        tag.append("\n")
+
+    text = soup.get_text()
+
+    # Collapse multiple blank lines into at most two
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    # Strip leading/trailing whitespace per line
+    lines = [line.strip() for line in text.split("\n")]
+    return "\n".join(lines).strip()
 
 
 # ── tree-sitter availability ──
@@ -119,9 +150,16 @@ class StructuralParser:
 
     def parse(self, file_path: Path, workspace_root: Path) -> FileStructure:
         """Analyze a file and return its structural breakdown."""
-        content = file_path.read_text(encoding="utf-8")
         relative = str(file_path.relative_to(workspace_root)).replace("\\", "/")
         language = _detect_language(file_path)
+
+        # Binary formats get their own parse path
+        if language == "epub":
+            return self._parse_epub_file(file_path, relative)
+        if language == "pdf":
+            return self._parse_pdf_file(file_path, relative)
+
+        content = file_path.read_text(encoding="utf-8")
         content_hash = hashlib.sha256(content.encode()).hexdigest()
         total_lines = content.count("\n") + 1
 
@@ -144,6 +182,8 @@ class StructuralParser:
             units = self._parse_html(content)
         elif language == "css":
             units = self._parse_css(content)
+        elif language == "plaintext":
+            units = self._parse_plaintext(content)
 
         for u in units:
             u.language = language
@@ -290,6 +330,248 @@ class StructuralParser:
                 current_selector = None
 
         return units
+
+    # ── EPUB parsing ──
+
+    def _parse_epub_file(self, file_path: Path, relative: str) -> FileStructure:
+        """Parse an EPUB file into structural units (chapters/sections).
+
+        Returns a complete FileStructure with full_text populated for
+        downstream enrichment (since epub is binary, not UTF-8 text).
+        """
+        try:
+            import warnings
+            from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
+            warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+            from ebooklib import epub, ITEM_DOCUMENT
+        except ImportError:
+            raise ImportError(
+                "EPUB support requires additional packages: "
+                "pip install acervo[epub]"
+            )
+
+        # Hash raw bytes for change detection
+        raw_bytes = file_path.read_bytes()
+        content_hash = hashlib.sha256(raw_bytes).hexdigest()
+
+        book = epub.read_epub(str(file_path))
+
+        # Extract text from spine-order documents
+        all_text_parts: list[str] = []
+        units: list[StructuralUnit] = []
+        cumulative_line = 1
+
+        # Get spine order (list of item IDs)
+        spine_ids = [item_id for item_id, _ in book.spine]
+
+        for item in book.get_items_of_type(ITEM_DOCUMENT):
+            if item.get_id() not in spine_ids:
+                continue
+
+            html_content = item.get_content()
+            soup = BeautifulSoup(html_content, "lxml")
+
+            # Extract chapter title from first heading or item title
+            chapter_title = None
+            first_heading = soup.find(re.compile(r"^h[1-3]$"))
+            if first_heading:
+                chapter_title = first_heading.get_text(strip=True)
+            if not chapter_title:
+                title_tag = soup.find("title")
+                if title_tag and title_tag.get_text(strip=True):
+                    chapter_title = title_tag.get_text(strip=True)
+            if not chapter_title:
+                # Use filename without extension
+                chapter_title = item.get_name().rsplit("/", 1)[-1].rsplit(".", 1)[0]
+
+            # Skip navigation/toc items with no real content
+            text = _epub_html_to_text(soup)
+            if len(text.strip()) < 50:
+                continue
+
+            text_lines = text.split("\n")
+            start_line = cumulative_line
+            end_line = cumulative_line + len(text_lines) - 1
+
+            # Create chapter-level section
+            units.append(StructuralUnit(
+                name=chapter_title,
+                unit_type="section",
+                start_line=start_line,
+                end_line=end_line,
+                parent=None,
+                language="markdown",
+                signature=f"# {chapter_title}",
+            ))
+
+            # Detect sub-sections from h2/h3 headings within this chapter
+            current_line = start_line
+            for line in text_lines:
+                heading_match = re.match(r"^(#{2,3})\s+(.+)", line)
+                if heading_match:
+                    level = len(heading_match.group(1))
+                    sub_title = heading_match.group(2).strip()
+                    # Find the end of this sub-section (next heading or chapter end)
+                    sub_start = current_line
+                    sub_end = end_line  # default to chapter end
+                    for future_line_idx, future_line in enumerate(
+                        text_lines[current_line - start_line + 1:], start=current_line + 1
+                    ):
+                        if re.match(r"^#{1,3}\s+", future_line):
+                            sub_end = future_line_idx - 1
+                            break
+                    if sub_end >= sub_start:
+                        units.append(StructuralUnit(
+                            name=sub_title,
+                            unit_type="section",
+                            start_line=sub_start,
+                            end_line=sub_end,
+                            parent=chapter_title,
+                            language="markdown",
+                            signature=f"{'#' * level} {sub_title}",
+                        ))
+                current_line += 1
+
+            all_text_parts.append(text)
+            cumulative_line = end_line + 1
+
+        full_text = "\n".join(all_text_parts)
+        total_lines = full_text.count("\n") + 1 if full_text else 0
+
+        return FileStructure(
+            file_path=relative,
+            language="epub",
+            content_hash=content_hash,
+            units=units,
+            total_lines=total_lines,
+            full_text=full_text,
+        )
+
+    # ── Plain text parsing ──
+
+    def _parse_plaintext(self, content: str) -> list[StructuralUnit]:
+        """Split plain text into sections by blank-line-separated paragraphs.
+
+        Groups consecutive paragraphs into ~50-line sections to avoid
+        one-unit-per-paragraph granularity.
+        """
+        lines = content.split("\n")
+        sections: list[StructuralUnit] = []
+        section_start = 0
+        section_lines: list[str] = []
+        section_idx = 1
+
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            section_lines.append(line)
+
+            # Split on double blank lines or every ~50 lines
+            is_double_blank = (
+                not stripped
+                and i > 0
+                and not lines[i - 1].strip()
+            )
+            is_long = len(section_lines) >= 50
+
+            if (is_double_blank or is_long) and len(section_lines) > 2:
+                # Use first non-empty line as title
+                title = next(
+                    (l.strip()[:80] for l in section_lines if l.strip()),
+                    f"Section {section_idx}",
+                )
+                sections.append(StructuralUnit(
+                    name=title,
+                    unit_type="section",
+                    start_line=section_start + 1,
+                    end_line=i + 1,
+                    language="plaintext",
+                    signature=title,
+                ))
+                section_idx += 1
+                section_start = i + 1
+                section_lines = []
+
+        # Remaining lines
+        if section_lines and any(l.strip() for l in section_lines):
+            title = next(
+                (l.strip()[:80] for l in section_lines if l.strip()),
+                f"Section {section_idx}",
+            )
+            sections.append(StructuralUnit(
+                name=title,
+                unit_type="section",
+                start_line=section_start + 1,
+                end_line=len(lines),
+                language="plaintext",
+                signature=title,
+            ))
+
+        return sections
+
+    # ── PDF parsing ──
+
+    def _parse_pdf_file(self, file_path: Path, relative: str) -> FileStructure:
+        """Extract text and structure from a PDF using PyMuPDF (fitz).
+
+        Falls back to page-based sectioning if no headings are detected.
+        """
+        try:
+            import fitz  # PyMuPDF
+        except ImportError:
+            raise ImportError(
+                "PyMuPDF is required for PDF parsing. Install with: "
+                "pip install PyMuPDF  (or: pip install acervo[pdf])"
+            )
+
+        doc = fitz.open(str(file_path))
+        content_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+
+        all_text_parts: list[str] = []
+        units: list[StructuralUnit] = []
+        cumulative_line = 1
+
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            text = page.get_text("text")
+            if not text or not text.strip():
+                continue
+
+            lines = text.split("\n")
+            line_count = len(lines)
+            start_line = cumulative_line
+            end_line = cumulative_line + line_count - 1
+
+            # Use first non-empty line as section title
+            title = next(
+                (l.strip()[:80] for l in lines if l.strip()),
+                f"Page {page_num + 1}",
+            )
+
+            units.append(StructuralUnit(
+                name=title,
+                unit_type="section",
+                start_line=start_line,
+                end_line=end_line,
+                language="pdf",
+                signature=f"# Page {page_num + 1}: {title}",
+            ))
+
+            all_text_parts.append(text)
+            cumulative_line = end_line + 1
+
+        doc.close()
+
+        full_text = "\n".join(all_text_parts)
+        total_lines = full_text.count("\n") + 1 if full_text else 0
+
+        return FileStructure(
+            file_path=relative,
+            language="pdf",
+            content_hash=content_hash,
+            units=units,
+            total_lines=total_lines,
+            full_text=full_text,
+        )
 
     # ── Import extraction ──
 

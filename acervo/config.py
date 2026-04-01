@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 class ModelConfig:
     """Configuration for the utility model used by Acervo's pipeline."""
 
-    name: str = "qwen3.5-9b"
+    name: str = "acervo-extractor-qwen3.5-9b"
     url: str = "http://localhost:1234/v1"
     api_key: str = ""
 
@@ -58,9 +58,9 @@ class ChangelogConfig:
 class EmbeddingsConfig:
     """Configuration for the embeddings model (optional, used for topic detection L2)."""
 
-    url: str = ""
-    model: str = ""
-    api_key: str = ""
+    url: str = "http://localhost:11434"
+    model: str = "qwen3-embedding"
+    api_key: str = "ollama-key"
 
     def resolve(self) -> EmbeddingsConfig:
         """Return a copy with env var overrides applied."""
@@ -85,7 +85,7 @@ class IndexingConfig:
     """What files to index."""
 
     extensions: list[str] = field(
-        default_factory=lambda: [".py", ".ts", ".js", ".tsx", ".jsx", ".md", ".html", ".css"]
+        default_factory=lambda: [".py", ".ts", ".js", ".tsx", ".jsx", ".md", ".html", ".css", ".epub"]
     )
     ignore: list[str] = field(
         default_factory=lambda: [
@@ -93,6 +93,7 @@ class IndexingConfig:
             "build", ".next", ".acervo",
         ]
     )
+    content_type: str = "auto"  # "auto" | "code" | "prose"
 
 
 @dataclass
@@ -190,6 +191,7 @@ class AcervoConfig:
     workspace: str = "."
     data_dir: str = ".acervo/data"
     owner: str = ""
+    description: str = ""
     model: ModelConfig = field(default_factory=ModelConfig)
     models: ModelsConfig = field(default_factory=ModelsConfig)
     embeddings: EmbeddingsConfig = field(default_factory=EmbeddingsConfig)
@@ -234,6 +236,7 @@ class AcervoConfig:
             workspace=acervo.get("workspace", "."),
             data_dir=acervo.get("data_dir", ".acervo/data"),
             owner=acervo.get("owner", ""),
+            description=acervo.get("description", ""),
         )
 
         model_raw = acervo.get("model", {})
@@ -279,6 +282,8 @@ class AcervoConfig:
             )
         if "ignore" in indexing_raw:
             config.indexing.ignore = indexing_raw["ignore"]
+        if "content_type" in indexing_raw:
+            config.indexing.content_type = indexing_raw["content_type"]
 
         changelog_raw = acervo.get("changelog", {})
         if changelog_raw:
@@ -355,9 +360,11 @@ class AcervoConfig:
 workspace = "{self.workspace}"
 data_dir = "{self.data_dir}"
 owner = "{self.owner}"
+description = "{self.description}"
 
 [acervo.model]
-# Utility model for Acervo's internal pipeline (extraction, planning, etc.)
+# Single model for everything — fine-tuned Qwen3.5-9B handles chat + extraction.
+# Behavior is determined by the system prompt, not the model.
 name = "{self.model.name}"
 url = "{self.model.url}"
 # api_key = "{self.model.api_key}"
@@ -391,6 +398,7 @@ delete_tools = [{delete_tools}]
 [acervo.indexing]
 extensions = [{exts}]
 ignore = [{ignore}]
+content_type = "{self.indexing.content_type}"
 
 [acervo.context]
 max_tokens = {self.context.max_tokens}
@@ -444,6 +452,8 @@ frontend_port = {svc.frontend_port}
             return self.data_dir
         if section == "owner" and not attr:
             return self.owner
+        if section == "description" and not attr:
+            return self.description
 
         obj = getattr(self, section, None)
         if obj is None:
@@ -470,6 +480,9 @@ frontend_port = {svc.frontend_port}
             return
         if section == "owner" and not attr:
             self.owner = value
+            return
+        if section == "description" and not attr:
+            self.description = value
             return
 
         obj = getattr(self, section, None)

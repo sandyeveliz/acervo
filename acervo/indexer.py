@@ -107,6 +107,7 @@ DEFAULT_EXCLUDES: set[str] = {
 
 DEFAULT_EXTENSIONS: set[str] = {
     ".ts", ".tsx", ".js", ".jsx", ".py", ".md", ".html", ".css",
+    ".epub", ".txt", ".pdf",
 }
 
 
@@ -123,6 +124,7 @@ class Indexer:
         embedder: Embedder | None = None,
         vector_store: VectorStore | None = None,
         on_event: Callable | None = None,
+        content_type: str = "auto",
     ) -> None:
         """
         Args:
@@ -131,6 +133,7 @@ class Indexer:
             embedder: Optional embedder for chunk embeddings.
             vector_store: Optional vector store for embedding storage.
             on_event: Optional callback for progress events.
+            content_type: Content type hint ("auto", "code", "prose").
         """
         self._graph = graph
         self._llm = llm
@@ -138,7 +141,9 @@ class Indexer:
         self._vector_store = vector_store
         self._on_event = on_event
         self._parser = StructuralParser()
-        self._enricher = SemanticEnricher(llm=llm, embedder=embedder)
+        self._enricher = SemanticEnricher(
+            llm=llm, embedder=embedder, content_type=content_type,
+        )
 
     def _emit(self, event: object) -> None:
         """Emit a progress event to the callback."""
@@ -226,7 +231,10 @@ class Indexer:
             for structure in structures:
                 try:
                     file_path = workspace_root / structure.file_path
-                    content = file_path.read_text(encoding="utf-8")
+                    if structure.full_text:
+                        content = structure.full_text
+                    else:
+                        content = file_path.read_text(encoding="utf-8")
 
                     enrichment = await self._enricher.enrich_file(structure, content)
 
@@ -257,6 +265,10 @@ class Indexer:
                         file_path=structure.file_path, error=str(e),
                     ))
                     log.warning("Phase 2 error: %s", err_msg)
+
+        # Phase 3: Cross-file semantic edges from shared topics
+        if self._llm:
+            self._create_cross_file_edges()
 
         # Final save
         self._graph.save()
@@ -399,16 +411,25 @@ class Indexer:
                 # Store summary and topics as node attributes
                 attrs = node.setdefault("attributes", {})
                 attrs["summary"] = matching.summary
-                attrs["topics"] = matching.topics
+                # Sanitize topics: LLM may return dicts instead of strings
+                attrs["topics"] = [
+                    str(t) if not isinstance(t, str) else t
+                    for t in matching.topics
+                    if t
+                ]
                 if matching.implicit_relations:
-                    attrs["implicit_relations"] = matching.implicit_relations
+                    attrs["implicit_relations"] = [
+                        str(r) if not isinstance(r, str) else r
+                        for r in matching.implicit_relations
+                        if r
+                    ]
 
     def _create_semantic_edges(
         self,
         structure: FileStructure,
         summaries: list[SemanticSummary],
     ) -> None:
-        """Create semantic 'related_to' edges from topic overlap between nodes."""
+        """Create semantic 'related_to' edges from topic overlap within a file."""
         # Group nodes by topic
         topic_to_nodes: dict[str, list[str]] = {}
 
@@ -419,6 +440,8 @@ class Indexer:
                 continue
             topics = node.get("attributes", {}).get("topics", [])
             for topic in topics:
+                if not isinstance(topic, str):
+                    continue
                 topic_to_nodes.setdefault(topic, []).append(node_id)
 
         # Create edges between nodes that share topics
@@ -435,3 +458,70 @@ class Indexer:
                             weight=0.6,
                             edge_type="semantic",
                         )
+
+    def _create_cross_file_edges(self) -> None:
+        """Create semantic edges between nodes in different files that share topics.
+
+        Runs after all files have been enriched so cross-file relationships
+        (e.g., same character appearing in multiple chapters) are connected.
+        """
+        _MAX_PAIRS_PER_TOPIC = 20
+
+        topic_to_nodes: dict[str, list[str]] = {}
+
+        for node in self._graph.get_all_nodes():
+            topics = node.get("attributes", {}).get("topics", [])
+            node_id = node.get("id", "")
+            if not topics or not node_id:
+                continue
+            for topic in topics:
+                if not isinstance(topic, str):
+                    continue
+                topic_lower = topic.lower().strip()
+                if topic_lower:
+                    topic_to_nodes.setdefault(topic_lower, []).append(node_id)
+
+        edges_created = 0
+        for topic, node_ids in topic_to_nodes.items():
+            if len(node_ids) < 2 or len(node_ids) > 50:
+                # Skip topics that appear in too many nodes (too generic)
+                continue
+
+            # Group by file to only create cross-file edges
+            by_file: dict[str, list[str]] = {}
+            for nid in node_ids:
+                n = self._graph.get_node(nid)
+                if n:
+                    fpath = n.get("attributes", {}).get("file_path", n.get("attributes", {}).get("path", ""))
+                    by_file.setdefault(fpath, []).append(nid)
+
+            if len(by_file) < 2:
+                continue
+
+            # Create edges between nodes from different files
+            file_keys = list(by_file.keys())
+            pairs = 0
+            for i, fk1 in enumerate(file_keys):
+                for fk2 in file_keys[i + 1:]:
+                    for src in by_file[fk1]:
+                        for tgt in by_file[fk2]:
+                            if pairs >= _MAX_PAIRS_PER_TOPIC:
+                                break
+                            self._graph.add_edge(
+                                source_id=src,
+                                target_id=tgt,
+                                relation="related_to",
+                                weight=0.5,
+                                edge_type="semantic",
+                            )
+                            pairs += 1
+                            edges_created += 1
+                        if pairs >= _MAX_PAIRS_PER_TOPIC:
+                            break
+                    if pairs >= _MAX_PAIRS_PER_TOPIC:
+                        break
+                if pairs >= _MAX_PAIRS_PER_TOPIC:
+                    break
+
+        if edges_created:
+            log.info("Created %d cross-file semantic edges", edges_created)

@@ -233,20 +233,10 @@ def cmd_index(args: argparse.Namespace) -> None:
     if result.errors:
         print(f"  Errors:      {len(result.errors)}")
 
-    # Legacy compatibility: also run FileIngestor for markdown LLM extraction
-    if llm and any(ext == ".md" for ext in extensions):
-        from acervo.structural_parser import StructuralParser
-        from acervo.file_ingestor import FileIngestor
-
-        parser = StructuralParser()
-        ingestor = FileIngestor(llm=llm, graph=graph, structural_parser=parser)
-        md_results = asyncio.run(
-            ingestor.ingest_all(project.workspace_root, extensions={".md"})
-        )
-        md_entities = sum(r.entities for r in md_results if not r.skipped)
-        md_facts = sum(r.facts for r in md_results if not r.skipped)
-        if md_entities or md_facts:
-            print(f"  Markdown extraction: {md_entities} entities, {md_facts} facts")
+    # NOTE: Legacy FileIngestor block removed in v0.4.0 — the Indexer's
+    # Phase 2 (semantic enrichment) already handles entity/fact extraction
+    # for all file types including markdown. The old block re-ran extraction
+    # on .md files, creating duplicate graph nodes.
 
 
 def cmd_reindex(args: argparse.Namespace) -> None:
@@ -272,6 +262,56 @@ def cmd_reindex(args: argparse.Namespace) -> None:
     for path in reindexed:
         print(f"  Reindexed: {path}")
     print(f"\nDone: {len(reindexed)} file(s) reindexed.")
+
+
+def cmd_synthesize(args: argparse.Namespace) -> None:
+    """Generate project understanding from indexed content."""
+    _load_env(args.env)
+    start = Path(args.path).resolve() if args.path else None
+    project = _require_project(start)
+
+    config = project.config
+    model_cfg = config.resolve_model()
+
+    print(f"Project:   {project.acervo_dir}")
+    print(f"Workspace: {project.workspace_root}")
+    print(f"LLM:       {model_cfg.name} @ {model_cfg.url}")
+    print()
+
+    from acervo.graph import TopicGraph
+    from acervo.graph_synthesizer import synthesize_graph
+
+    # Set up LLM client
+    from acervo.openai_client import OpenAIClient
+    llm = OpenAIClient(
+        base_url=model_cfg.url,
+        model=model_cfg.name,
+        api_key=model_cfg.api_key,
+    )
+
+    graph = TopicGraph(project.graph_path)
+
+    def on_progress(event: str, data: dict) -> None:
+        if event == "synthesis_started":
+            print(f"Synthesizing from {data['file_count']} files (type: {data['content_type']})...")
+        elif event == "overview_generated":
+            print(f"  Project overview generated ({data['length']} chars)")
+        elif event == "modules_generated":
+            print(f"  Module summaries generated ({data['count']} modules)")
+        elif event == "synthesis_complete":
+            print(f"\nDone: {data['nodes_created']} synthesis nodes in {data['duration_seconds']:.1f}s")
+
+    result = asyncio.run(synthesize_graph(
+        graph, llm,
+        project_description="",
+        content_type=args.content_type,
+        on_progress=on_progress,
+    ))
+
+    if result.errors:
+        print(f"\nWarnings: {len(result.errors)}")
+        for err in result.errors:
+            print(f"  - {err}")
 
 
 def cmd_status(args: argparse.Namespace) -> None:
@@ -409,6 +449,121 @@ def cmd_graph(args: argparse.Namespace) -> None:
         args._graph_parser.print_help()
 
 
+def cmd_chunks(args: argparse.Namespace) -> None:
+    """Chunk inspection commands (read-only access to ChromaDB)."""
+    import asyncio
+    from acervo.graph import TopicGraph
+    from acervo.vector_store import ChromaVectorStore
+
+    project = _require_project()
+    graph = TopicGraph(project.graph_path)
+
+    vectordb_path = project.acervo_dir / "data" / "vectordb"
+    if not vectordb_path.exists():
+        print("No vector store found. Run 'acervo index' first.", file=sys.stderr)
+        sys.exit(1)
+
+    action = args.chunks_action
+
+    if action == "search":
+        # Search needs a real embedder
+        config = project.config
+        embed_cfg = config.embeddings.resolve()
+        if not embed_cfg.model or not embed_cfg.url:
+            print("Embeddings not configured. Set [acervo.embeddings] in config.toml.", file=sys.stderr)
+            sys.exit(1)
+        from acervo.openai_client import OllamaEmbedder
+        embedder = OllamaEmbedder(base_url=embed_cfg.url, model=embed_cfg.model)
+        embed_batch_fn = getattr(embedder, "embed_batch", None)
+        store = ChromaVectorStore(
+            persist_path=str(vectordb_path),
+            embed_fn=embedder.embed,
+            embed_batch_fn=embed_batch_fn,
+        )
+        from acervo.chunks_cli import cmd_chunks_search
+        asyncio.run(cmd_chunks_search(store, args.query, args.n, args.json))
+    else:
+        # Non-search commands don't need embeddings
+        async def _noop_embed(text: str) -> list[float]:
+            raise RuntimeError("Embedding not available")
+
+        store = ChromaVectorStore(persist_path=str(vectordb_path), embed_fn=_noop_embed)
+
+        from acervo.chunks_cli import cmd_chunks_stats, cmd_chunks_list, cmd_chunks_show
+
+        if action == "stats":
+            cmd_chunks_stats(store, graph, getattr(args, "file", None), args.json)
+        elif action == "list":
+            cmd_chunks_list(store, graph, getattr(args, "file", None), getattr(args, "node", None), args.json)
+        elif action == "show":
+            cmd_chunks_show(store, args.chunk_id, args.json)
+        else:
+            args._chunks_parser.print_help()
+
+
+def cmd_trace(args: argparse.Namespace) -> None:
+    """Show per-turn trace data from conversation sessions."""
+    import json
+
+    project = _require_project()
+    traces_dir = project.acervo_dir / "data" / "traces"
+
+    if not traces_dir.exists() or not any(traces_dir.glob("*.jsonl")):
+        print("No traces found. Start a conversation via 'acervo up' to generate traces.")
+        return
+
+    # Find session file
+    files = sorted(traces_dir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
+    if args.session:
+        match = [f for f in files if f.stem == args.session]
+        if not match:
+            print(f"Session '{args.session}' not found. Available:", file=sys.stderr)
+            for f in files[:10]:
+                print(f"  {f.stem}", file=sys.stderr)
+            sys.exit(1)
+        trace_file = match[0]
+    else:
+        trace_file = files[0]
+
+    # Parse JSONL turns
+    turns = []
+    for line in trace_file.read_text(encoding="utf-8").strip().splitlines():
+        if line.strip():
+            turns.append(json.loads(line))
+
+    if not turns:
+        print(f"Session {trace_file.stem}: no turns recorded.")
+        return
+
+    print(f"Session: {trace_file.stem}  ({len(turns)} turns)")
+    print()
+
+    # Header
+    header = f"{'#':>3}  {'Topic':<20}  {'Warm':>5}  {'Hot':>5}  {'Total':>6}  {'Nodes':>5}  {'Ent':>4}  {'Facts':>5}  {'Hit':>3}"
+    print(header)
+    print("─" * len(header))
+
+    for t in turns:
+        turn_num = t.get("turn_number", "?")
+        topic = (t.get("topic", "") or "")[:20]
+        warm = t.get("warm_tokens", 0)
+        hot = t.get("hot_tokens", 0)
+        total = t.get("total_context_tokens", 0)
+        nodes = t.get("nodes_activated", 0)
+        entities = t.get("entities_extracted", 0)
+        facts = t.get("facts_added", 0)
+        hit = "yes" if t.get("context_hit") else "no"
+
+        print(f"{turn_num:>3}  {topic:<20}  {warm:>5}  {hot:>5}  {total:>6}  {nodes:>5}  {entities:>4}  {facts:>5}  {hit:>3}")
+
+    # Summary
+    if len(turns) > 1:
+        avg_total = sum(t.get("total_context_tokens", 0) for t in turns) / len(turns)
+        hits = sum(1 for t in turns if t.get("context_hit"))
+        print()
+        print(f"Avg tokens: {avg_total:.0f} | Context hits: {hits}/{len(turns)} ({hits/len(turns):.0%})")
+
+
 def cmd_config(args: argparse.Namespace) -> None:
     """Get or set config values."""
     project = _require_project()
@@ -512,6 +667,14 @@ def main() -> None:
     reindex_p = sub.add_parser("reindex", help="Re-index stale files")
     reindex_p.set_defaults(func=cmd_reindex)
 
+    # synthesize
+    synth_p = sub.add_parser("synthesize", help="Generate project understanding from indexed content")
+    synth_p.add_argument("path", nargs="?", default=None, help="Project root (default: auto-discover)")
+    synth_p.add_argument("--env", default=".env", help="Path to .env file for LLM config")
+    synth_p.add_argument("--content-type", default="auto", choices=["auto", "code", "prose"],
+                         help="Content type hint (default: auto-detect)")
+    synth_p.set_defaults(func=cmd_synthesize)
+
     # serve
     serve_p = sub.add_parser("serve", help="Start the transparent LLM proxy server")
     serve_p.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
@@ -565,6 +728,33 @@ def main() -> None:
 
     # graph repair
     graph_sub.add_parser("repair", help="Detect and fix graph corruption")
+
+    # chunks
+    chunks_p = sub.add_parser("chunks", help="Inspect vector store chunks")
+    chunks_p.set_defaults(func=cmd_chunks, _chunks_parser=chunks_p)
+    chunks_sub = chunks_p.add_subparsers(dest="chunks_action")
+
+    # chunks stats
+    chunks_stats_p = chunks_sub.add_parser("stats", help="Show chunk statistics")
+    chunks_stats_p.add_argument("--file", default=None, help="Filter by file path")
+    chunks_stats_p.add_argument("--json", action="store_true", help="JSON output")
+
+    # chunks list
+    chunks_list_p = chunks_sub.add_parser("list", help="List chunks with previews")
+    chunks_list_p.add_argument("--file", default=None, help="Filter by file path")
+    chunks_list_p.add_argument("--node", default=None, help="Filter by graph node ID")
+    chunks_list_p.add_argument("--json", action="store_true", help="JSON output")
+
+    # chunks show <chunk_id>
+    chunks_show_p = chunks_sub.add_parser("show", help="Show full content of a chunk")
+    chunks_show_p.add_argument("chunk_id", help="Chunk ID to display")
+    chunks_show_p.add_argument("--json", action="store_true", help="JSON output")
+
+    # chunks search <query>
+    chunks_search_p = chunks_sub.add_parser("search", help="Semantic vector search")
+    chunks_search_p.add_argument("query", help="Search query")
+    chunks_search_p.add_argument("--n", type=int, default=10, help="Number of results (default: 10)")
+    chunks_search_p.add_argument("--json", action="store_true", help="JSON output")
 
     # config
     config_p = sub.add_parser("config", help="Get or set config values")

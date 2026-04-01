@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -128,7 +129,9 @@ class Acervo:
         prompts: dict[str, str] | None = None,
         structural_parser: object | None = None,
         role_llms: dict[str, LLMClient] | None = None,
+        description: str = "",
     ) -> None:
+        self._project_description = description
         self._graph = TopicGraph(Path(persist_path))
         self._llm = llm
         p = prompts or {}
@@ -254,6 +257,7 @@ class Acervo:
             structural_parser=StructuralParser(),
             prompts=merged_prompts,
             role_llms=role_llms if role_llms else None,
+            description=project.config.description,
             **overrides,
         )
 
@@ -519,8 +523,7 @@ class Acervo:
             "node_count": graph.node_count,
             "edge_count": graph.edge_count,
             "nodes_by_kind": kinds,
-            "hot_nodes": len(graph.get_nodes_by_status("hot")),
-            "warm_nodes": len(graph.get_nodes_by_status("warm")),
+            "entity_nodes": len([n for n in graph.get_all_nodes() if n.get("kind", "entity") == "entity"]),
             "stale_files": len(graph.get_stale_files()),
         }
         if self._metrics:
@@ -617,6 +620,8 @@ class Acervo:
         """
         from acervo.token_counter import count_tokens
 
+        _t0 = time.monotonic()
+
         # ── S1: Topic Detection + Extraction (S1 Unified) ──
         _stages: list[str] = []
 
@@ -664,11 +669,24 @@ class Acervo:
             existing_nodes_summary=existing_nodes_summary,
         )
 
-        # Apply S1's topic decision
+        # Apply S1's topic + intent decision
         s1_topic = s1_result.topic
-        log.debug("S1 topic: action=%s label=%s", s1_topic.action, s1_topic.label)
-        log.debug(
-            "S1 extraction: %d entities, %d relations, %d facts",
+        s1_intent = s1_result.intent
+
+        # Keyword fallback for intent: detect overview patterns the model may miss
+        if s1_intent != "overview":
+            _overview = user_text.lower()
+            if any(p in _overview for p in (
+                "cuantos", "cuántos", "how many", "what do we have",
+                "que tenemos", "qué tenemos", "list all", "show all",
+                "resumen", "summary", "overview", "inventory",
+                "estructura", "structure",
+            )):
+                s1_intent = "overview"
+
+        log.info(
+            "[acervo] S1 detail: action=%s label=%s, intent=%s, %dE %dR %dF",
+            s1_topic.action, s1_topic.label, s1_intent,
             len(s1_result.extraction.entities),
             len(s1_result.extraction.relations),
             len(s1_result.extraction.facts),
@@ -681,14 +699,9 @@ class Acervo:
                 self._topic_detector.current_topic = detection.keyword
         current_topic = self._topic_detector.current_topic
 
-        # Update node statuses based on topic decision (AFTER S1, not before)
-        self._graph.update_status(
-            topic_action=s1_topic.action,
-            new_topic_id=_make_id(current_topic) if current_topic != "none" else None,
-        )
-
-        # Activate mentioned nodes
-        self._activate_mentioned_nodes(user_text, current_topic)
+        # Build the set of active node IDs for this turn (ephemeral, not persisted)
+        active_node_ids = self._find_active_node_ids(user_text, current_topic, intent=s1_intent)
+        self._last_active_node_ids = active_node_ids  # used by process() → _mark_touched_nodes()
 
         # Persist S1 extraction results SYNC (so S2 Gather sees the new nodes)
         s1_extraction = s1_result.extraction
@@ -737,15 +750,14 @@ class Acervo:
                     owner=self._owner or None,
                 )
 
-            # Enrich nodes post-extraction (embeddings, status promotion)
+            # Enrich nodes post-extraction (embeddings)
             await self._enrich_nodes_post_llm(s1_extraction, has_tool_results=False)
 
-        # Keep current topic node hot
+        # Add current topic node to active set
         if current_topic != "none":
             topic_id = _make_id(current_topic)
-            existing = self._graph.get_node(topic_id)
-            if existing:
-                self._graph.set_node_status(topic_id, "hot")
+            if self._graph.get_node(topic_id):
+                active_node_ids.add(topic_id)
 
         s1_msg = (
             f"S1 Unified: topic={current_topic} (action={s1_topic.action}), "
@@ -757,7 +769,7 @@ class Acervo:
 
         # ── S2: Gather (always, no planner) ──
         gathered = GatheredInfo()
-        gathered.nodes = self._gather_graph_nodes(current_topic)
+        gathered.nodes = self._gather_graph_nodes(active_node_ids)
 
         # Gather linked file contents (line-precise when symbols available)
         if self._workspace_path:
@@ -809,8 +821,8 @@ class Acervo:
 
         # Specificity classifier: only fetch chunks for detail-oriented questions
         query_specificity = classify_specificity(user_text)
-        log.debug(
-            "S2 gather: %d nodes, %d chunk_ids, specificity=%s",
+        log.info(
+            "[acervo] S2 gather: %d active nodes, %d chunk_ids, specificity=%s",
             len(gathered.nodes), len(node_chunk_ids), query_specificity,
         )
 
@@ -827,7 +839,8 @@ class Acervo:
                 log.warning("Node-scoped chunk search failed: %s", e)
 
         # Vector search for semantic matches (topic-scoped boost)
-        if self._vector_store:
+        # Skip for overview intent — vector hits are section-level noise
+        if self._vector_store and s1_intent != "overview":
             try:
                 if user_embedding:
                     vector_hits = await self._vector_store.search_with_embedding(user_embedding, n_results=5)
@@ -839,8 +852,8 @@ class Acervo:
                     node_id = hit.get("node_id", "")
                     node = self._graph.get_node(node_id) if node_id else None
                     if node:
-                        self._graph.set_node_status(node_id, "hot")
-                        if current_topic_id and node.get("_topic_id") == current_topic_id:
+                        active_node_ids.add(node_id)
+                        if current_topic_id and node_id in active_node_ids:
                             hit["score"] = min(hit.get("score", 0.5) + 0.2, 1.0)
                 gathered.vector_results = vector_hits
             except Exception as e:
@@ -853,12 +866,17 @@ class Acervo:
         verified_labels: set[str] = set()  # node labels with verified content
         user_lower = user_text.lower()
         for node in gathered.nodes:
-            # Skip placeholder nodes — nothing useful to inject
-            if node.get("status") == "placeholder":
+            kind = node.get("kind", "entity")
+            has_facts = bool(node.get("facts"))
+            has_relations = bool(node.get("_relations"))
+            summary = node.get("attributes", {}).get("summary", "")
+
+            # Skip nodes with no useful content at all
+            if not has_facts and not has_relations and not summary:
                 continue
+
             is_hot = node.get("_hot", True)
-            is_warm = node.get("_warm", False)
-            base_score = 1.0 if is_hot else (0.5 if is_warm else 0.8)
+            base_score = 1.0 if is_hot else 0.7
             # Query-relevance boost: entities mentioned in user message rank higher
             label_lower = node.get("label", "").lower()
             if label_lower and label_lower in user_lower:
@@ -866,10 +884,19 @@ class Acervo:
             is_verified = (
                 node.get("source") in ("world", "web")
                 or node.get("attributes", {}).get("verified", False)
-                or node.get("kind") in ("file", "symbol")
+                or kind in ("file", "section", "symbol", "folder")
             )
             if is_verified:
                 verified_labels.add(node.get("label", ""))
+
+            # Indexed nodes: use summary as a verified chunk
+            if kind in ("file", "section", "symbol", "folder") and summary and not has_facts:
+                text = f"**{node.get('label', '')}**: {summary}"
+                chunks.append(RankedChunk(
+                    text=text, score=base_score, source="verified_summary",
+                    label=node.get("label", ""), tokens=count_tokens(text),
+                ))
+
             for fact in node.get("facts", []):
                 fact_text = fact.get("fact", "") if isinstance(fact, dict) else str(fact)
                 text = f"**{node.get('label', '')}**: {fact_text}"
@@ -907,25 +934,63 @@ class Acervo:
             f"{len(gathered.file_contents)} files → {len(chunks)} chunks"
         )
         log.info("[acervo] S2 — %s", _stages[-1])
+        # Log top chunks for terminal debugging
+        for ci, ch in enumerate(sorted(chunks, key=lambda c: c.score, reverse=True)[:5]):
+            log.info(
+                "[acervo] S2   chunk[%d] score=%.2f src=%s: %s",
+                ci, ch.score, ch.source, ch.text[:120],
+            )
 
         # ── S3: Context Assembly (deterministic, no LLM) ──
-        # Split chunks into verified and conversation (unverified)
-        selected, warm_used = select_chunks_by_budget(chunks, self._warm_token_budget)
 
-        verified_chunks = [c for c in selected if c.source.startswith("verified")]
-        conversation_chunks = [c for c in selected if not c.source.startswith("verified")]
+        # TIER 1: Project overview — always injected if graph has data.
+        # This is structural metadata, NOT subject to budget selection.
+        project_overview = self._build_project_overview()
 
-        # Build warm override with verification markers
-        parts: list[str] = []
-        if verified_chunks:
-            parts.append(format_chunks_compact(verified_chunks))
-        if conversation_chunks:
-            if parts:
-                parts.append("")  # blank line separator
-            parts.append("[UNVERIFIED]\n"
-                         + format_chunks_compact(conversation_chunks))
+        # Initialize chunk lists used across all branches + debug output
+        verified_chunks: list = []
+        conversation_chunks: list = []
 
-        warm_override = "\n".join(parts) if parts else ""
+        if s1_intent == "overview":
+            # Overview intent: project overview + file/folder summaries only.
+            # Skip vector chunks (section-level noise) — they match semantically
+            # but are irrelevant for "how many books?" type questions.
+            overview_chunks = [
+                c for c in chunks
+                if c.source.startswith("verified")
+            ]
+            selected, warm_used = select_chunks_by_budget(overview_chunks, self._warm_token_budget)
+            parts: list[str] = []
+            if project_overview:
+                parts.append(project_overview)
+            verified_chunks = selected  # all are verified for overview
+            if verified_chunks:
+                parts.append(format_chunks_compact(verified_chunks))
+            warm_override = "\n".join(parts) if parts else ""
+        elif s1_intent == "chat":
+            # Chat intent: provide overview for awareness, skip specific chunks
+            selected = []
+            warm_override = project_overview or ""
+        else:
+            # Specific intent: normal budget-gated assembly
+            selected, warm_used = select_chunks_by_budget(chunks, self._warm_token_budget)
+
+            verified_chunks = [c for c in selected if c.source.startswith("verified")]
+            conversation_chunks = [c for c in selected if not c.source.startswith("verified")]
+
+            parts = []
+            if project_overview:
+                parts.append(project_overview)
+            if verified_chunks:
+                parts.append(format_chunks_compact(verified_chunks))
+            if conversation_chunks:
+                if parts:
+                    parts.append("")  # blank line separator
+                parts.append("[UNVERIFIED]\n"
+                             + format_chunks_compact(conversation_chunks))
+
+            warm_override = "\n".join(parts) if parts else ""
+
         warm_source = "graph" if warm_override else ""
 
         context_stack, hot_tk, warm_tk, total_tk = self._context_index.build_context_stack(
@@ -941,23 +1006,24 @@ class Acervo:
             f"warm={warm_tk}tk, hot={hot_tk}tk, total={total_tk}tk"
         )
         log.info("[acervo] S3 — %s", _stages[-1])
+        if warm_override:
+            log.info("[acervo] S3 warm preview: %s", warm_override[:200])
 
         # Record prepare-phase metrics
-        nodes_activated = len(self._graph.get_nodes_by_status("hot"))
         self._pending_metric = dict(
             warm_tokens=warm_tk,
             hot_tokens=hot_tk,
             total_context_tokens=total_tk,
             node_count=self._graph.node_count,
             edge_count=self._graph.edge_count,
-            nodes_activated=nodes_activated,
+            nodes_activated=len(active_node_ids),
             topic=current_topic,
             plan_tool="GATHER",
             context_hit=has_context,
         )
 
         _debug = {
-            "s1_unified": {
+            "s1_detection": {
                 "topic_action": s1_topic.action,
                 "topic_label": s1_topic.label,
                 "current_topic": current_topic,
@@ -966,6 +1032,7 @@ class Acervo:
                 "hint_verdict": detection.verdict.name,
                 "hint_keyword": detection.keyword,
                 "hint_similarity": detection.similarity,
+                "intent": s1_intent,
                 "entities_extracted": len(s1_extraction.entities),
                 "relations_extracted": len(s1_extraction.relations),
                 "facts_extracted": len(s1_extraction.facts),
@@ -996,13 +1063,23 @@ class Acervo:
                 "chunks_selected": len(selected),
                 "chunks": [
                     {
-                        "text": c.text[:100],
+                        "text": c.text[:200],
                         "score": round(c.score, 3),
                         "source": c.source,
                         "label": c.label,
                         "tokens": c.tokens,
                     }
                     for c in selected[:20]
+                ],
+                "all_chunks": [
+                    {
+                        "text": c.text[:150],
+                        "score": round(c.score, 3),
+                        "source": c.source,
+                        "label": c.label,
+                        "tokens": c.tokens,
+                    }
+                    for c in sorted(chunks, key=lambda x: x.score, reverse=True)[:30]
                 ],
             },
             "s3_context": {
@@ -1307,19 +1384,17 @@ class Acervo:
 
     def materialize(self, query: str, token_budget: int = 800) -> str:
         """Build a context string from relevant graph nodes."""
-        return synthesize(self._graph, query)
-
-    def cycle_status(self) -> None:
-        """Demote node statuses: hot -> warm -> cold."""
-        self._graph.cycle_status()
+        active = self._find_active_node_ids(query)
+        return synthesize(self._graph, query, active_node_ids=active)
 
     def _mark_touched_nodes(self) -> None:
-        """Update last_active on hot nodes, increment session_count once per session."""
+        """Update last_active on active nodes, increment session_count once per session."""
         from datetime import datetime
 
         now = datetime.now().isoformat(timespec="seconds")
+        active_ids = getattr(self, "_last_active_node_ids", set())
         already_counted = getattr(self, "_session_counted_nodes", set())
-        for node in self._graph.get_nodes_by_status("hot"):
+        for node in self._graph.get_nodes_by_ids(active_ids):
             nid = node.get("id", "")
             node["last_active"] = now
             if nid not in already_counted:
@@ -1330,8 +1405,8 @@ class Acervo:
 
     # ── Internal helpers ──
 
-    def _gather_graph_nodes(self, entity_hint: str) -> list[dict]:
-        """Gather hot nodes and their neighbors with relations for context building.
+    def _gather_graph_nodes(self, active_node_ids: set[str]) -> list[dict]:
+        """Gather active nodes and their neighbors with relations for context.
 
         Each node gets a ``_hot`` flag: True for directly-activated nodes,
         False for neighbor-expanded nodes (used for scoring in ranked chunks).
@@ -1339,8 +1414,8 @@ class Acervo:
         nodes: list[dict] = []
         seen_ids: set[str] = set()
 
-        # Collect hot nodes
-        for node in self._graph.get_nodes_by_status("hot"):
+        # Collect active nodes
+        for node in self._graph.get_nodes_by_ids(active_node_ids):
             nid = node.get("id", "")
             if nid in seen_ids:
                 continue
@@ -1358,7 +1433,7 @@ class Acervo:
             node_copy["_hot"] = True
             nodes.append(node_copy)
 
-        # Add neighbors of hot nodes (1-level)
+        # Add neighbors of active nodes (1-level expansion)
         for node in list(nodes):
             nid = node.get("id", "")
             neighbors = self._graph.get_neighbors(nid, max_count=3)
@@ -1373,23 +1448,24 @@ class Acervo:
                     nbr_copy["_hot"] = False
                     nodes.append(nbr_copy)
 
-        # Add warm nodes with facts (lower priority for progressive context)
-        warm_count = 0
-        for node in self._graph.get_nodes_by_status("warm"):
-            nid = node.get("id", "")
-            if nid in seen_ids:
-                continue
-            if not node.get("facts"):
-                continue
-            seen_ids.add(nid)
-            node_copy = dict(node)
-            node_copy["_relations"] = []
-            node_copy["_hot"] = False
-            node_copy["_warm"] = True
-            nodes.append(node_copy)
-            warm_count += 1
-            if warm_count >= 5:
-                break
+        # For indexed nodes (section/symbol): inject summary or content snippet
+        # as a pseudo-fact so it flows through the ranked chunk pipeline
+        if self._workspace_path:
+            for node in nodes:
+                kind = node.get("kind")
+                if kind not in ("section", "symbol"):
+                    continue
+                if node.get("facts"):
+                    continue  # already has facts, skip
+                summary = node.get("attributes", {}).get("summary", "")
+                if summary:
+                    node.setdefault("facts", []).append({"fact": summary, "source": "rag"})
+                else:
+                    content = self._graph.get_symbol_content(node["id"], self._workspace_path)
+                    if content:
+                        snippet = content[:500].strip()
+                        if snippet:
+                            node.setdefault("facts", []).append({"fact": snippet, "source": "rag"})
 
         return nodes
 
@@ -1409,36 +1485,200 @@ class Acervo:
         )
         self._pending_metric = {}
 
-    def _activate_mentioned_nodes(self, user_text: str, current_topic: str = "none") -> None:
-        """Set graph nodes to 'hot' if the user message mentions them."""
+    def _build_project_overview(self) -> str:
+        """Build a compact overview of the project from graph data.
+
+        Prefers synthesis-generated overview if available (from graph_synthesizer).
+        Falls back to structural file/folder listing otherwise.
+        """
+        all_nodes = self._graph.get_all_nodes()
+        file_nodes = [n for n in all_nodes if n.get("kind") == "file"]
+
+        if not file_nodes and not self._project_description:
+            return ""
+
+        lines: list[str] = []
+
+        # Optional client-provided description
+        if self._project_description:
+            lines.append(f"Project: {self._project_description}")
+
+        # Check for synthesis-generated overview (richer than structural listing)
+        synthesis_nodes = self._graph.get_nodes_by_kind("synthesis")
+        overview_node = next(
+            (n for n in synthesis_nodes if n.get("type") == "project_overview"),
+            None,
+        )
+        if overview_node:
+            summary = overview_node.get("attributes", {}).get("summary", "")
+            if summary:
+                lines.append(summary)
+                # Still include file list for structural awareness
+                lines.append(self._build_file_list(file_nodes, all_nodes))
+                return "\n".join(lines)
+
+        # Fallback: structural listing (no synthesis available)
+        if not file_nodes:
+            return "\n".join(lines)
+
+        lines.append(self._build_file_list(file_nodes, all_nodes))
+        return "\n".join(lines)
+
+    def _build_file_list(self, file_nodes: list[dict], all_nodes: list[dict]) -> str:
+        """Build a structural file/folder listing."""
+        folder_nodes = [n for n in all_nodes if n.get("kind") == "folder"]
+        lines: list[str] = []
+
+        if folder_nodes:
+            lines.append(f"This project contains {len(file_nodes)} indexed files:")
+            folder_files: dict[str, list[dict]] = {}
+            orphan_files: list[dict] = []
+            for fnode in file_nodes:
+                path = fnode.get("attributes", {}).get("path", "")
+                parts = path.rsplit("/", 1)
+                folder_path = parts[0] if len(parts) > 1 else ""
+                if folder_path:
+                    folder_files.setdefault(folder_path, []).append(fnode)
+                else:
+                    orphan_files.append(fnode)
+
+            for folder in sorted(folder_nodes, key=lambda n: n.get("attributes", {}).get("path", "")):
+                fpath = folder.get("attributes", {}).get("path", "")
+                flabel = folder.get("label", fpath)
+                files = folder_files.get(fpath, [])
+                if files:
+                    lines.append(f"- {flabel}/ ({len(files)} files)")
+                    for fnode in files[:10]:
+                        label = fnode.get("label", "")
+                        lines.append(f"  - {label}")
+                    if len(files) > 10:
+                        lines.append(f"  - ... and {len(files) - 10} more")
+
+            for fnode in orphan_files[:10]:
+                lines.append(f"- {fnode.get('label', '')}")
+        else:
+            lines.append(f"This project contains {len(file_nodes)} indexed files:")
+            for node in file_nodes[:30]:
+                lines.append(f"- {node.get('label', '')}")
+
+        section_count = sum(1 for n in all_nodes if n.get("kind") == "section")
+        if section_count:
+            lines.append(f"\nTotal sections across all files: {section_count}")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _text_matches(label: str, msg_lower: str, msg_words: set[str]) -> bool:
+        """Check if a node label is mentioned in the user message."""
+        if label in msg_lower:
+            return True
+        for word in msg_words:
+            if len(word) >= 4 and label.startswith(word):
+                return True
+        label_words = set(label.split())
+        if len(label_words) > 1 and label_words.issubset(msg_words):
+            return True
+        return False
+
+    def _find_active_node_ids(self, user_text: str, current_topic: str = "none", intent: str = "specific") -> set[str]:
+        """Find graph node IDs relevant to the user message.
+
+        Matches ALL node kinds with kind-appropriate logic:
+        - entity: label text matching (prefix, substring, multi-word)
+        - file: filename stem or path matching
+        - folder: folder name matching
+        - section/symbol: label text matching (same as entity)
+
+        For "overview" intent, activates all file and folder nodes so the
+        gathering step can build a complete picture of the project.
+
+        Returns a set of node IDs. Does NOT mutate the graph — activation
+        is ephemeral and lives in the conversation context.
+        """
+        active: set[str] = set()
         msg_lower = user_text.lower()
         msg_words = set(msg_lower.split())
-        topic_id = _make_id(current_topic) if current_topic != "none" else None
+
         for node in self._graph.get_all_nodes():
-            # Skip symbol/file/section nodes — only activate entity nodes
-            if node.get("kind", "entity") != "entity":
-                continue
+            kind = node.get("kind", "entity")
             label = node.get("label", "").lower()
             nid = node.get("id", "")
             if not label or len(label) < 3:
                 continue
-            activated = False
-            if label in msg_lower:
-                self._graph.set_node_status(nid, "hot")
-                activated = True
+
+            # Overview intent: activate file, folder, and synthesis nodes only.
+            # Skip section/symbol nodes — they add chapter-level noise.
+            if intent == "overview":
+                if kind in ("file", "folder", "synthesis"):
+                    active.add(nid)
+                continue  # skip all other kinds for overview
+
+            # Synthesis nodes: always activate on keyword match against summary
+            if kind == "synthesis":
+                summary = node.get("attributes", {}).get("summary", "").lower()
+                if summary:
+                    match_count = sum(1 for w in msg_words if len(w) >= 4 and w in summary)
+                    if match_count >= 1:
+                        active.add(nid)
+                continue
+
+            if kind == "file":
+                # Match filename stem (without extension) or full path
+                from pathlib import PurePosixPath
+                stem = PurePosixPath(label).stem.lower() if "." in label else label
+                path_str = node.get("attributes", {}).get("path", "").lower()
+                if (len(stem) >= 3 and stem in msg_lower) or (path_str and path_str in msg_lower):
+                    active.add(nid)
+                    continue
+            elif kind == "folder":
+                # Match folder name or path
+                path_str = node.get("attributes", {}).get("path", "").lower()
+                if self._text_matches(label, msg_lower, msg_words):
+                    active.add(nid)
+                    continue
+                if path_str and path_str in msg_lower:
+                    active.add(nid)
+                    continue
             else:
+                # entity, section, symbol: text matching on label
+                if self._text_matches(label, msg_lower, msg_words):
+                    active.add(nid)
+                    continue
+
+            # Also match against node summary and topics (semantic relevance)
+            summary = node.get("attributes", {}).get("summary", "").lower()
+            topics_raw = node.get("attributes", {}).get("topics", [])
+            topics_str = " ".join(t.lower() for t in topics_raw) if isinstance(topics_raw, list) else str(topics_raw).lower()
+            searchable = f"{summary} {topics_str}"
+            if searchable.strip():
                 for word in msg_words:
-                    if len(word) >= 4 and label.startswith(word):
-                        self._graph.set_node_status(nid, "hot")
-                        activated = True
+                    if len(word) >= 4 and word in searchable:
+                        active.add(nid)
                         break
-                if not activated:
-                    label_words = set(label.split())
-                    if len(label_words) > 1 and label_words.issubset(msg_words):
-                        self._graph.set_node_status(nid, "hot")
-                        activated = True
-            if activated and topic_id:
-                node["_topic_id"] = topic_id
+
+        # Expand: if a folder is active, activate all contained files
+        folder_ids = [
+            nid for nid in list(active)
+            if (n := self._graph.get_node(nid)) and n.get("kind") == "folder"
+        ]
+        for folder_id in folder_ids:
+            for edge in self._graph.get_edges_for(folder_id):
+                if edge.get("relation") == "contains":
+                    child_id = edge["target"] if edge["source"] == folder_id else edge["source"]
+                    active.add(child_id)
+
+        # Expand: if a file is active, also activate its child sections/symbols
+        file_ids = [
+            nid for nid in list(active)
+            if (n := self._graph.get_node(nid)) and n.get("kind") == "file"
+        ]
+        for file_id in file_ids:
+            for edge in self._graph.get_edges_for(file_id):
+                if edge.get("relation") == "contains":
+                    child_id = edge["target"] if edge["source"] == file_id else edge["source"]
+                    active.add(child_id)
+
+        return active
 
     async def _persist_web_facts(self, query: str, web_content: str) -> None:
         """Extract and persist entities, relations, and facts from web search results.

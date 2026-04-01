@@ -127,11 +127,42 @@ At turn 100, Acervo uses **490 tokens** where full history needs **5,157** — a
 To reproduce these results:
 
 ```bash
-# Run benchmarks (requires LM Studio with acervo-extractor model)
+# Run conversation benchmarks (requires LM Studio with acervo-extractor model)
 python -m tests.integration.run_benchmarks --format html
 
 # Generate report from existing data (no LLM needed)
 python -m tests.integration.export_report --tier full --open
+```
+
+### Indexed project benchmarks
+
+Acervo indexes entire projects and answers questions without reading files each time. Compared to an agent that uses tools (`read_file`, `search`, etc.), Acervo resolves queries in 1 step with 12x fewer tokens.
+
+55 turns tested across 3 domains: code (TypeScript/React, 31 files), literature (Sherlock Holmes epub, public domain), and project management docs (11 markdown files).
+
+| Category | What it proves | Score |
+|----------|---------------|-------|
+| RESOLVE  | Answers questions requiring project context | 100% |
+| GROUND   | Prevents hallucination with verified data | 92% |
+| RECALL   | Remembers user-stated facts across turns | 67% |
+| FOCUS    | Sends only relevant context, respects budget | 100% |
+| ADAPT    | Handles topic changes cleanly | 100% |
+
+**Efficiency vs agent-with-tools (RESOLVE questions, 13 turns):**
+
+| Approach | Can Answer | Avg Input Tokens | Avg Steps |
+|----------|-----------|-----------------|-----------|
+| Stateless LLM | 8% | -- | -- |
+| Agent + Tools | 100% | 7,462 | 2.8 |
+| **Acervo** | **100%** | **616** | **0** |
+
+> Acervo uses **12.1x fewer tokens** than an agent approach for the same questions.
+
+To reproduce:
+
+```bash
+# Run indexed project benchmarks (requires LM Studio + Ollama)
+pytest tests/integration/test_benchmarks.py -v -s
 ```
 
 ## How it works
@@ -379,7 +410,7 @@ Traditional systems use temporal layers — recent = hot, old = cold. Acervo use
 
 In 80% of turns, hot is enough.
 
-> **Note:** Progressive retrieval (automatic warm/cold escalation) is planned for v0.4. Currently, the hot layer is always injected and additional layers can be brought in via the SDK.
+> **Note:** Progressive retrieval (automatic warm/cold escalation) is planned for v0.6. Currently, the hot layer is always injected and additional layers can be brought in via the SDK.
 
 ## Fine-tuned extraction model
 
@@ -430,6 +461,9 @@ acervo index /path/to/project \
 | `.html` | regex | component references, element IDs |
 | `.css` | regex | selectors, custom properties |
 | `.md` | heading parser | sections with hierarchy context |
+| `.epub` | ebooklib | chapters, character/location entities |
+| `.pdf` | PyMuPDF | pages as sections, paragraph chunking |
+| `.txt` | paragraph parser | paragraph-based sections |
 
 ## Index documents
 
@@ -462,7 +496,7 @@ Each document is split into chunks (by heading and paragraph), embedded via Olla
 
 A specificity classifier decides whether to retrieve chunks at all. Conceptual questions ("What does this module do?") get the node summary only (~80 tokens). Specific questions ("What's the exact auth endpoint?") get the relevant chunks (~200 tokens).
 
-Currently supports `.md` files. Additional formats (PDF, DOCX, plain text) planned for v0.4.
+Supports `.md`, `.epub`, `.pdf`, and `.txt` files.
 
 ## Architecture
 
@@ -524,7 +558,7 @@ class LLMClient(Protocol):
 
 ## Project status
 
-v0.3.0 — [Changelog](./CHANGELOG.md)
+v0.4.0 — [Changelog](./CHANGELOG.md)
 
 | Feature | Status |
 |---------|--------|
@@ -553,7 +587,18 @@ v0.3.0 — [Changelog](./CHANGELOG.md)
 | Configurable logging (`--log-level trace\|debug\|info`) | ✅ Working |
 | `acervo graph repair` — corruption detection + fix | ✅ Working |
 | Configurable timeouts per pipeline phase | ✅ Working |
-| Multi-format ingestion (`.txt`, `.pdf`, `.docx`) | 🔜 v0.4.0 |
+| `.epub` ingestion (chapter extraction, prose chunking) | ✅ Working |
+| `.pdf` ingestion (page-based extraction) | ✅ Working |
+| `.txt` ingestion (paragraph-based sectioning) | ✅ Working |
+| Curation (entity extraction from indexed content) | ✅ Working |
+| Synthesis (project overview generation) | ✅ Working |
+| Paragraph-based prose chunking (~500tk clusters) | ✅ Working |
+| Intent-aware context pipeline (overview/specific/chat) | ✅ Working |
+| 5-category benchmark system (RESOLVE/GROUND/RECALL/FOCUS/ADAPT) | ✅ Working |
+| Agent efficiency comparison (12x fewer tokens) | ✅ Working |
+| Version-tracked benchmark results | ✅ Working |
+| Multi-project support in Acervo Studio | ✅ Working |
+| `acervo chunks` CLI (stats/list/show/search) | ✅ Working |
 | MCP Server (Claude Desktop, Cursor, Windsurf) | 🔜 v0.5.0 |
 | Progressive retrieval (hot → warm → cold) | 🔜 v0.6.0 |
 | Docker Compose (one-command setup) | 🔜 v0.6.0 |
@@ -563,8 +608,8 @@ v0.3.0 — [Changelog](./CHANGELOG.md)
 
 ```
 v0.3.0  ████████  DONE    Conversation memory works (benchmarks, CLI, .md ingestion)
-v0.4.0  ████████  NEXT    Indexation works for real (4 domains, formats, fine-tune v2)
-v0.5.0  ████████          Usable from anywhere (MCP server, TS SDK, integrations)
+v0.4.0  ████████  DONE    Indexation works for real (epub/pdf/txt, curate, synthesize, 5-category benchmarks)
+v0.5.0  ████████  NEXT    Usable from anywhere (MCP server, TS SDK, integrations)
 v0.6.0  ████████          Production-ready (Docker, metrics, progressive retrieval)
 v0.7.0  ████████          Ecosystem (multi-tenant, packs, Studio v2)
 ```
@@ -572,7 +617,7 @@ v0.7.0  ████████          Ecosystem (multi-tenant, packs, Studio
 | Version | What it proves | Evidence produced |
 |---------|---------------|-------------------|
 | **v0.3.0** | Conversation memory | 76% savings, 94% context hits, scissors chart |
-| **v0.4.0** | Document indexation | Indexation scorecard, query recall per domain |
+| **v0.4.0** | Document indexation | 5-category benchmark (100% RESOLVE), 12.1x efficiency vs agents |
 | **v0.5.0** | Works in any tool | MCP server, TypeScript SDK, framework integrations |
 | **v0.6.0** | Deploy in production | Docker one-liner, Prometheus metrics |
 | **v0.7.0** | Scales to teams | Multi-tenant, knowledge packs, Studio v2 |
@@ -588,6 +633,8 @@ Small versions, one theme per release, each with publishable benchmarks. Full de
 - **[Graph CLI](https://sandyeveliz.github.io/acervo/graph-cli/)** — Inspect, search, delete, merge graph nodes
 - **[Traces](https://sandyeveliz.github.io/acervo/traces/)** — Per-turn metrics, compression ratios, benchmarking
 - **[Document Ingestion](https://sandyeveliz.github.io/acervo/document-ingestion/)** — Indexing files, node-scoped retrieval, specificity classifier
+- **[Benchmark Guide](https://sandyeveliz.github.io/acervo/benchmark-guide/)** — Run benchmarks, understand categories, compare versions
+- **[Benchmark Results](https://sandyeveliz.github.io/acervo/benchmarks/)** — Published results per version
 - **[Roadmap](https://sandyeveliz.github.io/acervo/roadmap/)** — Planned features
 
 ## Why "Acervo"?

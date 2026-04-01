@@ -37,6 +37,12 @@ _SYSTEM_PROMPT = (
     "Only extract entities that are EXPLICITLY named in the conversation. "
     "Do not infer entities, relations, or facts that are not directly stated. "
     "If an entity is referenced by nickname or shortened name, use ONLY that form. "
+    "Also classify the user's INTENT as one of: "
+    '"overview" (user asks about the project as a whole: inventory, structure, '
+    '"what do we have?", "how many?", listing), '
+    '"specific" (user asks about specific content: a chapter, a character, a file, a concept), '
+    '"chat" (general conversation not about project content). '
+    'Include "intent": "overview"|"specific"|"chat" at the top level of your JSON output. '
     "Output valid JSON only, no markdown, no explanation."
 )
 
@@ -67,6 +73,7 @@ class TopicResult:
 class S1Result:
     topic: TopicResult
     extraction: ExtractionResult
+    intent: str = "specific"  # "overview" | "specific" | "chat"
 
 
 # ── Graph summary builder ──
@@ -290,6 +297,11 @@ def _parse_s1_response(raw: str) -> S1Result:
 
     topic = TopicResult(action=action, label=label)
 
+    # Parse intent
+    intent = obj.get("intent", "specific")
+    if not isinstance(intent, str) or intent not in ("overview", "specific", "chat"):
+        intent = "specific"
+
     # Parse entities — fine-tuned model uses "label" and "id", with nested "facts"
     entities: list[Entity] = []
     entity_facts: list[ExtractedFact] = []  # collected from nested entity facts
@@ -357,7 +369,7 @@ def _parse_s1_response(raw: str) -> S1Result:
     all_facts = entity_facts + facts
 
     extraction = ExtractionResult(entities=entities, relations=relations, facts=all_facts)
-    return S1Result(topic=topic, extraction=extraction)
+    return S1Result(topic=topic, extraction=extraction, intent=intent)
 
 
 # ── Validator ──

@@ -86,10 +86,12 @@ class SemanticEnricher:
         llm: LLMClient | None = None,
         embedder: Embedder | None = None,
         concurrency: int = 4,
+        content_type: str = "auto",
     ) -> None:
         self._llm = llm
         self._embedder = embedder
         self._concurrency = concurrency
+        self._content_type = content_type
 
     async def enrich_file(
         self,
@@ -103,6 +105,9 @@ class SemanticEnricher:
             return EnrichmentResult(
                 file_path=structure.file_path, chunks=[], summaries=[],
             )
+
+        # Resolve content type once per batch (auto-detection uses chunk stats)
+        self._effective_content_type = self._resolve_content_type(chunks)
 
         # Run embeddings and summaries in parallel
         embed_task = self._generate_embeddings(chunks)
@@ -120,10 +125,14 @@ class SemanticEnricher:
         self, structure: FileStructure, content: str,
     ) -> list[Chunk]:
         """Create logical chunks from a file's structural units."""
-        lines = content.split("\n")
+        # For binary formats, use full_text (epub/pdf store extracted text there)
+        text = structure.full_text if structure.full_text else content
+        lines = text.split("\n")
 
         if structure.language == "markdown":
             return self._chunk_markdown(structure, lines)
+        if structure.language in ("epub", "pdf", "plaintext"):
+            return self._chunk_prose(structure, lines)
         return self._chunk_code(structure, lines)
 
     def _chunk_code(
@@ -218,7 +227,12 @@ class SemanticEnricher:
     def _chunk_markdown(
         self, structure: FileStructure, lines: list[str],
     ) -> list[Chunk]:
-        """Create chunks from markdown heading sections."""
+        """Create chunks from markdown heading sections.
+
+        Small sections become single chunks. Large sections (>2000 chars) are
+        split at paragraph boundaries, same as prose chunking.
+        """
+        max_chars = _MAX_CHUNK_TOKENS * 4
         chunks: list[Chunk] = []
 
         for unit in structure.units:
@@ -226,22 +240,149 @@ class SemanticEnricher:
             if len(section_text.strip()) < 20:
                 continue
 
-            # Build heading hierarchy for context
             hierarchy = unit.name
             if unit.parent:
                 hierarchy = f"{unit.parent} > {unit.name}"
 
-            chunks.append(Chunk(
-                chunk_id=str(uuid.uuid4())[:12],
+            # Small section — keep as one chunk
+            if len(section_text) <= max_chars:
+                chunks.append(Chunk(
+                    chunk_id=str(uuid.uuid4())[:12],
+                    file_path=structure.file_path,
+                    entity_name=hierarchy,
+                    entity_kind="section",
+                    line_start=unit.start_line,
+                    line_end=unit.end_line,
+                    content=section_text,
+                    language="markdown",
+                    parent=unit.parent,
+                ))
+                continue
+
+            # Large section — split at paragraph boundaries
+            # Reuse the prose chunking logic via a temporary structure
+            temp = FileStructure(
                 file_path=structure.file_path,
-                entity_name=hierarchy,
-                entity_kind="section",
-                line_start=unit.start_line,
-                line_end=unit.end_line,
-                content=section_text,
                 language="markdown",
-                parent=unit.parent,
-            ))
+                content_hash="",
+                units=[unit],
+                total_lines=unit.end_line - unit.start_line + 1,
+            )
+            sub_chunks = self._chunk_prose(temp, lines)
+            # Preserve hierarchy in entity_name
+            for sc in sub_chunks:
+                sc.entity_name = hierarchy
+            chunks.extend(sub_chunks)
+
+        return chunks
+
+    def _chunk_prose(
+        self, structure: FileStructure, lines: list[str],
+    ) -> list[Chunk]:
+        """Split prose content (epub, pdf, txt) into paragraph-cluster chunks.
+
+        Unlike markdown chunking (one chunk per heading section), this splits
+        each section into ~500-token chunks at paragraph boundaries (blank lines).
+        This fixes the under-chunking problem where entire book chapters became
+        single 20k+ char chunks with one embedding vector.
+        """
+        max_chars = _MAX_CHUNK_TOKENS * 4  # ~2000 chars per chunk
+        chunks: list[Chunk] = []
+
+        for unit in structure.units:
+            section_lines = lines[unit.start_line - 1 : unit.end_line]
+            section_text = "\n".join(section_lines)
+
+            if len(section_text.strip()) < 20:
+                continue
+
+            # If section is small enough, keep as one chunk
+            if len(section_text) <= max_chars:
+                chunks.append(Chunk(
+                    chunk_id=str(uuid.uuid4())[:12],
+                    file_path=structure.file_path,
+                    entity_name=unit.name,
+                    entity_kind="section",
+                    line_start=unit.start_line,
+                    line_end=unit.end_line,
+                    content=section_text,
+                    language=structure.language,
+                    parent=unit.parent,
+                ))
+                continue
+
+            # Split into paragraphs (blank-line separated), then cluster
+            paragraphs: list[tuple[int, int, str]] = []  # (start, end, text)
+            para_start = 0
+            para_lines: list[str] = []
+
+            for i, line in enumerate(section_lines):
+                if not line.strip() and para_lines:
+                    para_text = "\n".join(para_lines)
+                    if para_text.strip():
+                        paragraphs.append((
+                            unit.start_line + para_start,
+                            unit.start_line + i - 1,
+                            para_text,
+                        ))
+                    para_start = i + 1
+                    para_lines = []
+                else:
+                    para_lines.append(line)
+
+            # Last paragraph
+            if para_lines:
+                para_text = "\n".join(para_lines)
+                if para_text.strip():
+                    paragraphs.append((
+                        unit.start_line + para_start,
+                        unit.end_line,
+                        para_text,
+                    ))
+
+            # Cluster paragraphs into chunks of ~max_chars
+            cluster_paras: list[tuple[int, int, str]] = []
+            cluster_chars = 0
+
+            for para_s, para_e, para_t in paragraphs:
+                if cluster_chars + len(para_t) > max_chars and cluster_paras:
+                    # Flush current cluster
+                    c_start = cluster_paras[0][0]
+                    c_end = cluster_paras[-1][1]
+                    c_text = "\n\n".join(p[2] for p in cluster_paras)
+                    chunks.append(Chunk(
+                        chunk_id=str(uuid.uuid4())[:12],
+                        file_path=structure.file_path,
+                        entity_name=unit.name,
+                        entity_kind="section",
+                        line_start=c_start,
+                        line_end=c_end,
+                        content=c_text,
+                        language=structure.language,
+                        parent=unit.parent,
+                    ))
+                    cluster_paras = []
+                    cluster_chars = 0
+
+                cluster_paras.append((para_s, para_e, para_t))
+                cluster_chars += len(para_t)
+
+            # Flush remaining
+            if cluster_paras:
+                c_start = cluster_paras[0][0]
+                c_end = cluster_paras[-1][1]
+                c_text = "\n\n".join(p[2] for p in cluster_paras)
+                chunks.append(Chunk(
+                    chunk_id=str(uuid.uuid4())[:12],
+                    file_path=structure.file_path,
+                    entity_name=unit.name,
+                    entity_kind="section",
+                    line_start=c_start,
+                    line_end=c_end,
+                    content=c_text,
+                    language=structure.language,
+                    parent=unit.parent,
+                ))
 
         return chunks
 
@@ -311,11 +452,35 @@ class SemanticEnricher:
         raw = await asyncio.gather(*tasks)
         return [r for r in raw if r is not None]
 
-    async def _summarize_chunk(self, chunk: Chunk) -> SemanticSummary:
-        """Call the 3B LLM to generate a semantic summary for one chunk."""
-        prompt = f"""Analyze this code chunk and provide:
+    def _resolve_content_type(self, chunks: list[Chunk]) -> str:
+        """Determine content type. If 'auto', detect from chunk languages."""
+        if self._content_type != "auto":
+            return self._content_type
+        if not chunks:
+            return "code"
+        markdown_count = sum(1 for c in chunks if c.language == "markdown")
+        return "prose" if markdown_count / len(chunks) > 0.7 else "code"
+
+    def _build_summary_prompt(self, chunk: Chunk, content_type: str) -> str:
+        """Build the LLM prompt for semantic summarization."""
+        if content_type == "prose":
+            return f"""Analyze this text passage and provide:
+1. A 1-2 sentence summary of what happens or what it covers
+2. A flat list of topic strings: characters, locations, themes, plot elements, time periods, objects, or concepts mentioned
+3. Any relationships to other parts of the work (e.g., "introduces character X", "references events from chapter Y", "continues the theme of Z")
+
+File: {chunk.file_path}
+Section: {chunk.entity_name} ({chunk.entity_kind})
+
+Text:
+{chunk.content[:3000]}
+
+Respond ONLY with valid JSON, no markdown. Topics must be plain strings, not objects:
+{{"summary": "one sentence", "topics": ["Harry Potter", "Hogwarts", "magic"], "implicit_relations": ["introduces X", "references Y"]}}"""
+
+        return f"""Analyze this code chunk and provide:
 1. A 1-2 sentence summary of what it does
-2. A list of semantic topics (e.g., authentication, database, CRUD, validation, routing, UI rendering)
+2. A flat list of topic strings (e.g., authentication, database, CRUD, validation, routing, UI rendering)
 3. Any implicit relationships not visible from imports (e.g., "this middleware protects these routes by convention", "this is called when the user clicks submit")
 
 File: {chunk.file_path}
@@ -325,11 +490,25 @@ Entity: {chunk.entity_name} ({chunk.entity_kind})
 Code:
 {chunk.content[:3000]}
 
-Respond in JSON format:
-{{"summary": "...", "topics": ["...", "..."], "implicit_relations": ["...", "..."]}}"""
+Respond ONLY with valid JSON, no markdown. Topics must be plain strings, not objects:
+{{"summary": "one sentence", "topics": ["auth", "database"], "implicit_relations": ["calls X", "used by Y"]}}"""
+
+    _ENRICHER_SYSTEM_PROMPT = (
+        "You are a strict semantic analyzer. "
+        "Analyze text or code and return a single JSON object with summary, topics, and implicit_relations. "
+        "Topics must be a flat list of plain strings — never objects or nested structures. "
+        "Output valid JSON only, no markdown, no explanation."
+    )
+
+    async def _summarize_chunk(self, chunk: Chunk) -> SemanticSummary:
+        """Call the LLM to generate a semantic summary for one chunk."""
+        prompt = self._build_summary_prompt(chunk, self._effective_content_type)
 
         response = await self._llm.chat(
-            [{"role": "user", "content": prompt}],
+            [
+                {"role": "system", "content": self._ENRICHER_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
             temperature=0.0,
             max_tokens=300,
         )

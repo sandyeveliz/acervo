@@ -4,8 +4,11 @@ Each node has:
   layer (Layer): UNIVERSAL or PERSONAL
   source (str): "world" or "user_assertion"
   confidence_for_owner (float): 0.0-1.0
-  status (str): "complete", "incomplete" or "pending_verification"
-  pending_fields (list[str]): missing fields if status == "incomplete"
+  pending_fields (list[str]): missing fields for incomplete nodes
+
+Runtime activation (hot/warm/cold) is NOT stored in nodes — it belongs to
+the conversation context (ephemeral, per-session). The graph only stores
+persistent knowledge.
 
 Existing nodes without layer default to PERSONAL with source="user_assertion".
 """
@@ -144,11 +147,12 @@ class TopicGraph:
             except json.JSONDecodeError:
                 self._edges = []
 
-        # Reset runtime statuses — previous session's hot/warm don't carry over
+        # Clean up legacy runtime fields that no longer belong in nodes
         for node in self._nodes.values():
-            if node.get("status") in ("hot", "warm"):
-                node["status"] = "cold"
             node.pop("_topic_id", None)
+            # Remove legacy runtime status if present
+            if node.get("status") in ("hot", "warm", "cold"):
+                del node["status"]
 
     def reload(self) -> None:
         """Reload graph from disk (used after external data clear)."""
@@ -269,7 +273,6 @@ class TopicGraph:
             if nid in self._nodes:
                 node = self._nodes[nid]
                 node["last_active"] = now
-                node["status"] = "hot"
                 sessions_seen = {f.get("session") for f in node.get("facts", [])}
                 if self._session_id not in sessions_seen:
                     node["session_count"] = node.get("session_count", 0) + 1
@@ -295,7 +298,6 @@ class TopicGraph:
                     "files": [],
                     "chunk_ids": [],
                     **meta.to_dict(),
-                    "status": "hot",  # runtime status — must come after meta spread
                 }
 
         # Add semantic relations (max 1 edge per directed pair)
@@ -391,33 +393,6 @@ class TopicGraph:
                 return e
         return None
 
-    def update_status(self, topic_action: str, new_topic_id: str | None = None) -> None:
-        """Update node statuses based on S1 topic decision.
-
-        - "same": no changes — nodes keep current status
-        - "subtopic": no changes — related shift, keep hot nodes hot
-        - "changed": demote hot→warm, warm→cold, then re-promote
-          nodes belonging to new_topic_id (topic re-entry)
-        """
-        if topic_action in ("same", "subtopic"):
-            return
-        # topic_action == "changed" — demote all
-        for node in self._nodes.values():
-            status = node.get("status", "cold")
-            if status == "hot":
-                node["status"] = "warm"
-            elif status == "warm":
-                node["status"] = "cold"
-        # Re-promote nodes that belong to the new topic (returning to old topic)
-        if new_topic_id:
-            for node in self._nodes.values():
-                if node.get("_topic_id") == new_topic_id and node.get("status") != "hot":
-                    node["status"] = "hot"
-
-    def cycle_status(self) -> None:
-        """Deprecated: use update_status(). Kept for backwards compat."""
-        self.update_status("changed")
-
     def _edge_exists(self, src: str, tgt: str, relation: str) -> bool:
         pair = {src, tgt}
         return any(
@@ -461,7 +436,7 @@ class TopicGraph:
         node = self._nodes.get(nid)
         if not node:
             return False
-        allowed = {"label", "type", "attributes", "status"}
+        allowed = {"label", "type", "attributes"}
         for key, value in fields.items():
             if key in allowed:
                 node[key] = value
@@ -570,9 +545,9 @@ class TopicGraph:
             return node
         return self._nodes.get(_make_id(name_or_id))
 
-    def get_nodes_by_status(self, status: str) -> list[dict]:
-        """Return nodes with the given status (hot/warm/cold)."""
-        return [n for n in self._nodes.values() if n.get("status") == status]
+    def get_nodes_by_ids(self, node_ids: set[str]) -> list[dict]:
+        """Return nodes matching the given IDs."""
+        return [self._nodes[nid] for nid in node_ids if nid in self._nodes]
 
     def get_all_nodes(self) -> list[dict]:
         """Return all nodes as a list of dicts."""
@@ -602,12 +577,6 @@ class TopicGraph:
             e for e in self._edges
             if e["source"] == node_id or e["target"] == node_id
         ]
-
-    def set_node_status(self, node_id: str, status: str) -> None:
-        """Set a node's status (hot/warm/cold)."""
-        node = self._nodes.get(node_id)
-        if node:
-            node["status"] = status
 
     def add_edge(
         self,
@@ -697,6 +666,34 @@ class TopicGraph:
         """Return all nodes with the given kind (entity/symbol/section/file)."""
         return [n for n in self._nodes.values() if n.get("kind") == kind]
 
+    def upsert_folder_node(self, folder_path: str) -> str:
+        """Create a folder node if it doesn't exist. Returns the folder node ID."""
+        folder_id = _make_id(folder_path)
+        if folder_id not in self._nodes:
+            now = datetime.now().isoformat(timespec="seconds")
+            folder_name = folder_path.rsplit("/", 1)[-1] if "/" in folder_path else folder_path
+            meta = NodeMeta(
+                layer=Layer.UNIVERSAL,
+                source="world",
+                confidence_for_owner=1.0,
+                status="complete",
+            )
+            self._nodes[folder_id] = {
+                "id": folder_id,
+                "label": folder_name,
+                "type": "Folder",
+                "kind": "folder",
+                "created_at": now,
+                "last_active": now,
+                "session_count": 1,
+                "attributes": {"path": folder_path},
+                "facts": [],
+                "files": [],
+                "chunk_ids": [],
+                **meta.to_dict(),
+            }
+        return folder_id
+
     def upsert_file_structure(
         self,
         file_path: str,
@@ -764,8 +761,42 @@ class TopicGraph:
                 "stale_since": None,
                 "indexed_at": now,
                 **meta.to_dict(),
-                "status": "cold",
             }
+
+        # Create folder hierarchy: a/b/c/file.md → folder "a" → "a/b" → "a/b/c" → file
+        path_parts = file_path.split("/")
+        if len(path_parts) > 1:
+            for i in range(1, len(path_parts)):
+                folder_path = "/".join(path_parts[:i])
+                folder_id = self.upsert_folder_node(folder_path)
+                if i == len(path_parts) - 1:
+                    # Immediate parent folder → file edge
+                    if not self._edge_exists(folder_id, file_id, "contains"):
+                        self._edges.append({
+                            "source": folder_id,
+                            "target": file_id,
+                            "relation": "contains",
+                            "weight": 1.0,
+                            "created_at": now,
+                            "last_active": now,
+                            "layer": "UNIVERSAL",
+                            "source_type": "world",
+                        })
+                else:
+                    # Parent folder → child folder edge
+                    child_folder = "/".join(path_parts[:i + 1])
+                    child_id = _make_id(child_folder)
+                    if not self._edge_exists(folder_id, child_id, "contains"):
+                        self._edges.append({
+                            "source": folder_id,
+                            "target": child_id,
+                            "relation": "contains",
+                            "weight": 1.0,
+                            "created_at": now,
+                            "last_active": now,
+                            "layer": "UNIVERSAL",
+                            "source_type": "world",
+                        })
 
         # Create symbol/section nodes
         created = 0
@@ -800,7 +831,6 @@ class TopicGraph:
                 "files": [file_path],
                 "chunk_ids": [],
                 **meta.to_dict(),
-                "status": "cold",
             }
 
             # CONTAINS edge: file -> symbol

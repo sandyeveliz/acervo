@@ -4,6 +4,89 @@ All notable changes to this project will be documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-04-01
+
+### Architecture
+- **Intent-aware context pipeline** — S1 classifies user intent as `overview`, `specific`, or `chat`. Overview questions use synthesis/entity nodes only (no section/symbol noise). Specific questions use vector search + section nodes. Chat messages get minimal or no context.
+- **Curate + Synthesize pipeline** — Two new post-indexing stages: `curate` extracts entities from indexed content via LLM batch analysis, `synthesize` generates a project overview node summarizing the entire project. Both persist to the knowledge graph.
+- **S1.5 memory extraction** — `process()` extracts entities and facts from user messages into the graph for later recall. Runs after every turn to build persistent memory.
+- **Context builder fallback fix** — Fixed `UnboundLocalError` on `conversation_chunks`/`verified_chunks` that silently crashed the context pipeline when the graph had data but intent classification diverged.
+- **Proxy graph reload** — Added `/acervo/reload-graph` endpoint to prevent the proxy's in-memory graph from overwriting disk state after external indexing.
+
+### Ingestion
+- **`.epub` ingestion** — Parses epub files via ebooklib, extracts chapters as sections, creates graph nodes with summaries. Optional dependency: `pip install acervo[epub]`.
+- **`.pdf` ingestion** — Parses PDF files via PyMuPDF, extracts pages as sections. Optional dependency: `pip install acervo[pdf]`.
+- **`.txt` ingestion** — Parses plain text files with paragraph-based sectioning.
+- **Paragraph-based prose chunking** — `_chunk_prose()` splits large sections (epub chapters, PDF pages) into ~500-token paragraph clusters instead of storing entire chapters as single chunks.
+- **`acervo chunks` CLI** — `stats` (chunk count, avg size, distribution), `list` (all chunks with metadata), `show <id>` (full chunk content), `search <query>` (semantic search across chunks).
+
+### Curation & Synthesis
+- **`acervo curate`** — LLM analyzes indexed files in batches, extracts entities (people, technologies, concepts) with types from a controlled ontology, and creates relationship edges between entities and files.
+- **`acervo synthesize`** — LLM generates a `synthesis:project_overview` node summarizing the entire project. Used as the primary context for overview-intent questions.
+- **Curation system prompt** — Explicit system prompt for the fine-tuned model with structured JSON output format, requesting 3-5 entities per batch with type classification.
+- **Entity type mapping** — `map_extractor_type()` converts lowercase extractor output to capitalized ontology types (e.g., "technology" → "Technology").
+
+### Context Pipeline
+- **Intent keyword fallback** — Overview detection uses keyword matching ("how many files", "what is this project") when the LLM intent classification is ambiguous.
+- **Overview intent filtering** — Skips vector search, skips section nodes, filters to verified chunks only. Prevents section-level noise from flooding overview answers.
+- **Node-scoped retrieval** — Chunk retrieval scoped to activated graph nodes instead of global RAG search. Only chunks belonging to relevant nodes are retrieved.
+- **Debug key alignment** — Renamed `s1_unified` → `s1_detection` in trace output for frontend compatibility.
+- **S1/S2 log level upgrade** — Pipeline step logs promoted from DEBUG to INFO for visibility in traces.
+
+### Benchmarks
+- **5-category benchmark system** — RESOLVE (enables impossible answers), GROUND (prevents hallucination), RECALL (persistent memory), FOCUS (efficient context), ADAPT (topic switching). 55 turns across 3 test projects.
+- **Test fixtures** — P1: TODO App (31 TypeScript/React files), P2: Sherlock Holmes epub (public domain, Project Gutenberg), P3: PM docs (11 markdown files with roadmaps, sprints, issues, ADRs).
+- **Pipeline validation tests** — 26 tests inspecting graph state per project (index/curate/synthesize structural checks, phantom entity detection, entity relation validation).
+- **Agent comparison scorecard** — Each RESOLVE/GROUND turn includes estimated costs for Stateless LLM, Agent+Tools, and Acervo approaches. Reports show efficiency ratios (12.1x fewer tokens than agent approach).
+- **Per-turn component diagnostics** — S1 intent accuracy, S2 activation accuracy, S3 budget compliance, S3 content quality. Cross-matrix shows which categories are affected by which component failures.
+- **Version-tracked results** — Each benchmark run appends to `version_history.json` for cross-version regression detection.
+- **Auto-indexing fixtures** — `conftest.py` runs the full init→index→curate→synthesize pipeline on first run for each test project.
+
+### Acervo Studio
+- **Multi-project support** — `ProjectContext` (React context) replaces window events. `select()` uses 2 API calls (was 4). Project switching with loading spinner.
+- **Project config UI** — Read/write `.acervo/config.toml` from the Settings tab.
+- **Indexation tab auto-load** — File status loads automatically when the Indexation tab opens. Operation timestamps display.
+- **Session export** — Copy/Markdown/JSON export buttons in the chat toolbar.
+- **Pipeline trace updates** — S1 Unified fields (topic_action, intent, entities), chunk text previews in S2, collapsible "all available chunks" section.
+- **Chat auto-clear on project switch** — Chat messages clear when switching projects via `useEffect` on `activeId`.
+- **Export toolbar layout fix** — Fixed flex layout broken by the export toolbar wrapper.
+
+### CLI
+- **`acervo up --dev`** — Starts Ollama, proxy, Studio backend, and Studio frontend in one terminal with multiplexed tagged logs.
+- **`acervo chunks stats|list|show|search`** — Chunk inspection CLI for debugging and validating ingestion.
+- **`acervo graph repair`** — Detects and fixes missing fields, orphan edges, duplicate edges.
+- **`acervo graph show|search|delete|merge`** — Full graph inspection and editing from the terminal.
+- **Configurable logging** — `--log-level trace|debug|info|warning|error`, `--no-color`, `-v` shorthand.
+
+### Bug Fixes
+- **Context builder `UnboundLocalError`** — Variables `conversation_chunks`/`verified_chunks` only defined in `else` branch but used unconditionally in debug dict. Fixed by initializing before if/elif/else.
+- **Proxy graph overwrite after indexing** — Indexer creates its own TopicGraph and saves to disk. Proxy's in-memory graph (empty) overwrites on next save. Fixed with `/acervo/reload-graph` endpoint called after indexing.
+- **Curation producing 0 entities** — No system prompt + vague user prompt for the fine-tuned model. Fixed with explicit curation system prompt and richer file context.
+- **Entity types "Unknown"** — `map_extractor_type()` not called; lowercase "technology" didn't match capitalized registry. Fixed by routing through ontology mapper.
+- **Unicode encoding error on Windows** — `─` character in print() caused cp1252 error. Fixed by using ASCII `-`.
+- **Prose under-chunking** — Entire book chapters stored as single 20k+ char chunks. Fixed with `_chunk_prose()` paragraph-cluster splitting.
+- **S1/S2/S3 invisible in trace** — Debug key mismatch `s1_unified` vs `s1_detection`. Fixed by renaming key.
+- **Chat layout broken by export toolbar** — Export toolbar wrapper broke flex layout. Fixed by adding `flex flex-col` to ChatArea container.
+- **FileTools removed from pipeline** — FileTools was wired into the pipeline but belonged in S2 gather. Removed entirely; file reading handled via S2 node activation.
+
+### Removed
+- **FileTools** — Removed from pipeline. File reading is handled by S2 node activation, not runtime tool calls.
+- **Old benchmark files** — Replaced v0.3 conversation benchmark framework with 5-category benchmark system.
+
+### Benchmark Results (v0.4.0 baseline)
+
+| Category | Score |
+|----------|-------|
+| RESOLVE  | 100%  |
+| GROUND   | 92%   |
+| RECALL   | 67%   |
+| FOCUS    | 100%  |
+| ADAPT    | 100%  |
+
+Component health: S1 Intent 78%, S2 Activation 56%, S3 Budget 32%, S3 Quality 81%.
+
+RESOLVE efficiency: **12.1x fewer tokens** than agent-with-tools approach (avg 616 tokens vs 7,462 tokens per turn).
+
 ## [0.2.2] - 2026-03-25
 
 ### Fixed
