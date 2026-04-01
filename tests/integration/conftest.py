@@ -144,6 +144,36 @@ def _ensure_indexed(project_path: Path) -> None:
         print(f"  SYNTHESIZE: FAILED — {e}")
 
 
+# ── Acervo instance fixtures for Layer 2/3 tests ──
+
+
+@pytest.fixture
+def p1_acervo():
+    """Acervo instance loaded from indexed P1 fixture."""
+    path = _FIXTURES / "p1-todo-app"
+    if not (path / ".acervo" / "data" / "graph" / "nodes.json").exists():
+        pytest.skip("P1 not indexed")
+    return Acervo.from_project(path, auto_init=False)
+
+
+@pytest.fixture
+def p2_acervo():
+    """Acervo instance loaded from indexed P2 fixture."""
+    path = _FIXTURES / "p2-literature"
+    if not (path / ".acervo" / "data" / "graph" / "nodes.json").exists():
+        pytest.skip("P2 not indexed")
+    return Acervo.from_project(path, auto_init=False)
+
+
+@pytest.fixture
+def p3_acervo():
+    """Acervo instance loaded from indexed P3 fixture."""
+    path = _FIXTURES / "p3-project-docs"
+    if not (path / ".acervo" / "data" / "graph" / "nodes.json").exists():
+        pytest.skip("P3 not indexed")
+    return Acervo.from_project(path, auto_init=False)
+
+
 def pytest_configure(config):
     """Auto-index fixture projects before any tests run."""
     # Enable logging so progress is visible during indexation
