@@ -10,10 +10,10 @@ and entity extraction. Two benchmark types:
 
 | Version | Date | Type | Turns | Key Result | Report |
 |---------|------|------|-------|------------|--------|
-| **v0.4.0** | 2026-04-01 | Indexed project | 55 | 100% RESOLVE, 12.1x efficiency | [Full Report](benchmarks/v0.4.0/) |
-| v0.2.2-3 | 2026-03-27 | Conversation | 360 | 76.1% savings | [Full Report](benchmarks/v0.2.2-3/) |
-| v0.2.2-2 | 2026-03-27 | Conversation | 360 | 76.1% savings | [Full Report](benchmarks/v0.2.2-2/) |
-| v0.2.2-1 | 2026-03-27 | Conversation | 360 | 76.1% savings | [Full Report](benchmarks/v0.2.2-1/) |
+| **v0.4.0** | 2026-04-01 | Indexed project | 55 | 100% RESOLVE, 12.1x efficiency | [Full Report](v0.4.0/) |
+| v0.2.2-3 | 2026-03-27 | Conversation | 360 | 76.1% savings | [Full Report](v0.2.2-3/) |
+| v0.2.2-2 | 2026-03-27 | Conversation | 360 | 76.1% savings | [Full Report](v0.2.2-2/) |
+| v0.2.2-1 | 2026-03-27 | Conversation | 360 | 76.1% savings | [Full Report](v0.2.2-1/) |
 
 ## v0.4.0 — Indexed Project Benchmarks
 
