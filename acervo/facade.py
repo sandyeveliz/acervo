@@ -172,6 +172,28 @@ class Acervo:
             summarize_prompt=p.get("summarizer"),
         )
 
+        # v0.5: Pipeline orchestrator delegates S1→S2→S3 and S1.5
+        from acervo.domain.pipeline import Pipeline as _Pipeline
+        from acervo.domain.s2_activator import S2Activator
+        from acervo.domain.s3_assembler import S3Assembler
+        self._pipeline = _Pipeline(
+            s1=self._s1_unified,
+            s2=S2Activator(),
+            s3=S3Assembler(),
+            s15_llm=extractor_llm,
+            s15_prompt=self._s1_5_prompt,
+            graph=self._graph,
+            topic_detector=self._topic_detector,
+            context_index=self._context_index,
+            embedder=self._embedder,
+            vector_store=self._vector_store,
+            metrics=self._metrics,
+            workspace_path=self._workspace_path,
+            owner=self._owner,
+            project_description=self._project_description,
+            warm_token_budget=self._warm_token_budget,
+        )
+
     @classmethod
     def from_project(
         cls,
@@ -605,7 +627,53 @@ class Acervo:
         user_text: str,
         history: list[dict],
     ) -> PrepareResult:
-        """Pre-LLM processing: 3-stage pipeline.
+        """Pre-LLM processing: S1 → S2 → S3 pipeline.
+
+        Delegates to the domain Pipeline. The result contract (PrepareResult)
+        is identical to v0.4. Consumers (proxy, cli) are unaffected.
+        """
+        from acervo.domain.pipeline import PrepareResult as PipelinePrepareResult
+        result = await self._pipeline.prepare(user_text, history)
+
+        # Copy internal state for backward compat
+        self._last_s1_extraction = self._pipeline._last_s1_extraction
+        self._last_active_node_ids = self._pipeline._last_active_node_ids
+
+        # Convert Pipeline's PrepareResult to facade's (same fields)
+        return PrepareResult(
+            context_stack=result.context_stack,
+            topic=result.topic,
+            hot_tokens=result.hot_tokens,
+            warm_tokens=result.warm_tokens,
+            total_tokens=result.total_tokens,
+            warm_content=result.warm_content,
+            has_context=result.has_context,
+            needs_tool=result.needs_tool,
+            stages=result.stages,
+            debug=result.debug,
+        )
+
+    async def process(
+        self,
+        user_text: str,
+        assistant_text: str,
+        web_results: str = "",
+    ) -> ExtractionResult:
+        """Post-LLM processing: S1.5 graph curation.
+
+        Delegates to the domain Pipeline.
+        """
+        result = await self._pipeline.process(user_text, assistant_text, web_results)
+        # Copy S1.5 debug for proxy telemetry
+        self._last_s15_debug = self._pipeline._last_s15_debug
+        return result
+
+    async def _prepare_legacy(
+        self,
+        user_text: str,
+        history: list[dict],
+    ) -> PrepareResult:
+        """LEGACY: Original prepare() implementation. Kept as fallback.
 
         S1 — S1 Unified: L1/L2 hints + LLM topic classification + entity extraction (9b)
         S2 — Gather: collect graph nodes, file contents, vector search → ranked chunks
@@ -1150,13 +1218,13 @@ class Acervo:
             debug=_debug,
         )
 
-    async def process(
+    async def _process_legacy(
         self,
         user_text: str,
         assistant_text: str,
         web_results: str = "",
     ) -> ExtractionResult:
-        """Post-LLM processing: S1.5 graph curation + assistant extraction.
+        """LEGACY: Original process() implementation. Kept as fallback.
 
         Runs S1.5 Graph Update asynchronously to:
         1. Curate graph (merge duplicates, fix types, discard garbage)

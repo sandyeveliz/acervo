@@ -377,11 +377,30 @@ def _parse_s1_response(raw: str) -> S1Result:
                     entity=name, fact=fact_text, source="user", speaker=speaker,
                 ))
 
+    # Build map: model-generated ID → entity label (for relation resolution)
+    # The model may generate "id": "supabase_db" but label: "Supabase".
+    # Relations reference IDs, but graph nodes use _make_id(label).
+    _id_to_label: dict[str, str] = {}
+    for e_raw in obj.get("entities", []):
+        if not isinstance(e_raw, dict):
+            continue
+        eid = str(e_raw.get("id", "")).strip().lower()
+        label = str(e_raw.get("label", "") or e_raw.get("name", "")).strip()
+        if eid and label:
+            _id_to_label[eid] = label
+            _id_to_label[label.lower()] = label
+
+    def _resolve_name(name: str) -> str:
+        """Resolve a model ID or label to the canonical entity label."""
+        return _id_to_label.get(name.lower(), name)
+
     # Parse relations — both top-level AND nested inside entities
     relations: list[Relation] = []
     seen_relations: set[tuple[str, str, str]] = set()
 
     def _add_relation(src: str, tgt: str, rel: str) -> None:
+        src = _resolve_name(src)
+        tgt = _resolve_name(tgt)
         if not src or not tgt or not rel or src.lower() == tgt.lower():
             return  # skip empty or self-referencing relations
         key = (src.lower(), tgt.lower(), rel.lower())
@@ -400,16 +419,21 @@ def _parse_s1_response(raw: str) -> S1Result:
         )
 
     # Nested relations inside entities (fine-tuned model format)
+    # Use entity LABEL (not model-generated ID) for relation source,
+    # so _make_id(label) in graph matches the node ID.
     for e_raw in obj.get("entities", []):
         if not isinstance(e_raw, dict):
             continue
-        entity_id = str(e_raw.get("id", "") or e_raw.get("label", "") or e_raw.get("name", "")).strip()
+        entity_label = str(e_raw.get("label", "") or e_raw.get("name", "") or e_raw.get("id", "")).strip()
         for r_raw in e_raw.get("relations", []):
             if not isinstance(r_raw, dict):
                 continue
+            # Use label for source; target may reference another entity by ID,
+            # so try to resolve via label_by_id map
+            target_raw = str(r_raw.get("target", "")).strip()
             _add_relation(
-                str(r_raw.get("source", entity_id)).strip(),
-                str(r_raw.get("target", "")).strip(),
+                str(r_raw.get("source", entity_label)).strip(),
+                target_raw,
                 str(r_raw.get("relation", "")).strip(),
             )
 
