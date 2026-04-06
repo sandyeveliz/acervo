@@ -1,0 +1,125 @@
+graph LR
+    subgraph "Layer 1: Config"
+        config[config.py<br/>523 LOC]
+        project[project.py<br/>160 LOC]
+        log_config[log_config.py<br/>105 LOC]
+    end
+
+    subgraph "Layer 2: Knowledge Graph"
+        graph_mod[graph.py<br/>1069 LOC]
+        layers[layers.py<br/>97 LOC]
+        ontology[ontology.py<br/>205 LOC]
+    end
+
+    subgraph "Layer 3: Structural"
+        structural_parser[structural_parser.py<br/>1286 LOC]
+        dependency_resolver[dependency_resolver.py<br/>175 LOC]
+        file_ingestor[file_ingestor.py<br/>175 LOC]
+    end
+
+    subgraph "Layer 4: Semantic"
+        semantic_enricher[semantic_enricher.py<br/>552 LOC]
+        indexer[indexer.py<br/>527 LOC]
+        reindexer[reindexer.py<br/>118 LOC]
+    end
+
+    subgraph "Layer 5: Extraction"
+        extractor[extractor.py<br/>580 LOC]
+        curator[curator.py<br/>315 LOC]
+        s1_unified[s1_unified.py<br/>552 LOC]
+        s1_5[s1_5_graph_update.py<br/>359 LOC]
+    end
+
+    subgraph "Layer 6: Context"
+        context_builder[context_builder.py<br/>245 LOC]
+        context_index[context_index.py<br/>249 LOC]
+        synthesizer[synthesizer.py<br/>226 LOC]
+        topic_detector[topic_detector.py<br/>183 LOC]
+        specificity[specificity.py<br/>67 LOC]
+    end
+
+    subgraph "Layer 7: Facade"
+        facade[facade.py<br/>1848 LOC]
+        llm[llm.py<br/>75 LOC]
+        openai_client[openai_client.py<br/>134 LOC]
+    end
+
+    subgraph "Layer 8: Proxy"
+        proxy[proxy.py<br/>1303 LOC]
+        services[services.py<br/>382 LOC]
+        infra_prompt[infra_prompt.py<br/>39 LOC]
+    end
+
+    %% Core dependencies
+    graph_mod --> layers
+    graph_mod --> ontology
+
+    %% Extraction dependencies
+    extractor --> llm
+    extractor --> ontology
+    s1_unified --> extractor
+    s1_unified --> llm
+    s1_unified --> ontology
+    s1_unified --> topic_detector
+    s1_5 --> extractor
+    s1_5 --> graph_mod
+    s1_5 --> llm
+    s1_5 --> ontology
+    curator --> graph_mod
+    curator --> llm
+    curator --> ontology
+
+    %% Context dependencies
+    context_builder --> token_counter[token_counter.py]
+    context_index --> graph_mod
+    context_index --> llm
+    context_index --> synthesizer
+    synthesizer --> graph_mod
+    topic_detector --> llm
+
+    %% Structural/Semantic
+    dependency_resolver --> structural_parser
+    indexer --> graph_mod
+    indexer --> structural_parser
+    indexer --> semantic_enricher
+    indexer --> dependency_resolver
+    semantic_enricher --> llm
+    file_ingestor --> graph_mod
+    reindexer --> graph_mod
+
+    %% Facade (HUB - most connections)
+    facade --> graph_mod
+    facade --> extractor
+    facade --> context_builder
+    facade --> context_index
+    facade --> synthesizer
+    facade --> s1_unified
+    facade --> topic_detector
+    facade --> specificity
+    facade --> reindexer
+    facade --> llm
+    facade --> ontology
+    facade --> layers
+    facade --> metrics[metrics.py]
+
+    %% Proxy
+    proxy --> config
+    proxy --> infra_prompt
+    proxy -.-> facade
+
+    %% CLI
+    cli[cli.py] --> config
+    cli --> project
+    cli --> graph_mod
+    cli --> indexer
+    cli --> proxy
+    cli --> services
+
+    %% Project
+    project --> config
+
+    style facade fill:#ff6b6b,color:#fff
+    style proxy fill:#ffa07a,color:#fff
+    style graph_mod fill:#87ceeb,color:#000
+    style s1_unified fill:#98fb98,color:#000
+    style s1_5 fill:#98fb98,color:#000

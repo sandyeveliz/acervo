@@ -128,12 +128,19 @@ JSON:"""
 # ── Shared JSON parsing ──
 
 def _parse_first_json(text: str, target: str = "object") -> dict | list | None:
-    """Find and parse the first JSON object or array in text."""
+    """Find and parse the first JSON object or array in text.
+
+    If the first balanced-braces attempt fails, tries a greedy approach
+    that finds the LAST closing brace and repairs common model errors
+    (e.g. newlines between array close and next key).
+    """
     open_char = "{" if target == "object" else "["
     close_char = "}" if target == "object" else "]"
     start = text.find(open_char)
     if start == -1:
         return None
+
+    # Attempt 1: strict depth tracking
     depth = 0
     for i in range(start, len(text)):
         if text[i] == open_char:
@@ -144,7 +151,24 @@ def _parse_first_json(text: str, target: str = "object") -> dict | list | None:
                 try:
                     return json.loads(text[start:i + 1])
                 except json.JSONDecodeError:
-                    return None
+                    break  # try repair instead of giving up
+
+    # Attempt 2: greedy — find the last closing brace and try to parse
+    end = text.rfind(close_char)
+    if end > start:
+        candidate = text[start:end + 1]
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+        # Attempt 3: repair common model errors (]\n" → ],\n")
+        repaired = re.sub(r'\]\s*\n\s*"', '], "', candidate)
+        repaired = re.sub(r'\}\s*\n\s*"', '}, "', repaired)
+        try:
+            return json.loads(repaired)
+        except json.JSONDecodeError:
+            pass
+
     return None
 
 

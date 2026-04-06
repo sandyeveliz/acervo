@@ -1,6 +1,6 @@
 # Acervo Pipeline — Complete Technical Documentation
 
-> Last updated: 2026-03-31 (v0.4.0)
+> Last updated: 2026-04-04 (v0.5.0)
 
 ---
 

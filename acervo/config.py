@@ -28,8 +28,8 @@ log = logging.getLogger(__name__)
 class ModelConfig:
     """Configuration for the utility model used by Acervo's pipeline."""
 
-    name: str = "acervo-extractor-qwen3.5-9b"
-    url: str = "http://localhost:1234/v1"
+    name: str = "acervo-extractor-v3-Q4_K_M"
+    url: str = "http://localhost:11434/v1"
     api_key: str = ""
 
     def resolve(self) -> ModelConfig:

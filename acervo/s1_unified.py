@@ -41,8 +41,11 @@ _SYSTEM_PROMPT = (
     '"overview" (user asks about the project as a whole: inventory, structure, '
     '"what do we have?", "how many?", listing), '
     '"specific" (user asks about specific content: a chapter, a character, a file, a concept), '
+    '"followup" (user continues the previous topic with more depth or a related sub-question), '
     '"chat" (general conversation not about project content). '
-    'Include "intent": "overview"|"specific"|"chat" at the top level of your JSON output. '
+    'Include "intent": "overview"|"specific"|"followup"|"chat" at the top level of your JSON output. '
+    'Also include "retrieval": "summary_only" (node summaries are sufficient) '
+    'or "with_chunks" (detailed indexed content is needed to answer). '
     "Output valid JSON only, no markdown, no explanation."
 )
 
@@ -73,7 +76,11 @@ class TopicResult:
 class S1Result:
     topic: TopicResult
     extraction: ExtractionResult
-    intent: str = "specific"  # "overview" | "specific" | "chat"
+    intent: str = "specific"  # "overview" | "specific" | "followup" | "chat"
+    retrieval: str | None = None  # "summary_only" | "with_chunks" | None (v1 fallback)
+    # Debug: prompt and raw response for telemetry/annotation
+    prompt_sent: str = ""       # JSON of messages array sent to extractor
+    raw_response: str = ""      # Raw model output before JSON parsing
 
 
 # ── Graph summary builder ──
@@ -217,11 +224,14 @@ class S1Unified:
 
         Builds the exact system+user message format the fine-tuned model expects.
         """
+        # Limit previous assistant to first 150 chars — enough for followup detection
+        # but too short to dominate topic classification with hallucinated topics
+        prev_summary = prev_assistant_msg[:150] if prev_assistant_msg else "null"
         user_content = (
             f"EXISTING NODES:\n{existing_nodes_summary}\n\n"
             f"TOPIC HINT: {topic_hint}\n"
             f"CURRENT TOPIC: {current_topic if current_topic != 'none' else 'null'}\n\n"
-            f"PREVIOUS ASSISTANT: {prev_assistant_msg[:500] if prev_assistant_msg else 'null'}\n"
+            f"PREVIOUS ASSISTANT: {prev_summary}\n"
             f"USER: {user_msg[:800]}"
         )
 
@@ -263,6 +273,10 @@ class S1Unified:
         combined_text = f"{user_msg} {prev_assistant_msg}"
         result = _validate_s1(result, combined_text)
 
+        # Attach debug data for telemetry
+        result.prompt_sent = json.dumps(messages, ensure_ascii=False)
+        result.raw_response = raw_response
+
         return result
 
 
@@ -282,37 +296,61 @@ def _parse_s1_response(raw: str) -> S1Result:
             extraction=ExtractionResult(),
         )
 
-    # Parse topic
+    # Parse topic — fine-tuned model returns {"action": ..., "label": ...},
+    # generic models may return a plain string (e.g. "Proyectos")
     topic_raw = obj.get("topic", {})
-    action = topic_raw.get("action", "same") if isinstance(topic_raw, dict) else "same"
-    if action not in ("same", "subtopic", "changed"):
-        action = "same"
-    label = topic_raw.get("label") if isinstance(topic_raw, dict) else None
-    if label and isinstance(label, str):
-        label = label.strip()
-        if not label or label.lower() in ("null", "none", ""):
+    if isinstance(topic_raw, str):
+        # Generic model returned topic as string — treat as new topic
+        label = topic_raw.strip() if topic_raw.strip().lower() not in ("null", "none", "") else None
+        action = "changed" if label else "same"
+    elif isinstance(topic_raw, dict):
+        action = topic_raw.get("action", "same")
+        label = topic_raw.get("label")
+        if label and isinstance(label, str):
+            label = label.strip()
+            if label.lower() in ("null", "none", ""):
+                label = None
+        else:
             label = None
     else:
+        action = "same"
         label = None
+    if action not in ("same", "subtopic", "changed"):
+        action = "same"
 
     topic = TopicResult(action=action, label=label)
 
-    # Parse intent
+    # Parse intent (v2 adds "followup")
     intent = obj.get("intent", "specific")
-    if not isinstance(intent, str) or intent not in ("overview", "specific", "chat"):
+    if not isinstance(intent, str) or intent not in ("overview", "specific", "followup", "chat"):
         intent = "specific"
 
-    # Parse entities — fine-tuned model uses "label" and "id", with nested "facts"
+    # Parse retrieval hint (v2 model only — None means v1/fallback)
+    retrieval = obj.get("retrieval")
+    if retrieval is not None:
+        if not isinstance(retrieval, str) or retrieval not in ("summary_only", "with_chunks"):
+            retrieval = None
+
+    # Parse entities — fine-tuned model uses "label" and "id", with nested "facts".
+    # Generic models may return plain strings instead of objects — handle both.
     entities: list[Entity] = []
     entity_facts: list[ExtractedFact] = []  # collected from nested entity facts
     for e_raw in obj.get("entities", []):
+        # Generic models may return entities as plain strings (e.g. "Butaco")
+        if isinstance(e_raw, str):
+            name = e_raw.strip()
+            if name and len(name) >= 2:
+                entities.append(Entity(name=name, type="concept", layer="", attributes={}))
+            continue
         if not isinstance(e_raw, dict):
             continue
         # Fine-tuned model: "label" field. Fallback: "name" for compat.
         name = str(e_raw.get("label", "") or e_raw.get("name", "")).strip()
         raw_type = str(e_raw.get("type", "")).strip()
-        if not name or not raw_type or len(raw_type) < 2:
+        if not name:
             continue
+        if not raw_type or len(raw_type) < 2:
+            raw_type = "concept"  # default type for generic models
         mapped_type = map_extractor_type(raw_type)
         layer = str(e_raw.get("layer", "")).upper()
         if layer not in ("PERSONAL", "UNIVERSAL"):
@@ -339,16 +377,41 @@ def _parse_s1_response(raw: str) -> S1Result:
                     entity=name, fact=fact_text, source="user", speaker=speaker,
                 ))
 
-    # Parse relations
+    # Parse relations — both top-level AND nested inside entities
     relations: list[Relation] = []
+    seen_relations: set[tuple[str, str, str]] = set()
+
+    def _add_relation(src: str, tgt: str, rel: str) -> None:
+        if not src or not tgt or not rel or src.lower() == tgt.lower():
+            return  # skip empty or self-referencing relations
+        key = (src.lower(), tgt.lower(), rel.lower())
+        if key not in seen_relations:
+            seen_relations.add(key)
+            relations.append(Relation(source=src, target=tgt, relation=rel))
+
+    # Top-level relations array
     for r_raw in obj.get("relations", []):
         if not isinstance(r_raw, dict):
             continue
-        src = str(r_raw.get("source", "")).strip()
-        tgt = str(r_raw.get("target", "")).strip()
-        rel = str(r_raw.get("relation", "")).strip()
-        if src and tgt and rel:
-            relations.append(Relation(source=src, target=tgt, relation=rel))
+        _add_relation(
+            str(r_raw.get("source", "")).strip(),
+            str(r_raw.get("target", "")).strip(),
+            str(r_raw.get("relation", "")).strip(),
+        )
+
+    # Nested relations inside entities (fine-tuned model format)
+    for e_raw in obj.get("entities", []):
+        if not isinstance(e_raw, dict):
+            continue
+        entity_id = str(e_raw.get("id", "") or e_raw.get("label", "") or e_raw.get("name", "")).strip()
+        for r_raw in e_raw.get("relations", []):
+            if not isinstance(r_raw, dict):
+                continue
+            _add_relation(
+                str(r_raw.get("source", entity_id)).strip(),
+                str(r_raw.get("target", "")).strip(),
+                str(r_raw.get("relation", "")).strip(),
+            )
 
     # Parse top-level facts (about existing entities) — "text" or "fact" field
     facts: list[ExtractedFact] = []
@@ -369,7 +432,7 @@ def _parse_s1_response(raw: str) -> S1Result:
     all_facts = entity_facts + facts
 
     extraction = ExtractionResult(entities=entities, relations=relations, facts=all_facts)
-    return S1Result(topic=topic, extraction=extraction, intent=intent)
+    return S1Result(topic=topic, extraction=extraction, intent=intent, retrieval=retrieval)
 
 
 # ── Validator ──
@@ -476,6 +539,8 @@ def _validate_s1(result: S1Result, conversation_text: str) -> S1Result:
             relations=valid_relations,
             facts=valid_facts,
         ),
+        intent=result.intent,
+        retrieval=result.retrieval,
     )
 
 

@@ -1260,6 +1260,10 @@ class AcervoProxy:
                 self._last_enrichment["indexing_verified"] = has_tool_results
                 log.info("Indexed: %d entities, %d facts, source=%s",
                          len(result.entities), len(result.facts), source)
+            # Merge S1.5 debug data into enrichment for telemetry
+            s15_debug = getattr(self._acervo, "_last_s15_debug", None)
+            if s15_debug and isinstance(self._last_enrichment.get("debug"), dict):
+                self._last_enrichment["debug"].update(s15_debug)
         except Exception as e:
             log.warning("process() failed: %s", e)
 

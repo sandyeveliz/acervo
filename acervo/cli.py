@@ -382,20 +382,26 @@ def cmd_serve(args: argparse.Namespace) -> None:
 def cmd_up(args: argparse.Namespace) -> None:
     """Start Acervo proxy (default) or full dev stack (--dev)."""
     _load_env(args.env)
-    project = _require_project()
-    config = project.config
 
     if args.dev:
-        # Dev mode: all services with multiplexed logs
+        # Dev mode: project is optional — Studio UI has a project selector
+        from acervo.config import AcervoConfig
         from acervo.services import DevRunner
-        runner = DevRunner(config, project.acervo_dir)
+
+        project = find_project()
+        config = project.config if project else AcervoConfig()
+        acervo_dir = project.acervo_dir if project else None
+        runner = DevRunner(config, acervo_dir)
         try:
             asyncio.run(runner.run())
         except KeyboardInterrupt:
             pass
         return
 
-    # Default mode: proxy only, with dependency check
+    # Default mode: proxy only — requires a project (needs a graph)
+    project = _require_project()
+    config = project.config
+
     from acervo.services import check_dependencies, format_dep_check, _banner
     from acervo.proxy import AcervoProxy
 

@@ -141,6 +141,7 @@ _EXTRACTOR_TYPE_MAP: dict[str, str] = {
     "project": "Project",
     "work": "Work",
     "place": "Place",
+    "location": "Place",
     "technology": "Technology",
     "document": "Document",
     "rule": "Rule",

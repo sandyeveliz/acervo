@@ -96,7 +96,7 @@ class TurnCheck:
 
 @dataclass
 class BenchmarkResult:
-    version: str = "v0.4.0"
+    version: str = "v0.5.0"
     total_turns: int = 0
     category_scores: dict[str, float] = field(default_factory=dict)
     component_scores: dict[str, float] = field(default_factory=dict)
@@ -143,7 +143,7 @@ def _check_s2(turn_spec: dict, prep_debug: dict, tc: TurnCheck) -> None:
         return
     s2_data = prep_debug.get("s2_gathered", {})
     nodes = s2_data.get("nodes", [])
-    tc.s2_nodes_activated = len(nodes)
+    tc.s2_nodes_activated = s2_data.get("nodes_total", len(nodes))
 
     # max_nodes check
     if "max_nodes" in s2_spec:
@@ -586,6 +586,10 @@ def _print_scorecard(r: BenchmarkResult) -> None:
 
 
 def _export_reports(r: BenchmarkResult) -> None:
+    # Write to versioned subdirectory so runs don't overwrite each other
+    version_dir = _REPORTS / r.version
+    version_dir.mkdir(parents=True, exist_ok=True)
+    # Also keep _REPORTS for version_history.json (shared across versions)
     _REPORTS.mkdir(parents=True, exist_ok=True)
 
     # Public JSON (includes scorecard + efficiency)
@@ -596,7 +600,7 @@ def _export_reports(r: BenchmarkResult) -> None:
         "resolve_scorecard": r.resolve_scorecard,
         "efficiency_chart": r.efficiency_chart,
     }
-    (_REPORTS / "benchmark_public.json").write_text(
+    (version_dir / "benchmark_public.json").write_text(
         json.dumps(public, indent=2), encoding="utf-8"
     )
 
@@ -604,7 +608,7 @@ def _export_reports(r: BenchmarkResult) -> None:
     diag = asdict(r)
     for t in diag.get("turns", []):
         t.pop("warm_content", None)
-    (_REPORTS / "benchmark_diagnostic.json").write_text(
+    (version_dir / "benchmark_diagnostic.json").write_text(
         json.dumps(diag, indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
@@ -666,7 +670,7 @@ def _export_reports(r: BenchmarkResult) -> None:
                 f"{row['ratio']}x | {row['user_msg']} |"
             )
 
-    (_REPORTS / "benchmark_public.md").write_text(
+    (version_dir / "benchmark_public.md").write_text(
         "\n".join(lines), encoding="utf-8"
     )
 
@@ -708,14 +712,14 @@ def _export_reports(r: BenchmarkResult) -> None:
                 f"| {cat} | {' | '.join(row_vals)} | {m.get('score', 0):.0f}% |"
             )
 
-    (_REPORTS / "benchmark_diagnostic.md").write_text(
+    (version_dir / "benchmark_diagnostic.md").write_text(
         "\n".join(dlines), encoding="utf-8"
     )
 
     # Version history (append to versions.json)
     _update_version_history(r)
 
-    print(f"\n  Reports: {_REPORTS}/benchmark_*.json|md")
+    print(f"\n  Reports: {_REPORTS / r.version}/benchmark_*.json|md")
 
 
 def _update_version_history(r: BenchmarkResult) -> None:

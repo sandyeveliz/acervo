@@ -156,7 +156,7 @@ class DepStatus:
 
 
 def check_dependencies(config: AcervoConfig) -> list[DepStatus]:
-    """Check Ollama and LM Studio health."""
+    """Check Ollama health."""
     results: list[DepStatus] = []
 
     # Ollama
@@ -168,23 +168,6 @@ def check_dependencies(config: AcervoConfig) -> list[DepStatus]:
         ok=ok,
         detail="ok" if ok else "not running",
     ))
-
-    # LM Studio
-    port = config.services.lmstudio_port
-    ok, body = check_health(f"http://localhost:{port}/v1/models")
-    detail = "ok"
-    if ok:
-        try:
-            data = json.loads(body)
-            models = data.get("data", [])
-            if models:
-                names = [m.get("id", "?") for m in models[:3]]
-                detail = ", ".join(names)
-        except (json.JSONDecodeError, KeyError):
-            pass
-    else:
-        detail = "not running -- start manually"
-    results.append(DepStatus(name="LM Studio (chat)", port=port, ok=ok, detail=detail))
 
     return results
 
@@ -221,7 +204,7 @@ def _get_npm_cmd() -> list[str]:
 class DevRunner:
     """Run multiple services with tagged log output. Ctrl+C stops all."""
 
-    def __init__(self, config: AcervoConfig, acervo_dir: Path) -> None:
+    def __init__(self, config: AcervoConfig, acervo_dir: Path | None) -> None:
         self._config = config
         self._acervo_dir = acervo_dir
         self._procs: list[tuple[str, asyncio.subprocess.Process]] = []
@@ -244,19 +227,19 @@ class DevRunner:
             else:
                 self._log("ollama", "not found -- install from https://ollama.com")
 
-        # 2. Check LM Studio (detect only)
-        ok, _ = check_health(f"http://localhost:{svc.lmstudio_port}/v1/models")
-        if ok:
-            self._log("lmstudio", f"running on :{svc.lmstudio_port}")
-        else:
-            self._log("lmstudio", f"not running on :{svc.lmstudio_port} -- start manually")
+        # 2. Start proxy — use cwd project or fall back to Studio's active project
+        proxy_project = self._acervo_dir
+        if proxy_project is None:
+            proxy_project = self._find_studio_active_project()
 
-        # 3. Start proxy
-        self._log("proxy", f"starting on :{self._config.proxy.port}...")
-        await self._start("proxy", [
-            sys.executable, "-m", "acervo", "serve",
-            "--port", str(self._config.proxy.port),
-        ])
+        if proxy_project is not None:
+            self._log("proxy", f"starting on :{self._config.proxy.port} ({proxy_project.name})...")
+            await self._start("proxy", [
+                sys.executable, "-m", "acervo", "serve",
+                "--port", str(self._config.proxy.port),
+            ], cwd=proxy_project.parent)
+        else:
+            self._log("proxy", "no project -- skipping (select one in Studio)")
 
         # 4. Start Studio backend (if available)
         studio_path = detect_studio_path(self._config)
@@ -359,6 +342,38 @@ class DevRunner:
                     self._log(tag, "stopped")
                 except (OSError, ProcessLookupError):
                     pass
+
+    def _find_studio_active_project(self) -> Path | None:
+        """Look up the active project from Studio's SQLite DB (best-effort)."""
+        studio_path = detect_studio_path(self._config)
+        if not studio_path:
+            return None
+        db_path = studio_path / "data" / "studio.db"
+        if not db_path.exists():
+            return None
+        try:
+            import sqlite3
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = 'active_project'"
+            ).fetchone()
+            if not row:
+                conn.close()
+                return None
+            project_id = row["value"]
+            proj = conn.execute(
+                "SELECT path FROM projects WHERE id = ?", (project_id,)
+            ).fetchone()
+            conn.close()
+            if not proj:
+                return None
+            acervo_dir = Path(proj["path"]) / ".acervo"
+            if acervo_dir.exists():
+                return acervo_dir
+        except Exception:
+            pass
+        return None
 
     def _log(self, tag: str, message: str) -> None:
         """Print a tagged log line with colored tag."""

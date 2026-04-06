@@ -23,6 +23,7 @@ class LLMClient(Protocol):
         *,
         temperature: float = 0.0,
         max_tokens: int = 500,
+        json_mode: bool = False,
     ) -> str:
         """Send messages and return the response text content."""
         ...

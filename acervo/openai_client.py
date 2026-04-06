@@ -70,9 +70,9 @@ class OpenAIClient:
 
     Usage:
         client = OpenAIClient(
-            base_url="http://localhost:1234/v1",
-            model="qwen3.5-9b",
-            api_key="lm-studio",
+            base_url="http://localhost:11434/v1",
+            model="acervo-extractor-v3-Q4_K_M",
+            api_key="ollama",
         )
         response = await client.chat([{"role": "user", "content": "hi"}])
     """
@@ -95,13 +95,14 @@ class OpenAIClient:
         *,
         temperature: float = 0.0,
         max_tokens: int = 500,
+        json_mode: bool = False,
     ) -> str:
         """Send chat completion request. Returns response content text."""
         import asyncio
 
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            None, self._chat_sync, messages, temperature, max_tokens,
+            None, self._chat_sync, messages, temperature, max_tokens, json_mode,
         )
 
     def _chat_sync(
@@ -109,14 +110,18 @@ class OpenAIClient:
         messages: list[dict[str, str]],
         temperature: float,
         max_tokens: int,
+        json_mode: bool = False,
     ) -> str:
         url = f"{self._base_url}/chat/completions"
-        payload = json.dumps({
+        body: dict = {
             "model": self._model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
-        }).encode()
+        }
+        if json_mode:
+            body["response_format"] = {"type": "json_object"}
+        payload = json.dumps(body).encode()
 
         headers = {"Content-Type": "application/json"}
         if self._api_key:

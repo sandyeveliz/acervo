@@ -558,7 +558,7 @@ class LLMClient(Protocol):
 
 ## Project status
 
-v0.4.0 — [Changelog](./CHANGELOG.md)
+v0.5.0 — [Changelog](./CHANGELOG.md)
 
 | Feature | Status |
 |---------|--------|

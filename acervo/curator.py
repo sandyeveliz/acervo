@@ -19,6 +19,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
+from acervo._text import strip_think_blocks
 from acervo.graph import TopicGraph, _make_id
 from acervo.layers import Layer
 from acervo.llm import LLMClient
@@ -30,36 +31,42 @@ BATCH_SIZE = 10
 MAX_SUMMARY_LEN = 200
 
 _CURATION_SYSTEM = """\
-You are a knowledge graph curator. You analyze project files and extract entities, relationships, and facts. Always respond with valid JSON only — no markdown, no explanation."""
+You are an entity and fact extractor for project files. Output valid JSON only. No explanation."""
 
 _CURATION_PROMPT = """\
-Analyze these project files and extract:
+You are an entity and fact extractor for project files.
+Extract structured knowledge from the project files below.
 
-1. **Named entities** found in or implied by the files — people, technologies, concepts, locations, organizations. Be specific: extract "Express.js", "SQLite", "JWT", "Sherlock Holmes", "Baker Street", etc.
-2. **Relationships** between entities and files — which technology is used by which module, which character appears in which chapter, which component depends on another.
-3. **Facts** — concrete claims grounded in the file names, paths, summaries, and sections.
+═══ RULES ═══
+- Extract only what is explicitly stated. Do not infer or invent.
+- Extract at least 3-5 entities per batch (technologies, people, concepts, locations).
+- Use node IDs (provided in parentheses) when referencing existing files.
+- Valid types: person, organization, project, technology, place, event, document, concept
+- Valid relations: part_of, created_by, uses_technology, depends_on, appears_in, documented_in, related_to
 
-RULES:
-- Extract at least 3-5 entities per batch (technologies, people, concepts, locations)
-- Use node IDs (provided in parentheses) when referencing existing files
-- For new entities, use descriptive names and appropriate types
+═══ OUTPUT FORMAT ═══
+Return ONLY valid JSON:
 
-Return ONLY this JSON (no extra text):
 {{
   "entities": [
-    {{"name": "Entity Name", "type": "person|technology|concept|location|organization|document|event"}}
+    {{
+      "name": "exact name from text",
+      "type": "person | technology | concept",
+      "layer": "UNIVERSAL"
+    }}
   ],
   "relations": [
-    {{"source": "node_id_or_entity_name", "target": "node_id_or_entity_name", "relation": "uses_technology|created_by|appears_in|part_of|related_to|documented_in|depends_on|shares_theme_with"}}
+    {{"source": "entity_name_or_node_id", "target": "entity_name_or_node_id", "relation": "verb_phrase"}}
   ],
   "facts": [
-    {{"entity": "node_id_or_entity_name", "fact": "specific factual claim", "source": "curation"}}
+    {{"entity": "entity_name_or_node_id", "fact": "specific verifiable claim", "source": "curation"}}
   ]
 }}
 
-FILES:
+PROJECT FILES:
 {files_block}
-"""
+
+JSON:"""
 
 
 @dataclass
@@ -120,9 +127,18 @@ async def curate_graph(
                 ],
                 temperature=0.3,
                 max_tokens=2048,
+                json_mode=True,
             )
 
+            log.info("Curation batch %d raw response (%d chars): %s",
+                     i + 1, len(response), response[:500])
+
             parsed = _parse_response(response)
+            log.info("Curation batch %d parsed: %d entities, %d relations, %d facts",
+                     i + 1, len(parsed.get("entities", [])),
+                     len(parsed.get("relations", [])),
+                     len(parsed.get("facts", [])))
+
             applied = _apply_curation(graph, parsed)
 
             result.total_entities += applied["entities"]
@@ -227,8 +243,9 @@ def _build_files_block(batch: list[dict], graph: TopicGraph) -> str:
 
 def _parse_response(raw: str) -> dict:
     """Parse LLM response into structured curation data."""
+    # Strip <think>...</think> blocks (Qwen3 reasoning traces)
+    cleaned = strip_think_blocks(raw).strip()
     # Strip markdown code fences if present
-    cleaned = raw.strip()
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
     cleaned = re.sub(r"\s*```$", "", cleaned)
 
@@ -240,7 +257,7 @@ def _parse_response(raw: str) -> dict:
         if match:
             data = json.loads(match.group())
         else:
-            log.warning("Failed to parse curation response")
+            log.warning("Failed to parse curation response: %s", cleaned[:300])
             return {"entities": [], "relations": [], "facts": []}
 
     return {

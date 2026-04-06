@@ -18,6 +18,8 @@ import asyncio
 import json
 import logging
 import uuid
+
+from acervo._text import strip_think_blocks
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -511,6 +513,7 @@ Respond ONLY with valid JSON, no markdown. Topics must be plain strings, not obj
             ],
             temperature=0.0,
             max_tokens=300,
+            json_mode=True,
         )
 
         parsed = self._parse_summary_response(response)
@@ -524,7 +527,7 @@ Respond ONLY with valid JSON, no markdown. Topics must be plain strings, not obj
     @staticmethod
     def _parse_summary_response(response: str) -> dict:
         """Parse JSON from LLM response, handling markdown code blocks."""
-        text = response.strip()
+        text = strip_think_blocks(response).strip()
 
         # Strip markdown code block if present
         if text.startswith("```"):
