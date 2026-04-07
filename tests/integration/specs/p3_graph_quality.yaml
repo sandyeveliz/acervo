@@ -1,0 +1,58 @@
+name: p3_graph_quality
+project: p3-project-docs
+type: graph_spec
+description: "PM Docs: 11 markdown files — roadmap, sprints, issues, ADRs"
+
+expected_entities:
+  required:
+    # NOTE: Sandy and Martin SHOULD be extracted but currently aren't.
+    # These are documented as known gaps — uncomment when fixed.
+    # - {label_contains: "Sandy", type: "person"}
+    # - {label_contains: "Martin", type: "person"}
+    # - {label_contains: "Express", type: "technology"}
+    []
+  optional:
+    - {label_contains: "Sandy", type: "person"}
+    - {label_contains: "Martin", type: "person"}
+    - {label_contains: "Express", type: "technology"}
+    - {label_contains: "SQLite", type: "technology"}
+    - {label_contains: "JWT", type: "technology"}
+    - {label_contains: "Todo App", type: "project"}
+  forbidden:
+    - {label_contains: "Weasley"}
+    - {label_contains: "Nuxt"}
+    - {label_contains: "MongoDB"}
+    - {label_contains: "Svelte"}
+    # Section titles that should NOT be entities
+    - {label_contains: "What Went Well"}
+    - {label_contains: "What Could Improve"}
+    - {label_contains: "Retrospective Notes"}
+    - {label_contains: "Foundation Sprint"}
+    - {label_contains: "Backend Development"}
+    - {label_contains: "Frontend Development"}
+    - {label_contains: "Infrastructure Setup"}
+    - {label_contains: "Testing Plan"}
+    - {label_contains: "Sprint 01 Retrospective"}
+    - {label_contains: "Sprint 1 Backlog"}
+
+expected_relations:
+  required: []
+
+expected_synthesis:
+  required:
+    - {id_contains: "project_overview"}
+    - {id_contains: "module_decisions"}
+    - {id_contains: "module_issues"}
+
+structural:
+  files: 11
+  sections_min: 50
+  folders_min: 2
+
+graph_bounds:
+  min_nodes: 80
+  max_nodes: 160
+  min_edges: 100
+  min_entities: 0
+  max_entities: 20
+  min_synthesis: 3

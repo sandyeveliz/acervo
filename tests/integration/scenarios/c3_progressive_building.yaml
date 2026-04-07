@@ -1,0 +1,84 @@
+name: c3_progressive_building
+type: conversation
+description: "Progressive knowledge building: corrections, updates, contradictions"
+
+turns:
+  - turn: 1
+    user: "Estoy aprendiendo Rust. Mi proyecto se llama QuickNotes, es un CLI."
+    assistant_sim: "Rust es genial para CLIs. ¿Qué va a hacer QuickNotes?"
+    phase: information_dump
+    category: RESOLVE
+    expected_entities:
+      - {label: "Rust", type: "technology"}
+      - {label: "QuickNotes", type: "project"}
+    expected_relations:
+      - {source: "quicknotes", target: "rust", relation: "uses_technology"}
+    graph_assertions:
+      min_nodes: 2
+
+  - turn: 2
+    user: >
+      QuickNotes va a gestionar notas en markdown con tags
+      y búsqueda full-text.
+    assistant_sim: "Buena idea. ¿Vas a usar una base de datos o archivos planos?"
+    phase: information_update
+    category: RESOLVE
+
+  - turn: 3
+    user: >
+      Voy a usar SQLite para la búsqueda.
+      Ah, y también sé Python y TypeScript.
+    assistant_sim: "SQLite es buena opción para FTS."
+    phase: information_update
+    category: RESOLVE
+    expected_entities:
+      - {label: "SQLite", type: "technology"}
+      - {label: "Python", type: "technology"}
+      - {label: "TypeScript", type: "technology"}
+    expected_relations:
+      - {source: "quicknotes", target: "sqlite", relation: "uses_technology"}
+
+  - turn: 4
+    user: "¿Qué tecnologías usa QuickNotes?"
+    phase: retrieval_specific
+    category: RESOLVE
+    expected_s2:
+      seeds: ["quicknotes"]
+    s3:
+      warm_tokens_min: 20
+      context_contains_any: ["Rust", "SQLite"]
+
+  - turn: 5
+    user: "Ah no, cambié de idea. Voy a usar PostgreSQL en vez de SQLite."
+    assistant_sim: "PostgreSQL te da más opciones de búsqueda."
+    phase: correction
+    category: GROUND
+    expected_entities:
+      - {label: "PostgreSQL", type: "technology"}
+    expected_relations:
+      - {source: "quicknotes", target: "postgresql", relation: "uses_technology"}
+
+  - turn: 6
+    user: "¿Qué usa QuickNotes ahora?"
+    phase: retrieval_after_correction
+    category: GROUND
+    s3:
+      warm_tokens_min: 20
+      context_contains_any: ["Rust", "PostgreSQL"]
+
+  - turn: 7
+    user: "¿Qué lenguajes sé?"
+    phase: retrieval_personal
+    category: RECALL
+    s3:
+      warm_tokens_min: 20
+      context_contains_any: ["Python", "TypeScript", "Rust"]
+
+  - turn: 8
+    user: "Gracias, buena charla"
+    phase: chat
+    category: ADAPT
+    s1:
+      expected_intent: chat
+    s3:
+      warm_tokens_max: 150
