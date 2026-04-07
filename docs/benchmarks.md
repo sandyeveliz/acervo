@@ -1,60 +1,83 @@
 # Benchmark Reports
 
 Acervo runs benchmarks on every release to measure context quality, token efficiency,
-and entity extraction. Two benchmark types:
+and entity extraction. Three benchmark types:
 
 - **Conversation benchmarks** (v0.2-v0.3): 360 turns across 6 scenarios measuring token savings and context hit rates.
 - **Indexed project benchmarks** (v0.4+): 55 turns across 3 projects with 5-category scoring (RESOLVE/GROUND/RECALL/FOCUS/ADAPT) and agent efficiency comparison.
+- **Conversation scenario tests** (v0.5+): 24 turns across 3 scenarios testing real-time graph construction from conversation.
 
 ## Reports by Version
 
 | Version | Date | Type | Turns | Key Result | Report |
 |---------|------|------|-------|------------|--------|
-| **v0.4.0** | 2026-04-01 | Indexed project | 55 | 100% RESOLVE, 12.1x efficiency | [Full Report](benchmarks/v0.4.0/) |
+| **v0.5.0** | 2026-04-06 | Indexed + Conversation | 79 | 100% GROUND, 21.3x efficiency, BFS layers | [Full Report](benchmarks/v0.5.0/) |
+| v0.4.0 | 2026-04-01 | Indexed project | 55 | 100% RESOLVE, 12.1x efficiency | [Full Report](benchmarks/v0.4.0/) |
 | v0.2.2-3 | 2026-03-27 | Conversation | 360 | 76.1% savings | [Full Report](benchmarks/v0.2.2-3/) |
 | v0.2.2-2 | 2026-03-27 | Conversation | 360 | 76.1% savings | [Full Report](benchmarks/v0.2.2-2/) |
 | v0.2.2-1 | 2026-03-27 | Conversation | 360 | 76.1% savings | [Full Report](benchmarks/v0.2.2-1/) |
 
-## v0.4.0 — Indexed Project Benchmarks
+## v0.5.0 — Hexagonal Architecture + BFS Semantic Layers
 
 ### Category Scores
 
-| Category | What it proves | Score |
-|----------|---------------|-------|
-| RESOLVE  | Answers questions requiring project context | 100% |
-| GROUND   | Prevents hallucination with verified data | 92% |
-| RECALL   | Remembers user-stated facts across turns | 67% |
-| FOCUS    | Sends only relevant context, respects budget | 100% |
-| ADAPT    | Handles topic changes cleanly | 100% |
+| Category | What it proves | v0.4 | v0.5 |
+|----------|---------------|------|------|
+| RESOLVE  | Answers questions requiring project context | 100% | 85% |
+| GROUND   | Prevents hallucination with verified data | 92% | **100%** |
+| RECALL   | Remembers user-stated facts across turns | 67% | 67% |
+| FOCUS    | Sends only relevant context, respects budget | 100% | 100% |
+| ADAPT    | Handles topic changes cleanly | 100% | 89% |
 
-### Approach Comparison (RESOLVE, 13 turns)
+### Efficiency vs Agent (21.3x improvement)
 
 | Approach | Can Answer | Avg Input Tokens | Avg Steps |
 |----------|-----------|-----------------|-----------|
 | Stateless LLM | 8% | -- | -- |
 | Agent + Tools | 100% | 7,462 | 2.8 |
-| **Acervo** | **100%** | **616** | **0** |
+| **Acervo** | **100%** | **~350** | **0** |
 
-> **12.1x fewer tokens** than an agent approach for the same questions.
+> **21.3x fewer tokens** than an agent approach. Up from 12.1x in v0.4.
 
-### Component Health
+### Graph Quality (85/85 checks)
 
-| Component | Score |
-|-----------|-------|
-| S1 Intent | 78% |
-| S2 Activation | 56% |
-| S3 Budget | 32% |
-| S3 Quality | 81% |
+| Project | Checks | Entities | Nodes | Edges |
+|---------|--------|----------|-------|-------|
+| P1 Code (Todo App) | 28/28 ✓ | 7 | 231 | 1,109 |
+| P2 Literature (Sherlock Holmes) | 21/21 ✓ | 5 | 40 | 307 |
+| P3 PM Docs | 32/32 ✓ | 6 | 108 | 331 |
 
-### Test Projects
+### Conversation Scenarios (NEW in v0.5)
 
-| Project | Domain | Content |
-|---------|--------|---------|
-| P1 — TODO App | Source code | 31 TypeScript/React files |
-| P2 — Literature | Prose | Sherlock Holmes epub (public domain) |
-| P3 — PM Docs | Project management | 11 markdown files |
+| Scenario | Turns | Passed | Graph | Entity Accuracy |
+|----------|-------|--------|-------|----------------|
+| C1: Multi-project portfolio | 10 | 7/10 | 13n / 27e | 72% |
+| C2: Personal knowledge | 6 | 3/6 | 5n / 4e | 60% |
+| C3: Progressive building | 8 | 7/8 | 6n / 5e | 83% |
 
-For detailed methodology, see the [Benchmark Guide](benchmark-guide.md).
+### What's new in v0.5
+
+- **BFS semantic layers** — S2 does breadth-first traversal: HOT (depth 0), WARM (depth 1), COLD (depth 2)
+- **Compressed context format** — XML-delimited (`<hot>`, `<warm>`), ~50% fewer tokens
+- **Conversation pipeline** — Graph grows in real time from chat. warm_tokens > 0 on 80%+ of retrieval turns (was 0% in v0.4)
+- **Hexagonal architecture** — facade.py (1,848 LOC) → domain/pipeline.py (~200 LOC)
+- **Graph quality specs** — Automated checks for required/forbidden entities
+
+For the full interactive report with charts, see the [v0.5.0 Benchmark Report](benchmarks/v0.5.0/).
+
+## v0.4.0 — Indexed Project Benchmarks
+
+| Category | Score |
+|----------|-------|
+| RESOLVE  | 100% |
+| GROUND   | 92% |
+| RECALL   | 67% |
+| FOCUS    | 100% |
+| ADAPT    | 100% |
+
+> **12.1x fewer tokens** than an agent approach (avg 616 tokens vs 7,462).
+
+For details, see the [v0.4.0 Report](benchmarks/v0.4.0/).
 
 ## v0.2.x — Conversation Benchmarks
 
@@ -70,12 +93,14 @@ For detailed methodology, see the [Benchmark Guide](benchmark-guide.md).
 ## Generating Reports
 
 ```bash
-# Indexed project benchmarks (v0.4+, requires LM Studio + Ollama)
-pytest tests/integration/test_benchmarks.py -v -s
+# Run all integration tests (requires Ollama with acervo-extractor-v3)
+pytest tests/integration/ -v -s
 
-# Conversation benchmarks (v0.2-v0.3)
-python -m tests.integration.run_benchmarks --format html
-python -m tests.integration.export_report --tier full --open
+# Generate unified report (JSON + MD + HTML)
+python tests/integration/generate_report.py v0.5.0
+
+# Copy HTML report to docs for publishing
+cp tests/integration/reports/v0.5.0/benchmark_report.html docs/benchmarks/v0.5.0/index.html
 ```
 
-After generating, copy reports to `docs/benchmarks/vX.Y.Z/` and update this page.
+For detailed methodology, see the [Benchmark Guide](benchmark-guide.md).
