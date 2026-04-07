@@ -76,30 +76,37 @@ class S1Result:
 
 
 @dataclass
+class LayeredContext:
+    """Graph nodes organized by BFS distance from seed."""
+    hot: list[dict[str, Any]] = field(default_factory=list)    # depth 0: seed nodes
+    warm: list[dict[str, Any]] = field(default_factory=list)   # depth 1: direct neighbors
+    cold: list[dict[str, Any]] = field(default_factory=list)   # depth 2: 2 edges away
+    seeds_used: list[str] = field(default_factory=list)        # seed labels for debug
+
+
+@dataclass
 class GatheredNode:
-    """A graph node gathered by S2, enriched with relations and hot flag."""
-    node: dict[str, Any]  # raw graph node dict
-    relations: list[str]  # formatted relation strings (e.g. "uses_technology: Angular")
-    hot: bool = True      # True = directly activated, False = neighbor expansion
+    """Legacy — kept for backward compat with telemetry."""
+    node: dict[str, Any]
+    relations: list[str] = field(default_factory=list)
+    hot: bool = True
 
 
 @dataclass
 class RankedChunk:
-    """A piece of context with a relevance score, ready for S3 budget selection."""
+    """A piece of context with a relevance score, used by S3 internally."""
     text: str
-    score: float        # 0.0–1.0 relevance score
-    source: str         # "verified_fact", "conversation_fact", "verified_relation", etc.
-    label: str          # entity name or file path (for debug)
+    score: float
+    source: str
+    label: str
     tokens: int = 0
 
 
 @dataclass
 class S2Result:
-    """Output of S2: activated nodes + ranked chunks for context assembly."""
-    activated_nodes: list[GatheredNode] = field(default_factory=list)
-    chunks: list[RankedChunk] = field(default_factory=list)
+    """Output of S2: layered graph nodes from BFS traversal."""
+    layered: LayeredContext = field(default_factory=LayeredContext)
     active_node_ids: set[str] = field(default_factory=set)
-    # Debug
     vector_hits: list[dict] = field(default_factory=list)
 
 

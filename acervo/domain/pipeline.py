@@ -211,29 +211,31 @@ class Pipeline:
         if s1_extraction.entities:
             self._persist_s1_entities(s1_extraction, user_text, current_topic)
 
-        # ── S2: Node activation + Gathering ──
+        # ── S2: BFS Seed Selection + Traversal ──
         s2_result = self._s2.run(
-            user_text, self._graph,
+            user_text, s1_result, self._graph,
             intent=s1_intent,
-            current_topic=current_topic,
             vector_store=self._vector_store,
             user_embedding=user_embedding,
-            workspace_path=self._workspace_path,
         )
         self._last_active_node_ids = s2_result.active_node_ids
 
         _stages.append(
-            f"S2: {len(s2_result.activated_nodes)} nodes, {len(s2_result.chunks)} chunks"
+            f"S2: seeds={len(s2_result.layered.seeds_used)}, "
+            f"hot={len(s2_result.layered.hot)}, "
+            f"warm={len(s2_result.layered.warm)}, "
+            f"cold={len(s2_result.layered.cold)}"
         )
 
-        # ── S3: Context Assembly ──
+        # ── S3: Layer-aware Context Assembly ──
         project_overview = self._build_project_overview()
         s3_result = self._s3.run(
-            chunks=s2_result.chunks,
+            layered=s2_result.layered,
             intent=s1_intent,
-            history=history,
+            graph=self._graph,
             project_overview=project_overview,
             context_index=self._context_index,
+            history=history,
             current_topic=current_topic,
             warm_budget_override=self._warm_token_budget,
         )
@@ -461,24 +463,24 @@ class Pipeline:
             "s1_raw_response": s1_result.raw_response,
             "s1_latency_ms": s1_ms,
             "s2_gathered": {
-                "nodes_total": len(s2_result.activated_nodes),
+                "seeds": s2_result.layered.seeds_used,
+                "hot_count": len(s2_result.layered.hot),
+                "warm_count": len(s2_result.layered.warm),
+                "cold_count": len(s2_result.layered.cold),
+                "nodes_total": len(s2_result.layered.hot) + len(s2_result.layered.warm) + len(s2_result.layered.cold),
                 "nodes": [
                     {
-                        "id": gn.node.get("id", ""),
-                        "label": gn.node.get("label", ""),
-                        "type": gn.node.get("type", ""),
-                        "facts": [
-                            f.get("fact", "") if isinstance(f, dict) else str(f)
-                            for f in gn.node.get("facts", [])
-                        ],
+                        "id": n.get("id", ""),
+                        "label": n.get("label", ""),
+                        "type": n.get("type", ""),
+                        "layer": "hot" if n in s2_result.layered.hot else "warm" if n in s2_result.layered.warm else "cold",
                     }
-                    for gn in s2_result.activated_nodes[:20]
+                    for n in (s2_result.layered.hot + s2_result.layered.warm + s2_result.layered.cold)[:20]
                 ],
                 "vector_hits": [
                     {"node_id": v.get("node_id", ""), "score": round(v.get("score", 0), 3)}
                     for v in s2_result.vector_hits[:10]
                 ],
-                "chunks_total": len(s2_result.chunks),
             },
             "s3_context": {
                 "warm_tokens": s3_result.warm_tokens,
