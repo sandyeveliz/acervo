@@ -30,9 +30,9 @@ _FIXTURES = _REPO_ROOT / "tests" / "fixtures"
 def llm_client():
     """Create an OpenAIClient from environment variables."""
     return OpenAIClient(
-        base_url=os.getenv("ACERVO_LIGHT_MODEL_URL", "http://localhost:1234/v1"),
-        model=os.getenv("ACERVO_LIGHT_MODEL", "acervo-extractor-qwen3.5-9b"),
-        api_key=os.getenv("ACERVO_LIGHT_API_KEY", "lm-studio"),
+        base_url=os.getenv("ACERVO_LIGHT_MODEL_URL", "http://localhost:11434/v1"),
+        model=os.getenv("ACERVO_LIGHT_MODEL", "acervo-extractor-v3-Q4_K_M"),
+        api_key=os.getenv("ACERVO_LIGHT_API_KEY", "ollama"),
     )
 
 

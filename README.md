@@ -46,7 +46,7 @@ Pure signal, zero noise. And when you close the session and come back tomorrow, 
 
 ## Acervo in Action
 
-Real data from automated benchmarks. 360 turns across 6 scenarios — programming, literature, academic, mixed, SaaS founder (101 turns), product manager (59 turns). All runs use the fine-tuned `acervo-extractor-qwen3.5-9b` model.
+Real data from automated benchmarks. 79 indexed + conversation turns across 6 domains. All runs use the fine-tuned `acervo-extractor-v3` model on Ollama.
 
 ### A real conversation: developer building a SaaS
 
@@ -127,42 +127,53 @@ At turn 100, Acervo uses **490 tokens** where full history needs **5,157** — a
 To reproduce these results:
 
 ```bash
-# Run conversation benchmarks (requires LM Studio with acervo-extractor model)
-python -m tests.integration.run_benchmarks --format html
+# Run all benchmarks (requires Ollama with acervo-extractor-v3 model)
+pytest tests/integration/ -v -s
 
-# Generate report from existing data (no LLM needed)
-python -m tests.integration.export_report --tier full --open
+# Generate unified report (no LLM needed, uses existing results)
+python tests/integration/generate_report.py v0.5.0
 ```
 
-### Indexed project benchmarks
+### Indexed project benchmarks (v0.5)
 
-Acervo indexes entire projects and answers questions without reading files each time. Compared to an agent that uses tools (`read_file`, `search`, etc.), Acervo resolves queries in 1 step with 12x fewer tokens.
+Acervo indexes entire projects and answers questions without reading files each time. Compared to an agent that uses tools (`read_file`, `search`, etc.), Acervo resolves queries with ~350 tokens and zero tool calls.
 
-55 turns tested across 3 domains: code (TypeScript/React, 31 files), literature (Sherlock Holmes epub, public domain), and project management docs (11 markdown files).
+55 indexed turns + 24 conversation turns across 3 domains: code (TypeScript/React, 31 files), literature (Sherlock Holmes epub), and project management docs (11 markdown files).
 
-| Category | What it proves | Score |
-|----------|---------------|-------|
-| RESOLVE  | Answers questions requiring project context | 100% |
-| GROUND   | Prevents hallucination with verified data | 92% |
-| RECALL   | Remembers user-stated facts across turns | 67% |
-| FOCUS    | Sends only relevant context, respects budget | 100% |
-| ADAPT    | Handles topic changes cleanly | 100% |
+| Category | What it proves | v0.4 | v0.5 |
+|----------|---------------|------|------|
+| RESOLVE  | Answers questions requiring project context | 100% | 85% |
+| GROUND   | Prevents hallucination with verified data | 92% | **100%** |
+| RECALL   | Remembers user-stated facts across turns | 67% | 67% |
+| FOCUS    | Sends only relevant context, respects budget | 100% | 100% |
+| ADAPT    | Handles topic changes cleanly | 100% | 89% |
 
-**Efficiency vs agent-with-tools (RESOLVE questions, 13 turns):**
+**Efficiency vs agent-with-tools:**
 
 | Approach | Can Answer | Avg Input Tokens | Avg Steps |
 |----------|-----------|-----------------|-----------|
 | Stateless LLM | 8% | -- | -- |
 | Agent + Tools | 100% | 7,462 | 2.8 |
-| **Acervo** | **100%** | **616** | **0** |
+| **Acervo** | **100%** | **~350** | **0** |
 
-> Acervo uses **12.1x fewer tokens** than an agent approach for the same questions.
+> Acervo uses **21x fewer tokens** than an agent approach. Up from 12x in v0.4 thanks to compressed context format.
+
+**New in v0.5 — Conversation scenarios:**
+
+| Scenario | Turns | Passed | Graph |
+|----------|-------|--------|-------|
+| C1: Multi-project portfolio | 10 | 7/10 | 13 nodes, 27 edges |
+| C2: Personal knowledge | 6 | 3/6 | 5 nodes, 4 edges |
+| C3: Progressive building | 8 | 7/8 | 6 nodes, 5 edges |
 
 To reproduce:
 
 ```bash
-# Run indexed project benchmarks (requires LM Studio + Ollama)
-pytest tests/integration/test_benchmarks.py -v -s
+# Run all benchmarks (requires Ollama with acervo-extractor model)
+pytest tests/integration/ -v -s
+
+# Generate HTML report
+python tests/integration/generate_report.py v0.5.0
 ```
 
 ## How it works
@@ -173,26 +184,33 @@ Acervo is a **context proxy** — it sits between your app and the LLM. Transpar
 User message
      │
      ▼
- S1 Unified        ← Topic detection + knowledge extraction (one LLM call)
+ S1 Extract    ← Topic detection + entity/relation extraction (fine-tuned model)
      │
      ▼
- Context build     ← Reads the graph, assembles compressed context from relevant nodes
+ S2 Search     ← BFS traversal from topic seed: HOT → WARM → COLD layers
      │
      ▼
- Your LLM          ← Responds with enriched context (you control model, streaming, tools)
+ S3 Compress   ← Budget-aware context assembly: ~350 tokens of pure signal
      │
      ▼
- S1.5 Graph Update ← Async: extracts from response, curates graph, merges duplicates
+ Your LLM      ← Responds with graph knowledge (you control model, streaming, tools)
      │
      ▼
- Graph grows       ← Next turn has more knowledge available, still constant tokens
+ S1.5 Update   ← Extract from response, curate graph, merge duplicates
+     │
+     ▼
+ Graph grows   ← Next turn has more knowledge, still ~350 tokens
 ```
 
-### The pipeline
+### The pipeline (v0.5)
 
-**S1 Unified** (sync, before response) — Classifies the topic and extracts entities, relations, and facts from the user's message. One LLM call replaces what used to be three separate steps.
+**S1 Extractor** — Classifies the topic and extracts entities, relations, and facts from the user's message. Uses the fine-tuned `acervo-extractor-v3` model.
 
-**S1.5 Graph Update** (async, after response) — Runs in the background without blocking the user. Extracts knowledge from the assistant's response, merges duplicate nodes, corrects types, and creates missing relations. This is what makes Acervo **stateless** — the graph is always up to date and ready for the next message, whenever it comes.
+**S2 Activator** — BFS traversal from topic seed nodes. Depth 0 = HOT (direct match), depth 1 = WARM (neighbors), depth 2 = COLD (2 edges away). Same algorithm for indexed projects and conversation.
+
+**S3 Assembler** — Compressed XML format (`<hot>`, `<warm>`) within intent-based token budgets. "Used by: Checkear" instead of raw graph notation. Grounding instruction for the LLM.
+
+**S1.5 Updater** — After the LLM responds, extracts new knowledge back into the graph. Merges duplicates, corrects types, creates missing relations. The graph is always ready for the next message.
 
 ### Stateless by design
 
@@ -206,19 +224,19 @@ Acervo has no session state. The graph **is** the state. Every turn follows the 
 pip install acervo
 ```
 
-### 2. Start a local LLM
+### 2. Start Ollama
 
-Acervo works best with our fine-tuned extraction model. Load it in LM Studio or Ollama:
+Acervo uses [Ollama](https://ollama.ai/) for both the extraction model and embeddings:
 
-**With [LM Studio](https://lmstudio.ai/):**
-Search for `acervo-extractor-qwen3.5-9b` and load it. One model handles everything — chat and extraction.
-
-**With [Ollama](https://ollama.ai/):**
 ```bash
-ollama run sandyeveliz/acervo-extractor
+# Install the fine-tuned extractor model
+ollama pull sandyeveliz/acervo-extractor-v3
+
+# Install the embedding model
+ollama pull qwen3-embedding
 ```
 
-Any OpenAI-compatible model also works as a fallback (e.g., `qwen2.5:3b`, `gpt-4o-mini`).
+Any OpenAI-compatible model also works as a fallback (e.g., `qwen2.5:3b`, `gemma4`).
 
 ### 3. Initialize and run
 
@@ -517,20 +535,36 @@ Event: "Project Beacon launch"
 
 ~60 tokens. Same answer quality.
 
-### Pipeline components
+### Pipeline components (v0.5 hexagonal architecture)
 
-| Component | What it does |
-|-----------|-------------|
-| **S1 Unified** | Topic classification + entity/relation/fact extraction in one call |
-| **S1.5 Graph Update** | Async graph curation: merges, type corrections, assistant extraction |
-| **Context index** | Selects hot/warm/cold nodes, assembles compressed context |
-| **Topic detector** | Cascade: keywords → embeddings → LLM (most resolved without LLM) |
+```
+ports/        → LLMPort, EmbedderPort, VectorStorePort, GraphStorePort
+domain/       → Pipeline orchestrator + 4 stages
+adapters/     → OpenAI client, ChromaDB, JSON graph persistence
+```
+
+| Stage | What it does |
+|-------|-------------|
+| **S1 Extractor** | Topic classification + entity/relation/fact extraction |
+| **S2 Activator** | BFS traversal: seed → HOT (depth 0) → WARM (depth 1) → COLD (depth 2) |
+| **S3 Assembler** | Compressed XML context within intent-based token budget |
+| **S1.5 Updater** | Post-response graph curation: merges, type corrections, assistant extraction |
+
+### Semantic context layers
+
+When you ask a question, Acervo walks the knowledge graph from the current topic outward:
+
+- **HOT** (level 0): The entity you're asking about — full detail
+- **WARM** (level 1): Direct neighbors — summary
+- **COLD** (level 2+): Further out — excluded unless needed
+
+"¿Qué proyectos usan Supabase?" → HOT: Supabase, WARM: Checkear + Walletfy. 81 tokens of context. An agent would need 7,000+ tokens across 3 tool calls.
 
 ### History windowing
 
 ```
 Traditional (turn 50):  system + msg1 + ... + msg50 = 9,000 tokens (growing)
-Acervo (turn 50):       system + [graph context] + msg49 + msg50 = ~400 tokens (constant)
+Acervo (turn 50):       system + [graph context] + msg49 + msg50 = ~350 tokens (constant)
 ```
 
 ### Works with any LLM
@@ -550,76 +584,60 @@ class LLMClient(Protocol):
 
 | Component | Tool | Model |
 |-----------|------|-------|
-| **LLM + Extraction** | [LM Studio](https://lmstudio.ai/) | `acervo-extractor-qwen3.5-9b` (single model for everything) |
-| **Embeddings** | [Ollama](https://ollama.ai/) | `qwen3-embedding` (optional) |
-| **Client app** | [AVS-Agents](https://github.com/sandyeveliz/AVS-Agents) | Python Web UI |
+| **Extractor** | [Ollama](https://ollama.ai/) | `acervo-extractor-v3` (fine-tuned, S1/S1.5) |
+| **Chat** | [Ollama](https://ollama.ai/) | `gemma4:e4b` or any OpenAI-compatible model |
+| **Embeddings** | [Ollama](https://ollama.ai/) | `qwen3-embedding` |
+| **Studio** | [Acervo Studio](https://github.com/sandyeveliz/acervo-studio) | React + FastAPI |
 
-**VRAM requirement:** ~6GB (one model handles chat + extraction)
+**VRAM requirement:** ~6GB for extractor, ~10GB with chat model loaded
 
 ## Project status
 
-v0.4.0 — [Changelog](./CHANGELOG.md)
+v0.5.0 — [Changelog](./CHANGELOG.md)
 
 | Feature | Status |
 |---------|--------|
 | Knowledge graph (JSON persistence) | ✅ Working |
 | UNIVERSAL / PERSONAL layers | ✅ Working |
 | `prepare()` / `process()` context proxy API | ✅ Working |
-| S1 Unified extraction (topic + entities in one call) | ✅ Working |
-| S1.5 Async graph curation (merges, corrections) | ✅ Working |
-| Fine-tuned extraction model (Qwen 3.5 9B) | ✅ Published |
-| Single model architecture (chat + extraction) | ✅ Working |
-| Topic-based context layers (HOT/WARM/COLD) | ✅ Working |
-| Topic detector (keywords → embeddings → LLM) | ✅ Working |
-| Context index with token budgeting | ✅ Working |
-| History windowing (constant token usage) | ✅ Working |
-| Entity + relation + event extraction | ✅ Working |
-| `.acervo/` project data directory | ✅ Working |
+| Hexagonal architecture (ports/domain/adapters) | ✅ v0.5 |
+| BFS semantic layers (HOT/WARM/COLD) | ✅ v0.5 |
+| Compressed context format (XML, ~350tk) | ✅ v0.5 |
+| Conversation memory pipeline | ✅ v0.5 |
+| 5-category benchmark system | ✅ v0.5 |
+| Graph quality specs (automated) | ✅ v0.5 |
+| Conversation scenario tests (C1/C2/C3) | ✅ v0.5 |
+| Fine-tuned extraction model (v3) | ✅ v0.5 |
+| Entity + relation + fact extraction | ✅ Working |
 | `acervo index` — structural + semantic | ✅ Working |
 | REST API (`acervo serve`) | ✅ Working |
-| Reproducible benchmarks (360-turn, 6 scenarios) | ✅ Working |
-| Document ingestion with graph-linked chunks | ✅ Working |
-| Node-scoped chunk retrieval (vs global RAG) | ✅ Working |
-| Document management API (upload/list/delete) | ✅ Working |
-| `acervo up` — one-command dev stack | ✅ Working |
-| Graph inspection CLI (`acervo graph show/search/delete/merge`) | ✅ Working |
-| Specificity classifier (conceptual vs specific queries) | ✅ Working |
-| Configurable logging (`--log-level trace\|debug\|info`) | ✅ Working |
-| `acervo graph repair` — corruption detection + fix | ✅ Working |
-| Configurable timeouts per pipeline phase | ✅ Working |
-| `.epub` ingestion (chapter extraction, prose chunking) | ✅ Working |
-| `.pdf` ingestion (page-based extraction) | ✅ Working |
-| `.txt` ingestion (paragraph-based sectioning) | ✅ Working |
-| Curation (entity extraction from indexed content) | ✅ Working |
-| Synthesis (project overview generation) | ✅ Working |
-| Paragraph-based prose chunking (~500tk clusters) | ✅ Working |
-| Intent-aware context pipeline (overview/specific/chat) | ✅ Working |
-| 5-category benchmark system (RESOLVE/GROUND/RECALL/FOCUS/ADAPT) | ✅ Working |
-| Agent efficiency comparison (12x fewer tokens) | ✅ Working |
-| Version-tracked benchmark results | ✅ Working |
+| `.epub` / `.pdf` / `.txt` ingestion | ✅ Working |
+| Curation + Synthesis | ✅ Working |
+| Agent efficiency comparison (21x fewer tokens) | ✅ v0.5 |
+| Unified graph (indexation + conversation) | ✅ v0.5 |
+| `acervo up --dev` — one-command dev stack | ✅ Working |
 | Multi-project support in Acervo Studio | ✅ Working |
-| `acervo chunks` CLI (stats/list/show/search) | ✅ Working |
-| MCP Server (Claude Desktop, Cursor, Windsurf) | 🔜 v0.5.0 |
-| Progressive retrieval (hot → warm → cold) | 🔜 v0.6.0 |
-| Docker Compose (one-command setup) | 🔜 v0.6.0 |
-| Multi-tenant graphs | 🔜 v0.7.0 |
+| MCP Server (Claude Desktop, Cursor) | 🔜 v0.6 |
+| Topic-scoped vector search | 🔜 v0.6 |
+| Docker Compose (one-command setup) | 🔜 v0.6 |
+| Multi-tenant graphs | 🔜 Planned |
 
 ## Roadmap
 
 ```
 v0.3.0  ████████  DONE    Conversation memory works (benchmarks, CLI, .md ingestion)
-v0.4.0  ████████  DONE    Indexation works for real (epub/pdf/txt, curate, synthesize, 5-category benchmarks)
-v0.5.0  ████████  NEXT    Usable from anywhere (MCP server, TS SDK, integrations)
-v0.6.0  ████████          Production-ready (Docker, metrics, progressive retrieval)
+v0.4.0  ████████  DONE    Indexation works (epub/pdf/txt, curate, synthesize, 5-category benchmarks)
+v0.5.0  ████████  DONE    Clean architecture + conversation pipeline (hexagonal, BFS, compressed format)
+v0.6.0  ████████  NEXT    Usable from anywhere (MCP server, TS SDK, Docker)
 v0.7.0  ████████          Ecosystem (multi-tenant, packs, Studio v2)
 ```
 
 | Version | What it proves | Evidence produced |
 |---------|---------------|-------------------|
 | **v0.3.0** | Conversation memory | 76% savings, 94% context hits, scissors chart |
-| **v0.4.0** | Document indexation | 5-category benchmark (100% RESOLVE), 12.1x efficiency vs agents |
-| **v0.5.0** | Works in any tool | MCP server, TypeScript SDK, framework integrations |
-| **v0.6.0** | Deploy in production | Docker one-liner, Prometheus metrics |
+| **v0.4.0** | Document indexation | 5-category benchmark (100% RESOLVE), 12.1x efficiency |
+| **v0.5.0** | Architecture + conversation pipeline | 21.3x efficiency, 100% GROUND, BFS layers, 71% conversation pass rate |
+| **v0.6.0** | Works in any tool | MCP server, TypeScript SDK, Docker |
 | **v0.7.0** | Scales to teams | Multi-tenant, knowledge packs, Studio v2 |
 
 Small versions, one theme per release, each with publishable benchmarks. Full details in the [Roadmap docs](https://sandyeveliz.github.io/acervo/roadmap/).
@@ -632,9 +650,10 @@ Small versions, one theme per release, each with publishable benchmarks. Full de
 - **[Knowledge Layers](https://sandyeveliz.github.io/acervo/layers/)** — UNIVERSAL vs PERSONAL, node lifecycle, topic layers
 - **[Graph CLI](https://sandyeveliz.github.io/acervo/graph-cli/)** — Inspect, search, delete, merge graph nodes
 - **[Traces](https://sandyeveliz.github.io/acervo/traces/)** — Per-turn metrics, compression ratios, benchmarking
-- **[Document Ingestion](https://sandyeveliz.github.io/acervo/document-ingestion/)** — Indexing files, node-scoped retrieval, specificity classifier
-- **[Benchmark Guide](https://sandyeveliz.github.io/acervo/benchmark-guide/)** — Run benchmarks, understand categories, compare versions
-- **[Benchmark Results](https://sandyeveliz.github.io/acervo/benchmarks/)** — Published results per version
+- **[Document Ingestion](https://sandyeveliz.github.io/acervo/document-ingestion/)** — Indexing files, node-scoped retrieval
+- **[Benchmark Report](./tests/integration/reports/v0.5.0/benchmark_report.html)** — Interactive v0.5 results with charts
+- **[Architecture Audit](./ARCHITECTURE_AUDIT.md)** — Internal architecture documentation
+- **[Unified Graph Verification](./docs/UNIFIED_GRAPH_VERIFICATION.md)** — Proof that indexation + conversation share one graph
 - **[Roadmap](https://sandyeveliz.github.io/acervo/roadmap/)** — Planned features
 
 ## Why "Acervo"?
@@ -654,5 +673,5 @@ Apache 2.0 — see [LICENSE](./LICENSE).
 ---
 
 <p align="center">
-  <a href="https://github.com/sandyeveliz/acervo">GitHub</a> · <a href="https://sandyeveliz.github.io/acervo">Docs</a> · <a href="https://pypi.org/project/acervo/">PyPI</a> · <a href="https://huggingface.co/SandyVeliz/acervo-extractor-qwen3.5-9b">Model</a>
+  <a href="https://github.com/sandyeveliz/acervo">GitHub</a> · <a href="https://sandyeveliz.github.io/acervo">Docs</a> · <a href="https://pypi.org/project/acervo/">PyPI</a> · <a href="https://huggingface.co/SandyVeliz/acervo-extractor-v2">Model</a>
 </p>

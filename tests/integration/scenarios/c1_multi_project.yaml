@@ -1,0 +1,154 @@
+name: c1_multi_project
+type: conversation
+description: "Multi-project portfolio: graph construction + retrieval from conversation"
+
+turns:
+  - turn: 1
+    user: >
+      Tenemos 4 proyectos: Butaco es una app de viandas para un cliente,
+      hecho con Angular 18 y Firebase de Backend. Checkear es nuestro,
+      una app de gestión de tareas con React, ReactNative y Supabase.
+      Walletfy también es nuestro, app de finanzas personales con Next.js
+      y Supabase. Altovallestudio es nuestra web de la empresa con Next.js
+      y Firebase.
+    assistant_sim: >
+      Entendido, tengo los 4 proyectos registrados con sus stacks tecnológicos.
+    phase: information_dump
+    category: RESOLVE
+    s1:
+      expected_intent: overview
+    expected_entities:
+      - {label: "Butaco", type: "project"}
+      - {label: "Checkear", type: "project"}
+      - {label: "Walletfy", type: "project"}
+      - {label: "Altovallestudio", type: "project"}
+      - {label: "Angular", type: "technology"}
+      - {label: "Firebase", type: "technology"}
+      - {label: "React", type: "technology"}
+      - {label: "Supabase", type: "technology"}
+      - {label: "Next.js", type: "technology"}
+    expected_relations:
+      - {source: "butaco", target: "angular", relation: "uses_technology"}
+      - {source: "butaco", target: "firebase", relation: "uses_technology"}
+      - {source: "checkear", target: "react", relation: "uses_technology"}
+      - {source: "checkear", target: "supabase", relation: "uses_technology"}
+      - {source: "walletfy", target: "nextjs", relation: "uses_technology"}
+      - {source: "walletfy", target: "supabase", relation: "uses_technology"}
+      - {source: "altovallestudio", target: "nextjs", relation: "uses_technology"}
+      - {source: "altovallestudio", target: "firebase", relation: "uses_technology"}
+    graph_assertions:
+      min_nodes: 8
+      min_edges: 8
+
+  - turn: 2
+    user: >
+      Sandy es el lead developer y trabaja en todos los proyectos.
+      Martin ayuda en Checkear y Walletfy.
+    assistant_sim: >
+      Registrado. Sandy es lead dev en los 4 proyectos, Martin en Checkear y Walletfy.
+    phase: information_dump
+    category: RESOLVE
+    expected_entities:
+      - {label: "Sandy", type: "person"}
+      - {label: "Martin", type: "person"}
+    expected_relations:
+      - {source: "sandy", target: "butaco", relation: "works_at"}
+      - {source: "sandy", target: "checkear", relation: "works_at"}
+      - {source: "martin", target: "checkear", relation: "works_at"}
+      - {source: "martin", target: "walletfy", relation: "works_at"}
+    graph_assertions:
+      min_nodes: 10
+      min_edges: 10
+
+  - turn: 3
+    user: "¿Qué proyectos usan Supabase?"
+    phase: retrieval_specific
+    category: RESOLVE
+    s1:
+      expected_intent: specific
+    expected_s2:
+      seeds: ["supabase"]
+      warm: ["checkear", "walletfy"]
+    s3:
+      warm_tokens_min: 30
+      context_contains: ["Checkear", "Walletfy"]
+      context_not_contains: ["Angular"]
+    graph_assertions:
+      node_delta_max: 0
+
+  - turn: 4
+    user: "¿En cuáles trabaja Martin?"
+    phase: retrieval_specific
+    category: RESOLVE
+    s1:
+      expected_intent: specific
+    expected_s2:
+      seeds: ["martin"]
+      warm: ["checkear", "walletfy"]
+    s3:
+      warm_tokens_min: 30
+      context_contains: ["Checkear", "Walletfy"]
+
+  - turn: 5
+    user: "Buenísimo, vamos bien"
+    phase: chat
+    category: ADAPT
+    s1:
+      expected_intent: chat
+    s3:
+      warm_tokens_max: 150
+    graph_assertions:
+      node_delta_max: 0
+
+  - turn: 6
+    user: "Checkear va a tener un módulo nuevo de reportes, hecho con D3.js"
+    assistant_sim: "Entendido, módulo de reportes con D3.js para Checkear."
+    phase: information_update
+    category: RESOLVE
+    expected_entities:
+      - {label: "D3.js", type: "technology"}
+    expected_relations:
+      - {source: "checkear", target: "d3.js", relation: "uses_technology"}
+    graph_assertions:
+      node_delta_min: 1
+      edge_delta_min: 1
+
+  - turn: 7
+    user: "¿Qué tecnologías usa Checkear ahora?"
+    phase: retrieval_specific
+    category: RESOLVE
+    expected_s2:
+      seeds: ["checkear"]
+    s3:
+      warm_tokens_min: 30
+      context_contains_any: ["React", "Supabase"]
+
+  - turn: 8
+    user: "Cambiemos de tema. El sábado vamos a Mendoza."
+    assistant_sim: "Genial, ¿viaje de trabajo o personal?"
+    phase: topic_change
+    category: ADAPT
+    expected_entities:
+      - {label: "Mendoza", type: "place"}
+    s3:
+      context_not_contains: ["Checkear", "Angular"]
+
+  - turn: 9
+    user: "Volviendo a los proyectos, ¿cuáles son nuestros?"
+    phase: retrieval_overview
+    category: ADAPT
+    s1:
+      expected_intent: overview
+    s3:
+      warm_tokens_min: 30
+      context_contains_any: ["Butaco", "Checkear", "Walletfy", "Altovallestudio"]
+
+  - turn: 10
+    user: "¿Cuántas tecnologías distintas usamos en total?"
+    phase: retrieval_overview
+    category: RESOLVE
+    s1:
+      expected_intent: overview
+    s3:
+      warm_tokens_min: 30
+      context_contains_any: ["Angular", "React", "Supabase", "Firebase", "Next.js"]

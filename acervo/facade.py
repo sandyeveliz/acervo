@@ -172,6 +172,28 @@ class Acervo:
             summarize_prompt=p.get("summarizer"),
         )
 
+        # v0.5: Pipeline orchestrator delegates S1→S2→S3 and S1.5
+        from acervo.domain.pipeline import Pipeline as _Pipeline
+        from acervo.domain.s2_activator import S2Activator
+        from acervo.domain.s3_assembler import S3Assembler
+        self._pipeline = _Pipeline(
+            s1=self._s1_unified,
+            s2=S2Activator(),
+            s3=S3Assembler(),
+            s15_llm=extractor_llm,
+            s15_prompt=self._s1_5_prompt,
+            graph=self._graph,
+            topic_detector=self._topic_detector,
+            context_index=self._context_index,
+            embedder=self._embedder,
+            vector_store=self._vector_store,
+            metrics=self._metrics,
+            workspace_path=self._workspace_path,
+            owner=self._owner,
+            project_description=self._project_description,
+            warm_token_budget=self._warm_token_budget,
+        )
+
     @classmethod
     def from_project(
         cls,
@@ -285,9 +307,9 @@ class Acervo:
         # Fallback to env vars (legacy behavior)
         from acervo.openai_client import OpenAIClient
 
-        base_url = os.environ.get("ACERVO_LIGHT_MODEL_URL", "http://localhost:1234/v1")
-        model = os.environ.get("ACERVO_LIGHT_MODEL", "qwen3.5-9b")
-        api_key = os.environ.get("ACERVO_LIGHT_API_KEY", "lm-studio")
+        base_url = os.environ.get("ACERVO_LIGHT_MODEL_URL", "http://localhost:11434/v1")
+        model = os.environ.get("ACERVO_LIGHT_MODEL", "acervo-extractor-v3-Q4_K_M")
+        api_key = os.environ.get("ACERVO_LIGHT_API_KEY", "ollama")
 
         llm = OpenAIClient(base_url=base_url, model=model, api_key=api_key)
         return cls(llm=llm, owner=owner, persist_path=persist_path)
@@ -605,7 +627,53 @@ class Acervo:
         user_text: str,
         history: list[dict],
     ) -> PrepareResult:
-        """Pre-LLM processing: 3-stage pipeline.
+        """Pre-LLM processing: S1 → S2 → S3 pipeline.
+
+        Delegates to the domain Pipeline. The result contract (PrepareResult)
+        is identical to v0.4. Consumers (proxy, cli) are unaffected.
+        """
+        from acervo.domain.pipeline import PrepareResult as PipelinePrepareResult
+        result = await self._pipeline.prepare(user_text, history)
+
+        # Copy internal state for backward compat
+        self._last_s1_extraction = self._pipeline._last_s1_extraction
+        self._last_active_node_ids = self._pipeline._last_active_node_ids
+
+        # Convert Pipeline's PrepareResult to facade's (same fields)
+        return PrepareResult(
+            context_stack=result.context_stack,
+            topic=result.topic,
+            hot_tokens=result.hot_tokens,
+            warm_tokens=result.warm_tokens,
+            total_tokens=result.total_tokens,
+            warm_content=result.warm_content,
+            has_context=result.has_context,
+            needs_tool=result.needs_tool,
+            stages=result.stages,
+            debug=result.debug,
+        )
+
+    async def process(
+        self,
+        user_text: str,
+        assistant_text: str,
+        web_results: str = "",
+    ) -> ExtractionResult:
+        """Post-LLM processing: S1.5 graph curation.
+
+        Delegates to the domain Pipeline.
+        """
+        result = await self._pipeline.process(user_text, assistant_text, web_results)
+        # Copy S1.5 debug for proxy telemetry
+        self._last_s15_debug = self._pipeline._last_s15_debug
+        return result
+
+    async def _prepare_legacy(
+        self,
+        user_text: str,
+        history: list[dict],
+    ) -> PrepareResult:
+        """LEGACY: Original prepare() implementation. Kept as fallback.
 
         S1 — S1 Unified: L1/L2 hints + LLM topic classification + entity extraction (9b)
         S2 — Gather: collect graph nodes, file contents, vector search → ranked chunks
@@ -661,6 +729,7 @@ class Acervo:
                 break
 
         # S1 Unified: topic classification + extraction in one LLM call (ALWAYS runs)
+        _s1_t0 = time.perf_counter()
         s1_result = await self._s1_unified.run(
             user_msg=user_text,
             prev_assistant_msg=prev_assistant_msg,
@@ -668,6 +737,7 @@ class Acervo:
             topic_hint=topic_hint,
             existing_nodes_summary=existing_nodes_summary,
         )
+        _s1_ms = round((time.perf_counter() - _s1_t0) * 1000)
 
         # Apply S1's topic + intent decision
         s1_topic = s1_result.topic
@@ -819,14 +889,22 @@ class Acervo:
         for node in gathered.nodes:
             node_chunk_ids.extend(node.get("chunk_ids", []))
 
-        # Specificity classifier: only fetch chunks for detail-oriented questions
-        query_specificity = classify_specificity(user_text)
+        # Retrieval decision: v2 model provides "retrieval" field, v1 falls back to specificity
+        s1_retrieval = s1_result.retrieval  # "summary_only" | "with_chunks" | None
+        if s1_retrieval is not None:
+            wants_chunks = (s1_retrieval == "with_chunks")
+            retrieval_source = "model"
+            query_specificity = "specific" if wants_chunks else "conceptual"
+        else:
+            query_specificity = classify_specificity(user_text)
+            wants_chunks = (query_specificity == "specific")
+            retrieval_source = "fallback"
         log.info(
-            "[acervo] S2 gather: %d active nodes, %d chunk_ids, specificity=%s",
-            len(gathered.nodes), len(node_chunk_ids), query_specificity,
+            "[acervo] S2 gather: %d active nodes, %d chunk_ids, specificity=%s (source=%s)",
+            len(gathered.nodes), len(node_chunk_ids), query_specificity, retrieval_source,
         )
 
-        if node_chunk_ids and self._vector_store and user_embedding and query_specificity == "specific":
+        if node_chunk_ids and self._vector_store and user_embedding and wants_chunks:
             try:
                 if hasattr(self._vector_store, "search_by_chunk_ids"):
                     scoped_hits = await self._vector_store.search_by_chunk_ids(
@@ -839,8 +917,9 @@ class Acervo:
                 log.warning("Node-scoped chunk search failed: %s", e)
 
         # Vector search for semantic matches (topic-scoped boost)
-        # Skip for overview intent — vector hits are section-level noise
-        if self._vector_store and s1_intent != "overview":
+        # Skip for overview intent or summary_only retrieval — vector hits are section-level noise
+        skip_vector = (s1_intent == "overview") or (s1_retrieval == "summary_only")
+        if self._vector_store and not skip_vector:
             try:
                 if user_embedding:
                     vector_hits = await self._vector_store.search_with_embedding(user_embedding, n_results=5)
@@ -943,9 +1022,10 @@ class Acervo:
 
         # ── S3: Context Assembly (deterministic, no LLM) ──
 
-        # TIER 1: Project overview — always injected if graph has data.
-        # This is structural metadata, NOT subject to budget selection.
+        # Project overview — included in total budget, not added on top.
         project_overview = self._build_project_overview()
+        overview_tokens = count_tokens(project_overview) if project_overview else 0
+        chunk_budget = max(self._warm_token_budget - overview_tokens, 50)
 
         # Initialize chunk lists used across all branches + debug output
         verified_chunks: list = []
@@ -959,7 +1039,7 @@ class Acervo:
                 c for c in chunks
                 if c.source.startswith("verified")
             ]
-            selected, warm_used = select_chunks_by_budget(overview_chunks, self._warm_token_budget)
+            selected, warm_used = select_chunks_by_budget(overview_chunks, chunk_budget)
             parts: list[str] = []
             if project_overview:
                 parts.append(project_overview)
@@ -968,12 +1048,12 @@ class Acervo:
                 parts.append(format_chunks_compact(verified_chunks))
             warm_override = "\n".join(parts) if parts else ""
         elif s1_intent == "chat":
-            # Chat intent: provide overview for awareness, skip specific chunks
+            # Chat intent: no project context needed for casual messages
             selected = []
-            warm_override = project_overview or ""
+            warm_override = ""
         else:
-            # Specific intent: normal budget-gated assembly
-            selected, warm_used = select_chunks_by_budget(chunks, self._warm_token_budget)
+            # Specific/followup intent: normal budget-gated assembly
+            selected, warm_used = select_chunks_by_budget(chunks, chunk_budget)
 
             verified_chunks = [c for c in selected if c.source.startswith("verified")]
             conversation_chunks = [c for c in selected if not c.source.startswith("verified")]
@@ -1033,6 +1113,8 @@ class Acervo:
                 "hint_keyword": detection.keyword,
                 "hint_similarity": detection.similarity,
                 "intent": s1_intent,
+                "retrieval": s1_retrieval or "none",
+                "retrieval_source": retrieval_source,
                 "entities_extracted": len(s1_extraction.entities),
                 "relations_extracted": len(s1_extraction.relations),
                 "facts_extracted": len(s1_extraction.facts),
@@ -1040,8 +1122,21 @@ class Acervo:
                     {"name": e.name, "type": e.type, "layer": e.layer}
                     for e in s1_extraction.entities[:10]
                 ],
+                "relations": [
+                    {"source": r.source, "target": r.target, "relation": r.relation}
+                    for r in s1_extraction.relations[:10]
+                ],
+                "facts": [
+                    {"entity": f.entity, "fact": f.fact, "speaker": f.speaker}
+                    for f in s1_extraction.facts[:10]
+                ],
             },
+            # S1 debug: prompt and raw model response for telemetry/annotation
+            "s1_prompt": s1_result.prompt_sent,
+            "s1_raw_response": s1_result.raw_response,
+            "s1_latency_ms": _s1_ms,
             "s2_gathered": {
+                "nodes_total": len(gathered.nodes),
                 "nodes": [
                     {
                         "id": n.get("id", ""),
@@ -1098,8 +1193,9 @@ class Acervo:
                 "documents_with_chunks_activated": len([n for n in gathered.nodes if n.get("chunk_ids")]),
                 "chunks_retrieved": len([h for h in gathered.vector_results if h.get("source") == "node_scoped_chunk"]),
                 "chunks_total_on_activated_nodes": len(node_chunk_ids),
-                "retrieval_scope": "node_scoped" if node_chunk_ids and query_specificity == "specific" else "global",
+                "retrieval_scope": "node_scoped" if node_chunk_ids and wants_chunks else "global",
                 "query_specificity": query_specificity,
+                "retrieval_source": retrieval_source,
             },
         }
 
@@ -1122,13 +1218,13 @@ class Acervo:
             debug=_debug,
         )
 
-    async def process(
+    async def _process_legacy(
         self,
         user_text: str,
         assistant_text: str,
         web_results: str = "",
     ) -> ExtractionResult:
-        """Post-LLM processing: S1.5 graph curation + assistant extraction.
+        """LEGACY: Original process() implementation. Kept as fallback.
 
         Runs S1.5 Graph Update asynchronously to:
         1. Curate graph (merge duplicates, fix types, discard garbage)
@@ -1179,12 +1275,14 @@ class Acervo:
         )
 
         # Run S1.5 Graph Update
+        _s15_t0 = time.perf_counter()
         s1_5 = S1_5GraphUpdate(self._extractor_llm, prompt_template=self._s1_5_prompt)
         s1_5_result = await s1_5.run(
             new_entities_json=new_entities_json,
             existing_nodes_json=existing_nodes_json,
             current_assistant_msg=assistant_text,
         )
+        _s15_ms = round((time.perf_counter() - _s15_t0) * 1000)
 
         # Apply curation actions + persist assistant entities
         audit = apply_s1_5_result(self._graph, s1_5_result, owner=self._owner)
@@ -1193,6 +1291,21 @@ class Acervo:
             audit["merges_applied"], audit["type_corrections"],
             audit["discards"], audit["entities_added"], audit["facts_added"],
         )
+
+        # Store S1.5 debug data for proxy to expose via /acervo/last-turn
+        self._last_s15_debug = {
+            "s15_prompt": s1_5_result.prompt_sent,
+            "s15_raw_response": s1_5_result.raw_response,
+            "s15_latency_ms": _s15_ms,
+            "s15_actions": {
+                "merges_applied": audit["merges_applied"],
+                "type_corrections": audit["type_corrections"],
+                "discards": audit["discards"],
+                "entities_added": audit["entities_added"],
+                "facts_added": audit["facts_added"],
+            },
+            "assistant_msg": assistant_text,
+        }
 
         # Enrich newly added assistant entities
         if s1_5_result.assistant_extraction.entities:
@@ -1677,6 +1790,38 @@ class Acervo:
                 if edge.get("relation") == "contains":
                     child_id = edge["target"] if edge["source"] == file_id else edge["source"]
                     active.add(child_id)
+
+        # Expand: if an entity is active, activate its direct neighbors via any edge
+        # This enables graph traversal: "supabase" → uses_technology → "checkear", "walletfy"
+        entity_ids = [
+            nid for nid in list(active)
+            if (n := self._graph.get_node(nid)) and n.get("kind") == "entity"
+        ]
+        for entity_id in entity_ids:
+            for edge in self._graph.get_edges_for(entity_id):
+                neighbor_id = edge["target"] if edge["source"] == entity_id else edge["source"]
+                if neighbor_id not in active:
+                    neighbor = self._graph.get_node(neighbor_id)
+                    if neighbor and neighbor.get("kind") == "entity":
+                        active.add(neighbor_id)
+
+        # Intent-based node cap: prevent over-activation
+        if intent == "chat":
+            # Chat: minimal context — only synthesis nodes for awareness
+            active = {nid for nid in active
+                      if (n := self._graph.get_node(nid)) and n.get("kind") == "synthesis"}
+        elif intent in ("specific", "followup") and len(active) > 15:
+            # Too many nodes — trim section/symbol expansion, keep structural nodes
+            direct = {nid for nid in active
+                      if (n := self._graph.get_node(nid))
+                      and n.get("kind") in ("entity", "synthesis", "file", "folder")}
+            if len(direct) <= 15:
+                active = direct
+            else:
+                active = {nid for nid in active
+                          if (n := self._graph.get_node(nid))
+                          and n.get("kind") in ("entity", "synthesis")}
+        # overview: no cap (keep all file/folder/synthesis)
 
         return active
 

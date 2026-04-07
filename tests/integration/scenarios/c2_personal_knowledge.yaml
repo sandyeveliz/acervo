@@ -1,0 +1,63 @@
+name: c2_personal_knowledge
+type: conversation
+description: "Personal knowledge: books, family, events — non-technical domain"
+
+turns:
+  - turn: 1
+    user: >
+      Le estoy leyendo libros a mi hijo Mateo todas las noches.
+      Ya le leí El Principito, Harry Potter 1 y La Isla del Tesoro.
+      Ahora estamos con Charlie y la Fábrica de Chocolate.
+    assistant_sim: >
+      Qué lindo hábito. ¿A Mateo le está gustando Charlie?
+    phase: information_dump
+    category: RESOLVE
+    expected_entities:
+      - {label: "Mateo", type: "person"}
+      - {label: "El Principito", type: "document"}
+      - {label: "Harry Potter 1", type: "document"}
+      - {label: "La Isla del Tesoro", type: "document"}
+      - {label: "Charlie y la Fábrica de Chocolate", type: "document"}
+    graph_assertions:
+      min_nodes: 4
+
+  - turn: 2
+    user: >
+      A Mateo le encantó El Principito, fue su favorito.
+      Harry Potter le dio un poco de miedo.
+    assistant_sim: >
+      Es normal, HP tiene partes intensas para chicos.
+    phase: information_update
+    category: RESOLVE
+
+  - turn: 3
+    user: "¿Cuáles ya le leí?"
+    phase: retrieval_specific
+    category: RECALL
+    s3:
+      warm_tokens_min: 20
+      context_contains_any: ["Principito", "Harry Potter", "Isla del Tesoro"]
+
+  - turn: 4
+    user: "¿Cuál le gustó más?"
+    phase: retrieval_specific
+    category: RECALL
+    s3:
+      warm_tokens_min: 20
+      context_contains_any: ["Principito", "favorito"]
+
+  - turn: 5
+    user: >
+      Quiero comprarle un libro nuevo.
+      ¿Alguna sugerencia basada en lo que le gustó?
+    phase: retrieval_complex
+    category: RESOLVE
+    s3:
+      warm_tokens_min: 20
+
+  - turn: 6
+    user: "Hablemos de otra cosa. ¿Qué proyectos estoy haciendo?"
+    phase: topic_change
+    category: ADAPT
+    s3:
+      context_not_contains: ["Principito", "Harry Potter"]

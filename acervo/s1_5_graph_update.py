@@ -73,6 +73,9 @@ class S1_5Result:
     type_corrections: list[TypeCorrection] = field(default_factory=list)
     discards: list[DiscardAction] = field(default_factory=list)
     assistant_extraction: ExtractionResult = field(default_factory=ExtractionResult)
+    # Debug: prompt and raw response for telemetry/annotation
+    prompt_sent: str = ""
+    raw_response: str = ""
 
 
 # ── S1.5 Invoker ──
@@ -112,7 +115,11 @@ class S1_5GraphUpdate:
             return S1_5Result()
 
         raw = _clean_response(raw_response)
-        return _parse_s1_5_response(raw)
+        messages_sent = [{"role": "user", "content": prompt}]
+        result = _parse_s1_5_response(raw)
+        result.prompt_sent = json.dumps(messages_sent, ensure_ascii=False)
+        result.raw_response = raw_response
+        return result
 
 
 # ── Parser ──

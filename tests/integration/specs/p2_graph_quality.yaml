@@ -1,0 +1,41 @@
+name: p2_graph_quality
+project: p2-literature
+type: graph_spec
+description: "The Adventures of Sherlock Holmes — 12 stories, EPUB"
+
+expected_entities:
+  required:
+    - {label_contains: "Sherlock Holmes", type: "person"}
+    - {label_contains: "Watson", type: "person"}
+    - {label_contains: "Irene Adler", type: "person"}
+    - {label_contains: "Conan Doyle", type: "person"}
+  optional:
+    - {label_contains: "Baker Street", type: "place"}
+    - {label_contains: "Red-Headed League"}
+    - {label_contains: "Moriarty"}
+    - {label_contains: "London"}
+    - {label_contains: "Adventures of Sherlock Holmes"}
+  forbidden:
+    - {label_contains: "Weasley"}
+    - {label_contains: "React"}
+    - {label_contains: "Express"}
+    - {label_contains: "CHAPTER"}
+
+expected_relations:
+  required: []
+
+expected_synthesis:
+  required:
+    - {id_contains: "project_overview"}
+
+structural:
+  files_min: 1
+  sections_min: 12
+
+graph_bounds:
+  min_nodes: 35
+  max_nodes: 80
+  min_edges: 50
+  min_entities: 5
+  max_entities: 20
+  min_synthesis: 1

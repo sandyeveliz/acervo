@@ -1,66 +1,80 @@
-# v0.5.0 — "Usable from anywhere"
+# v0.5.0 — "Clean Architecture"
 
-> MCP server as the killer feature. If you use Claude, Cursor, or any IDE
-> with MCP, Acervo works without changing anything.
+> Hexagonal pipeline refactor. Each stage is standalone and testable.
+> S2 works identically for conversation and indexed projects.
+> The foundation for MCP, SDK, and multi-project support.
 
 ---
 
-## M1 — MCP Server
+## M1 — Architecture Refactor ✅
 
-**The most important integration.** An Acervo MCP server exposing:
+Split the 1,848-line God Module (`facade.py`) into:
 
 ```
-Tools:
-  acervo_prepare    — enrich context before LLM call
-  acervo_process    — extract knowledge after LLM response
-  acervo_index      — index a file/directory
-  acervo_search     — search the knowledge graph
-  acervo_status     — graph stats
-
-Resources:
-  acervo://graph          — current graph state
-  acervo://nodes/{id}     — node detail
-  acervo://traces/latest  — last conversation trace
+ports/           → Protocol interfaces (LLM, Embedder, VectorStore, GraphStore)
+domain/          → Pipeline stages (S1, S2, S3, S1.5) + orchestrator
+graph/           → Knowledge graph (TopicGraph, Layer, ontology)
+context/         → Context management (ContextIndex, TopicDetector, synthesizer)
+extraction/      → Entity extractors (Conversation, Text, Search, RAG)
+indexing/        → File indexation pipeline (unchanged internals)
+adapters/        → Concrete implementations (OpenAI client, ChromaDB)
 ```
 
-- Compatible with Claude Desktop, Cursor, Windsurf, Continue.dev
-- User installs Acervo, adds the MCP server to their config,
-  and has persistent memory in any tool
-- `npx acervo-mcp` or `uvx acervo-mcp` to start
-
-**Why MCP first:**
-- Zero friction: doesn't change the user's framework
-- Perfect audience: developers using AI IDEs
-- Doesn't compete with LangChain/LlamaIndex, complements them
-- A well-made MCP server IS the marketing — people share it
+Key results:
+- `facade.py` → thin wrapper delegating to `Pipeline`
+- S2 Activator: ONE code path for all modes
+- S3 Assembler: intent controls budget, not whether to inject
+- 178/185 tests pass, 0 regressions
 
 ---
 
-## M2 — TypeScript SDK
+## M2 — Pipeline Bug Fixes ✅
 
-- `npm install acervo-client`
-- REST API wrapper for the JS/TS ecosystem
-- Types for all endpoints
-- Example: Vercel AI SDK + Acervo memory
-- Example: Next.js chatbot with persistent memory
-- Needed so the MCP server has a native Node client
-
----
-
-## M3 — LangChain / LlamaIndex integrations
-
-Secondary to MCP, but expands reach:
-
-- `AcervoMemory` — drop-in for LangChain ConversationBufferMemory
-- `AcervoRetriever` — drop-in for LlamaIndex retriever
-- Competitive advantage: same interface, but with knowledge graph
-  compression instead of raw chunks
+Critical fixes discovered during architecture audit:
+- JSON parser: 3-level repair for malformed model output
+- Nested relations: extracted from entity objects
+- Relation IDs: resolved to entity labels (not model-generated IDs)
+- Entity expansion: S2 traverses ALL entity edges
+- Topic drift: limited PREVIOUS ASSISTANT influence
+- Description chunks: included in S2 context building
+- S3 unified: no intent-based chunk filtering
 
 ---
 
-## M4 — Blog post v0.4.0 + indexation benchmarks
+## M3 — Ollama Migration ✅
 
-- Blog: results from the 4 indexation domains
-- Visual comparison: Acervo indexation vs plain RAG
-- LinkedIn/X: one hero chart per domain
-- GitHub Pages: indexation benchmark reports
+- Default provider: Ollama (port 11434) replaces LM Studio (port 1234)
+- Modelfile: Qwen3.5 chat template for fine-tuned extractor
+- `acervo up --dev` works from any directory
+
+---
+
+## M4 — Studio Features ✅
+
+- Telemetry: per-turn annotation with actual vs expected
+- Ollama monitor: live VRAM/GPU/RAM
+- Per-project telemetry persistence
+- Annotation export (JSONL training data)
+
+---
+
+## What's left for v0.5.0 release
+
+1. **Verify Turn 4** — restart proxy, confirm warm_tokens > 0 for overview intent
+2. **Documentation** — update README, ARCHITECTURE.md, CLAUDE.md
+3. **Commit & tag** — clean commit history, tag v0.5.0
+
+---
+
+## Deferred to v0.6.0
+
+The original v0.5.0 milestones (MCP Server, TypeScript SDK, LangChain integration)
+are deferred. The architecture refactor was prerequisite work that expanded scope.
+
+- **MCP Server** — `acervo-mcp` package (now easier with clean Pipeline)
+- **TypeScript SDK** — `acervo-client` npm package
+- **LangChain/LlamaIndex** — drop-in memory/retriever
+- **S1 intent improvement** — RECALL benchmark (67% → target 85%)
+- **S1.5 refactor** — extract from s1_5_graph_update.py into domain layer (currently re-export only)
+- **Proxy API dedup** — unify Anthropic/OpenAI code paths
+- **Auto-save graph** — remove manual `graph.save()` calls (15 call sites)

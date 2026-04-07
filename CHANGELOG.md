@@ -4,6 +4,72 @@ All notable changes to this project will be documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-04-06
+
+### Architecture
+- **Hexagonal architecture** — Split facade.py (1,848 LOC) into `ports/` (protocols), `domain/` (pipeline stages), `adapters/` (implementations). Each stage is standalone and testable.
+- **Pipeline orchestrator** — `domain/pipeline.py` wires S1→S2→S3 for prepare(), S1.5 for process(). Thin delegation, no business logic.
+- **Port protocols** — `LLMPort`, `EmbedderPort`, `VectorStorePort`, `GraphStorePort` in `ports/`. Domain code depends on abstractions.
+- **Single S2 code path** — No behavioral differences between conversation mode and indexed project mode. Same BFS traversal for both.
+- **Backward compatible** — `from acervo import Acervo` unchanged. All old imports preserved via re-export stubs.
+
+### Semantic Layer Retrieval
+- **BFS-based context layers** — S2 finds seed nodes (from S1 entities + keyword match), then does breadth-first traversal. Depth 0 = HOT (direct match), depth 1 = WARM (neighbors), depth 2 = COLD (2 edges away).
+- **Intent-aware budgets** — overview=300tk, specific=600tk, followup=400tk, chat=100tk. Intent controls how much context, not whether to send any.
+- **Graph traversal** — Works identically for conversation entities and indexed file/section/symbol nodes. All edge types traversed.
+
+### Context Format (S3)
+- **Compressed token format** — Level 1 compression (~12tk per node vs ~25tk verbose). ~50% reduction.
+- **XML-delimited layers** — `<ctx>`, `<hot>`, `<warm>` tags for structured reference data.
+- **Human-readable relations** — "Used by: Checkear" instead of "uses_technology: Checkear". Correct relation direction.
+- **Intent-specific grounding** — "Answer using the knowledge context above" for specific, "Give a complete overview" for overview, nothing for chat.
+- **No "UNVERIFIED" label** — Graph data presented as knowledge, not as "maybe true".
+
+### Conversation Pipeline (NEW)
+- **Full cycle working** — User message → S1 extracts entities → graph grows → S2 retrieves via BFS → S3 injects compressed context → LLM responds grounded in graph.
+- **warm_tokens > 0** — 71% of retrieval turns now have graph context injected (was 0% in v0.4).
+- **Graph evolution tracking** — Per-turn snapshots of node/edge counts, entity accuracy, retrieval quality.
+
+### Ollama Migration
+- **Default provider** — Ollama (port 11434) replaces LM Studio (port 1234). Modelfile with Qwen3.5 chat template.
+- **`acervo up --dev` without project** — Starts from any directory. Proxy skipped if no project, started from Studio DB if available.
+
+### Testing
+- **Layer 1b: Graph quality specs** — Required/forbidden entity checks for P1/P2/P3. 85/85 checks pass.
+- **Layer 3: Conversation scenarios** — C1 (multi-project portfolio, 10 turns), C2 (personal knowledge, 6 turns), C3 (progressive building, 8 turns). 17/24 turns pass.
+- **Unified report generator** — Collects all 4 layers into `benchmark_unified.json` + `benchmark_report.html`.
+
+### Unified Graph (verified)
+- Indexation and conversation feed the same TopicGraph instance.
+- Entity dedup works across sources (same `_make_id`). Merge semantics, not replace.
+- S1.5 appends facts to entities created by curate.
+- Graph reload endpoint for proxy after external indexation.
+
+### Bug Fixes
+- JSON parser: 3-attempt repair (strict → greedy → newline repair)
+- Nested relations: extracted from both top-level and entity-level arrays
+- Relation ID resolution: model IDs mapped to entity labels via `_resolve_name`
+- Self-referencing relations rejected (source == target)
+- Topic drift: PREVIOUS ASSISTANT limited to 150 chars in S1 prompt
+- Generic model support: string entities, string topics, default types
+
+### Benchmark Results
+
+| Category | v0.4.0 | v0.5.0 |
+|----------|--------|--------|
+| RESOLVE  | 100%   | 85%    |
+| GROUND   | 92%    | 100%   |
+| RECALL   | 67%    | 67%    |
+| FOCUS    | 100%   | 100%   |
+| ADAPT    | 100%   | 89%    |
+
+**New metrics (v0.5 only):**
+- Graph quality: 85/85 checks (100%)
+- Conversation scenarios: 17/24 turns (71%)
+- warm_tokens > 0 on retrieval turns: 80%+
+
+GROUND improved 92% → 100%. RESOLVE/ADAPT slightly decreased due to S2 BFS activation pattern changes (different node sets than v0.4 label-matching). Conversation pipeline is entirely new — was non-functional in v0.4.
+
 ## [0.4.0] - 2026-04-01
 
 ### Architecture

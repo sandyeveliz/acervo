@@ -1,0 +1,50 @@
+name: p1_graph_quality
+project: p1-todo-app
+type: graph_spec
+description: "Full-stack Todo App: Express.js + React + SQLite + JWT auth"
+
+expected_entities:
+  required:
+    - {label_contains: "React", type: "technology"}
+    - {label_contains: "Express", type: "technology"}
+    - {label_contains: "Todo App", type: "project"}
+  optional:
+    - {label_contains: "TypeScript", type: "technology"}
+    - {label_contains: "SQLite", type: "technology"}
+    - {label_contains: "JWT", type: "technology"}
+    - {label_contains: "Tailwind", type: "technology"}
+    - {label_contains: "Supabase", type: "technology"}
+    - {label_contains: "Node", type: "technology"}
+  forbidden:
+    - {label_contains: "Nuxt"}
+    - {label_contains: "MongoDB"}
+    - {label_contains: "Django"}
+    - {label_contains: "Python"}
+    - {label_contains: "Svelte"}
+    - {label_contains: "Weasley"}
+    - {label_contains: "What Went Well"}
+    - {label_contains: "What Could Improve"}
+    - {label_contains: "Retrospective"}
+
+expected_relations:
+  required: []
+
+expected_synthesis:
+  required:
+    - {id_contains: "project_overview"}
+    - {id_contains: "module_backend"}
+    - {id_contains: "module_frontend"}
+
+structural:
+  files: 31
+  sections_min: 30
+  symbols_min: 100
+  folders_min: 10
+
+graph_bounds:
+  min_nodes: 200
+  max_nodes: 300
+  min_edges: 800
+  min_entities: 4
+  max_entities: 15
+  min_synthesis: 3
