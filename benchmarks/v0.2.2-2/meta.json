@@ -1,0 +1,16 @@
+{
+  "version": "v0.2.2-2",
+  "tier": "full",
+  "timestamp": "2026-03-27T07:45:53.927659",
+  "git_sha": "8a6378f",
+  "scenarios": [
+    "developer_workflow",
+    "literature_comics",
+    "academic_research",
+    "mixed_domains",
+    "saas_founder_real",
+    "product_manager_real"
+  ],
+  "avg_savings_pct": 76.1,
+  "total_turns": 360
+}

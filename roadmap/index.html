@@ -1,0 +1,1385 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Context proxy for AI agents">
+      
+      
+      
+        <link rel="canonical" href="https://sandyeveliz.github.io/acervo/roadmap/">
+      
+      
+        <link rel="prev" href="../benchmark-guide/">
+      
+      
+        <link rel="next" href="../contributing/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Roadmap - Acervo</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#roadmap" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Acervo" class="md-header__button md-logo" aria-label="Acervo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Acervo
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Roadmap
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/sandyeveliz/acervo" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sandyeveliz/acervo
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Acervo" class="md-nav__button md-logo" aria-label="Acervo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Acervo
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/sandyeveliz/acervo" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sandyeveliz/acervo
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorial/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../layers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Layers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmark-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmark Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-works-today-v030" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What works today (v0.3.0)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v040-indexation-works-for-real" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v0.4.0 — "Indexation works for real"
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v0.4.0 — &#34;Indexation works for real&#34;">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#new-ingestion-formats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        New ingestion formats
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#semantic-chunking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Semantic chunking
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-domain-benchmarks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4 domain benchmarks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fine-tune-v2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fine-tune v2
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v050-usable-from-anywhere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v0.5.0 — "Usable from anywhere"
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v0.5.0 — &#34;Usable from anywhere&#34;">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mcp-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#typescript-sdk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TypeScript SDK
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#framework-integrations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Framework integrations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v060-production-ready" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v0.6.0 — "Production-ready"
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v0.6.0 — &#34;Production-ready&#34;">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docker-compose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Compose
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#progressive-retrieval" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Progressive retrieval
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#runtime-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#advanced-error-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advanced error recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v070-ecosystem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v0.7.0 — "Ecosystem"
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v0.7.0 — &#34;Ecosystem&#34;">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#multi-tenant-graphs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-tenant graphs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#knowledge-packs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Knowledge packs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#acervo-studio-v2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Acervo Studio v2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#model-v3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model v3+
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#whats-not-planned-before-v10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What's NOT planned before v1.0
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#want-to-help" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Want to help?
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-works-today-v030" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What works today (v0.3.0)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v040-indexation-works-for-real" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v0.4.0 — "Indexation works for real"
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v0.4.0 — &#34;Indexation works for real&#34;">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#new-ingestion-formats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        New ingestion formats
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#semantic-chunking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Semantic chunking
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-domain-benchmarks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4 domain benchmarks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fine-tune-v2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fine-tune v2
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v050-usable-from-anywhere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v0.5.0 — "Usable from anywhere"
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v0.5.0 — &#34;Usable from anywhere&#34;">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mcp-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#typescript-sdk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TypeScript SDK
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#framework-integrations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Framework integrations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v060-production-ready" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v0.6.0 — "Production-ready"
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v0.6.0 — &#34;Production-ready&#34;">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docker-compose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Compose
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#progressive-retrieval" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Progressive retrieval
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#runtime-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#advanced-error-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advanced error recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v070-ecosystem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v0.7.0 — "Ecosystem"
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v0.7.0 — &#34;Ecosystem&#34;">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#multi-tenant-graphs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-tenant graphs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#knowledge-packs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Knowledge packs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#acervo-studio-v2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Acervo Studio v2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#model-v3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model v3+
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#whats-not-planned-before-v10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What's NOT planned before v1.0
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#want-to-help" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Want to help?
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="roadmap">Roadmap</h1>
+<p>Current version: <strong>v0.3.0</strong> (<a href="https://pypi.org/project/acervo/">PyPI</a> · <a href="https://github.com/sandyeveliz/acervo/blob/main/CHANGELOG.md">Changelog</a>)</p>
+<blockquote>
+<p>v0.3.0 proved that conversation memory works: 76% token savings, 94% context hits.
+Now we need to prove that indexation works just as well, make Acervo usable from
+any tool, and then scale.</p>
+<p>Small versions, one theme per release, each with publishable benchmarks.</p>
+</blockquote>
+<hr />
+<h2 id="overview">Overview</h2>
+<div class="highlight"><pre><span></span><code>v0.3.0  ========  DONE    Conversation memory works (benchmarks, CLI, .md ingestion)
+v0.4.0  ========  NEXT    Indexation works for real (4 domains, formats, fine-tune v2)
+v0.5.0  ========          Usable from anywhere (MCP server, TS SDK, integrations)
+v0.6.0  ========          Production-ready (Docker, metrics, progressive retrieval)
+v0.7.0  ========          Ecosystem (multi-tenant, packs, Studio v2)
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Version</th>
+<th>What it proves</th>
+<th>Evidence produced</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>v0.3.0</td>
+<td>Conversation memory</td>
+<td>76% savings, scissors chart</td>
+</tr>
+<tr>
+<td>v0.4.0</td>
+<td>Document indexation</td>
+<td>Indexation scorecard, query recall per domain</td>
+</tr>
+<tr>
+<td>v0.5.0</td>
+<td>Works in any tool</td>
+<td>MCP server downloads, integration demos</td>
+</tr>
+<tr>
+<td>v0.6.0</td>
+<td>Deploy in production</td>
+<td>Docker one-liner, live metrics</td>
+</tr>
+<tr>
+<td>v0.7.0</td>
+<td>Scales to teams</td>
+<td>Multi-user demos, knowledge pack catalog</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="what-works-today-v030">What works today (v0.3.0)</h2>
+<ul>
+<li>Knowledge graph with JSON persistence</li>
+<li>UNIVERSAL / PERSONAL two-layer architecture</li>
+<li><code>prepare()</code> / <code>process()</code> context proxy API</li>
+<li>S1 Unified extraction (topic + entities in one call)</li>
+<li>S1.5 Async graph curation (merges, corrections)</li>
+<li>Fine-tuned extraction model (Qwen 3.5 9B, single model for chat + extraction)</li>
+<li>Topic-based context layers (HOT/WARM/COLD)</li>
+<li>History windowing (constant token usage)</li>
+<li><code>acervo serve</code> / <code>acervo up</code> — proxy + dev stack</li>
+<li><code>acervo index</code> — structural + semantic codebase indexing</li>
+<li>Document ingestion with graph-linked chunks (<code>.md</code>)</li>
+<li>Node-scoped chunk retrieval with specificity classifier</li>
+<li>Graph inspection CLI (<code>acervo graph show/search/delete/merge/repair</code>)</li>
+<li>Configurable logging (<code>--log-level trace|debug|info</code>)</li>
+<li>Reproducible benchmarks (360 turns, 6 scenarios, HTML reports)</li>
+</ul>
+<hr />
+<h2 id="v040-indexation-works-for-real">v0.4.0 — "Indexation works for real"</h2>
+<p><strong>Goal:</strong> Same level of evidence for document indexation that we already have for conversation memory.</p>
+<h3 id="new-ingestion-formats">New ingestion formats</h3>
+<table>
+<thead>
+<tr>
+<th>Format</th>
+<th>Parser</th>
+<th>Use case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.txt</code></td>
+<td>Line/paragraph splitter</td>
+<td>Literature, books</td>
+</tr>
+<tr>
+<td><code>.pdf</code></td>
+<td>PyMuPDF / pdfplumber</td>
+<td>Academic papers, manuals</td>
+</tr>
+<tr>
+<td><code>.docx</code></td>
+<td>python-docx</td>
+<td>Business docs, specs</td>
+</tr>
+<tr>
+<td><code>.md</code></td>
+<td>Already works</td>
+<td>Technical docs</td>
+</tr>
+</tbody>
+</table>
+<h3 id="semantic-chunking">Semantic chunking</h3>
+<p>Replace fixed-size chunking with embedding-based boundary detection. Consecutive paragraphs are embedded; chunk breaks happen where cosine similarity drops. Hierarchical chunks for long documents (section -&gt; subsection -&gt; semantic chunk).</p>
+<h3 id="4-domain-benchmarks">4 domain benchmarks</h3>
+<table>
+<thead>
+<tr>
+<th>Domain</th>
+<th>Test material</th>
+<th>Key metrics</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Code</td>
+<td>Small (~20 files) + large (~200 files) project</td>
+<td>Node coverage, import accuracy, query recall</td>
+</tr>
+<tr>
+<td>Literature</td>
+<td>Short story + novel</td>
+<td>Character coverage, event recall, context tokens</td>
+</tr>
+<tr>
+<td>Academic</td>
+<td>Short paper + thesis (PDF)</td>
+<td>Concept extraction, methodology accuracy</td>
+</tr>
+<tr>
+<td>Multi-project</td>
+<td>3 simultaneous projects</td>
+<td>Project isolation, shared UNIVERSAL nodes</td>
+</tr>
+</tbody>
+</table>
+<p>Each domain produces HTML benchmark reports: indexation scorecard, query recall chart, token efficiency comparison (Acervo node-scoped vs global RAG).</p>
+<h3 id="fine-tune-v2">Fine-tune v2</h3>
+<p>Training data from M3 failure modes. Target: extraction accuracy 85% -&gt; 92%+. New training signal: chunk retrieval decisions (<code>summary_only</code> | <code>with_chunks</code>) as S1 output.</p>
+<hr />
+<h2 id="v050-usable-from-anywhere">v0.5.0 — "Usable from anywhere"</h2>
+<h3 id="mcp-server">MCP Server</h3>
+<p>The most important integration. An Acervo MCP server exposing tools (<code>acervo_prepare</code>, <code>acervo_process</code>, <code>acervo_index</code>, <code>acervo_search</code>, <code>acervo_status</code>) and resources (<code>acervo://graph</code>, <code>acervo://nodes/{id}</code>, <code>acervo://traces/latest</code>).</p>
+<p>Compatible with Claude Desktop, Cursor, Windsurf, Continue.dev. Install Acervo, add the MCP server to your config, and you have persistent memory in any tool.</p>
+<h3 id="typescript-sdk">TypeScript SDK</h3>
+<p><code>npm install acervo-client</code> — REST API wrapper with full types. Examples with Vercel AI SDK and Next.js.</p>
+<h3 id="framework-integrations">Framework integrations</h3>
+<ul>
+<li><code>AcervoMemory</code> — LangChain ConversationBufferMemory drop-in</li>
+<li><code>AcervoRetriever</code> — LlamaIndex retriever drop-in</li>
+</ul>
+<p>Same interface, but with knowledge graph compression instead of raw chunks.</p>
+<hr />
+<h2 id="v060-production-ready">v0.6.0 — "Production-ready"</h2>
+<h3 id="docker-compose">Docker Compose</h3>
+<p><code>docker compose up</code> -&gt; Acervo proxy + Ollama + model + ChromaDB. GPU passthrough, persistent volumes. "Try Acervo in 30 seconds."</p>
+<h3 id="progressive-retrieval">Progressive retrieval</h3>
+<p>Hot layer insufficient -&gt; automatically escalate to warm, then cold. Detection via topic confidence and LLM "no info" signals. Configurable budget per layer.</p>
+<h3 id="runtime-metrics">Runtime metrics</h3>
+<p><code>GET /acervo/metrics</code> — Prometheus-compatible endpoint. Tokens saved, compression ratio, latency, hit rate. Minimal dashboard in Acervo Studio.</p>
+<h3 id="advanced-error-recovery">Advanced error recovery</h3>
+<p>Automatic graph backup before destructive operations. <code>acervo graph rollback</code> to revert. LLM down -&gt; cache last known graph context.</p>
+<hr />
+<h2 id="v070-ecosystem">v0.7.0 — "Ecosystem"</h2>
+<h3 id="multi-tenant-graphs">Multi-tenant graphs</h3>
+<p>UNIVERSAL layer shared across users, PERSONAL scoped per API key. Automatic UNIVERSAL node merging.</p>
+<h3 id="knowledge-packs">Knowledge packs</h3>
+<p>Pre-built domain graphs. <code>acervo pack install javascript</code>. Export/import graphs. GitHub-based registry.</p>
+<h3 id="acervo-studio-v2">Acervo Studio v2</h3>
+<p>Real-time graph visualization, visual node/relation editor, session comparator, metrics dashboard.</p>
+<h3 id="model-v3">Model v3+</h3>
+<p>Extraction accuracy &gt;95%. Multi-language: PT, FR, DE. Document reference extraction. Benchmark vs GPT-4o.</p>
+<hr />
+<h2 id="whats-not-planned-before-v10">What's NOT planned before v1.0</h2>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cloud-hosted version</td>
+<td>Needs infra + billing</td>
+</tr>
+<tr>
+<td>Voice/audio ingestion</td>
+<td>Text-first, niche</td>
+</tr>
+<tr>
+<td>Image/multimodal extraction</td>
+<td>Requires multimodal model</td>
+</tr>
+<tr>
+<td>Graph database backend (Neo4j)</td>
+<td>JSON + ChromaDB scales enough</td>
+</tr>
+<tr>
+<td>Real-time collaboration</td>
+<td>Multi-tenant first</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="want-to-help">Want to help?</h2>
+<p>Check out <a href="../contributing/">Contributing</a> or open an <a href="https://github.com/sandyeveliz/acervo/issues">issue</a> to discuss ideas.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.sections", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

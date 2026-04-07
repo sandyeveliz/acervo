@@ -1,0 +1,2117 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Context proxy for AI agents">
+      
+      
+      
+        <link rel="canonical" href="https://sandyeveliz.github.io/acervo/benchmark-guide/">
+      
+      
+        <link rel="prev" href="../benchmarks/">
+      
+      
+        <link rel="next" href="../roadmap/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Benchmark Guide - Acervo</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#acervo-benchmark-guide" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Acervo" class="md-header__button md-logo" aria-label="Acervo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Acervo
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Benchmark Guide
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/sandyeveliz/acervo" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sandyeveliz/acervo
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Acervo" class="md-nav__button md-logo" aria-label="Acervo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Acervo
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/sandyeveliz/acervo" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sandyeveliz/acervo
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorial/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../layers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Layers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmark Guide
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmark Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test-infrastructure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test Infrastructure
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Test Infrastructure">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixture-projects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixture Projects
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#auto-indexing-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-Indexing Pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-1-pipeline-validation-test_pipeline_validationpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 1: Pipeline Validation (test_pipeline_validation.py)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Layer 1: Pipeline Validation (test_pipeline_validation.py)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-it-tests-per-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it tests per project
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What it tests per project">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#index-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Index validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#curate-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Curate validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#synthesize-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Synthesize validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#diagnostic-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagnostic report
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-2-5-category-benchmark-test_benchmarkspy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 2: 5-Category Benchmark (test_benchmarks.py)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Layer 2: 5-Category Benchmark (test_benchmarks.py)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-a-turn-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a turn works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-5-categories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The 5 Categories
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The 5 Categories">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#resolve-14-turns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RESOLVE (14 turns)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ground-12-turns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GROUND (12 turns)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recall-6-turns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RECALL (6 turns)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#focus-14-turns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FOCUS (14 turns)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adapt-8-turns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ADAPT (8 turns)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-level-checks-internal-diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component-Level Checks (Internal Diagnostics)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Component-Level Checks (Internal Diagnostics)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#s1-intent-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        S1 — Intent Detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#s2-node-activation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        S2 — Node Activation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#s3-context-assembly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        S3 — Context Assembly
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#s15-memory-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        S1.5 — Memory Extraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent-comparison-approach-scorecard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent Comparison (Approach Scorecard)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Agent Comparison (Approach Scorecard)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#three-approaches-compared" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Three approaches compared
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-gets-measured" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What gets measured
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reports-generated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reports generated
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#version-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Version History
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-the-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running the Tests
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Running the Tests">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#output-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output files
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interpreting-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interpreting results
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test-infrastructure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test Infrastructure
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Test Infrastructure">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixture-projects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixture Projects
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#auto-indexing-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-Indexing Pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-1-pipeline-validation-test_pipeline_validationpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 1: Pipeline Validation (test_pipeline_validation.py)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Layer 1: Pipeline Validation (test_pipeline_validation.py)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-it-tests-per-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it tests per project
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What it tests per project">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#index-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Index validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#curate-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Curate validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#synthesize-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Synthesize validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#diagnostic-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagnostic report
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-2-5-category-benchmark-test_benchmarkspy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 2: 5-Category Benchmark (test_benchmarks.py)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Layer 2: 5-Category Benchmark (test_benchmarks.py)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-a-turn-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a turn works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-5-categories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The 5 Categories
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The 5 Categories">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#resolve-14-turns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RESOLVE (14 turns)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ground-12-turns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GROUND (12 turns)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recall-6-turns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RECALL (6 turns)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#focus-14-turns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FOCUS (14 turns)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adapt-8-turns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ADAPT (8 turns)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-level-checks-internal-diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component-Level Checks (Internal Diagnostics)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Component-Level Checks (Internal Diagnostics)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#s1-intent-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        S1 — Intent Detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#s2-node-activation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        S2 — Node Activation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#s3-context-assembly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        S3 — Context Assembly
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#s15-memory-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        S1.5 — Memory Extraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent-comparison-approach-scorecard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent Comparison (Approach Scorecard)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Agent Comparison (Approach Scorecard)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#three-approaches-compared" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Three approaches compared
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-gets-measured" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What gets measured
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reports-generated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reports generated
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#version-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Version History
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-the-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running the Tests
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Running the Tests">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#output-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output files
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interpreting-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interpreting results
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="acervo-benchmark-guide">Acervo Benchmark Guide</h1>
+<p>This document describes every test in Acervo's integration benchmark suite:
+what it measures, how it works, and how to interpret the results.</p>
+<hr />
+<h2 id="overview">Overview</h2>
+<p>Acervo replaces traditional conversation history with a <strong>persistent knowledge graph</strong>.
+Instead of accumulating every message in the context window (which grows linearly and
+eventually overflows), Acervo builds a graph of entities, facts, and relationships
+from each conversation turn, then injects only the <em>relevant</em> subset as context
+for the next turn.</p>
+<p>The benchmark suite answers two questions:</p>
+<ol>
+<li>
+<p><strong>Does it work?</strong> Can Acervo answer questions that require project knowledge,
+   recall user-stated facts, and avoid hallucinating information that doesn't exist?</p>
+</li>
+<li>
+<p><strong>Is it efficient?</strong> Does Acervo use fewer tokens than alternative approaches
+   (raw history accumulation, or an agent with file-reading tools)?</p>
+</li>
+</ol>
+<hr />
+<h2 id="test-infrastructure">Test Infrastructure</h2>
+<h3 id="fixture-projects">Fixture Projects</h3>
+<p>Three real-world projects are used as test data, each representing a different domain:</p>
+<table>
+<thead>
+<tr>
+<th>Project</th>
+<th>Domain</th>
+<th>Content</th>
+<th>Files</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>P1 — TODO App</strong></td>
+<td>Source code</td>
+<td>Full-stack TypeScript app: Express backend, React frontend, SQLite, JWT auth</td>
+<td>31 files (.ts, .tsx, .md, .json, .html, .css)</td>
+</tr>
+<tr>
+<td><strong>P2 — Literature</strong></td>
+<td>Prose / epub</td>
+<td>"The Adventures of Sherlock Holmes" by Arthur Conan Doyle (1892, public domain, Project Gutenberg)</td>
+<td>1 epub file, 12 stories</td>
+</tr>
+<tr>
+<td><strong>P3 — PM Docs</strong></td>
+<td>Project management</td>
+<td>Roadmap, sprint plans, issue trackers, architecture decision records</td>
+<td>11 markdown files</td>
+</tr>
+</tbody>
+</table>
+<p>These projects live in <code>tests/fixtures/</code> and contain <strong>only source files</strong> (no generated data).</p>
+<h3 id="auto-indexing-pipeline">Auto-Indexing Pipeline</h3>
+<p>Before tests run, <code>conftest.py</code> automatically processes each fixture through
+Acervo's full pipeline:</p>
+<div class="highlight"><pre><span></span><code>init -&gt; index -&gt; curate -&gt; synthesize
+</code></pre></div>
+<ul>
+<li><strong>Index</strong>: Parses files, creates graph nodes (file, section, symbol, folder),
+  generates embeddings, stores chunks in vector DB.</li>
+<li><strong>Curate</strong>: LLM analyzes files in batches, extracts entities (people, technologies,
+  concepts) and relationships between them.</li>
+<li><strong>Synthesize</strong>: LLM generates a project overview node that summarizes the entire project.</li>
+</ul>
+<p>This happens once. Subsequent runs reuse the existing <code>.acervo/</code> state.
+Delete <code>.acervo/</code> inside a fixture to force re-indexing.</p>
+<p><strong>Requirements</strong>: LM Studio running <code>acervo-extractor-qwen3.5-9b</code> and
+Ollama running <code>qwen3-embedding</code>.</p>
+<hr />
+<h2 id="layer-1-pipeline-validation-test_pipeline_validationpy">Layer 1: Pipeline Validation (<code>test_pipeline_validation.py</code>)</h2>
+<p><strong>26 tests</strong> that inspect the graph state produced by index/curate/synthesize.
+These tests do NOT call the LLM at runtime -- they read the existing graph and
+check structural properties. They run in seconds.</p>
+<h3 id="what-it-tests-per-project">What it tests per project</h3>
+<h4 id="index-validation">Index validation</h4>
+<ul>
+<li><strong>File nodes created</strong>: Did the indexer find all source files?
+  (P1: &gt;=20 files, P2: &gt;=1 epub, P3: &gt;=5 markdown files)</li>
+<li><strong>Section nodes created</strong>: Did the parser extract headings/chapters?
+  (P2: &gt;=10 story sections, P3: &gt;=30 markdown heading sections)</li>
+<li><strong>Symbol nodes created</strong>: Did code parsing extract functions and classes?
+  (P1: &gt;=50 symbols from TypeScript)</li>
+<li><strong>Folder nodes created</strong>: Is the directory structure captured?
+  (P1: &gt;=5 folders)</li>
+<li><strong>Chunk IDs linked</strong>: Are text chunks properly associated with nodes?
+  (P1: &gt;=100 chunk links, P2: &gt;=50 chunk links)</li>
+<li><strong>Edges exist</strong>: Are parent-child, import, and contains relationships stored?
+  (P1: &gt;=100 edges)</li>
+</ul>
+<h4 id="curate-validation">Curate validation</h4>
+<ul>
+<li><strong>Entities extracted</strong>: Did the LLM identify real entities?
+  (P1: &gt;=3 tech entities like React/Express/SQLite)
+  (P2: &gt;=2 character entities like Holmes/Watson)
+  (P3: &gt;=1 entity from PM docs)</li>
+<li><strong>Entity types valid</strong>: Are types from the ontology?
+  (person, organization, project, technology, place, event, document, concept, symbol)</li>
+<li><strong>No phantom entities</strong>: Every entity label must appear in at least one source file.
+  Phantoms = hallucinated entities the LLM invented.</li>
+<li><strong>Entities have relations</strong>: Entities should be connected to file nodes, not orphaned.</li>
+<li><strong>Character entities</strong> (P2): Does curation extract Sherlock, Watson, Adler, etc?</li>
+<li><strong>Location entities</strong> (P2): Does curation find Baker Street, London?</li>
+</ul>
+<h4 id="synthesize-validation">Synthesize validation</h4>
+<ul>
+<li><strong>Synthesis node exists</strong>: Is there a <code>synthesis:*overview*</code> node?</li>
+<li><strong>Synthesis mentions stack</strong> (P1): Does the overview mention React, Express, etc?</li>
+<li><strong>Synthesis mentions Sherlock</strong> (P2): Does the overview mention Holmes/Conan Doyle?</li>
+<li><strong>Module summaries</strong> (P3): Are there module-level synthesis nodes?</li>
+</ul>
+<h4 id="diagnostic-report">Diagnostic report</h4>
+<p>The final test generates a cross-project summary printed to console and saved as
+<code>reports/pipeline_diagnostic.json</code> and <code>reports/pipeline_diagnostic.md</code>.</p>
+<hr />
+<h2 id="layer-2-5-category-benchmark-test_benchmarkspy">Layer 2: 5-Category Benchmark (<code>test_benchmarks.py</code>)</h2>
+<p><strong>55 conversation turns</strong> across 3 projects, organized into 5 capability categories.
+Each turn calls <code>prepare()</code> (the context injection pipeline) and <code>process()</code>
+(the memory extraction pipeline), then evaluates component-level checks.</p>
+<h3 id="how-a-turn-works">How a turn works</h3>
+<div class="highlight"><pre><span></span><code>1. User message sent to prepare(user_msg, history)
+2. S1 (Intent Detection): Classify as overview/specific/chat
+3. S2 (Node Activation): Select relevant graph nodes
+4. S3 (Context Assembly): Build warm context within token budget
+5. Evaluate per-turn checks against S1/S2/S3 outputs
+6. Call process(user_msg, assistant_sim) to update memory graph
+7. Record pass/fail for each check
+</code></pre></div>
+<p>The <code>assistant_sim</code> is a simulated assistant response (not from an LLM).
+This isolates the test to Acervo's context pipeline, not the chat model's quality.</p>
+<h3 id="the-5-categories">The 5 Categories</h3>
+<h4 id="resolve-14-turns">RESOLVE (14 turns)</h4>
+<p><strong>"Can Acervo enable answers that are impossible without project knowledge?"</strong></p>
+<p>These questions have NO correct answer without access to the project data.
+A stateless LLM would have to refuse or hallucinate.</p>
+<table>
+<thead>
+<tr>
+<th>Turn</th>
+<th>Project</th>
+<th>Question</th>
+<th>Why it's impossible without context</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1-1</td>
+<td>TODO App</td>
+<td>"How many files does this project have?"</td>
+<td>Requires file listing</td>
+</tr>
+<tr>
+<td>P1-2</td>
+<td>TODO App</td>
+<td>"What technologies does this project use?"</td>
+<td>Must read package.json/imports</td>
+</tr>
+<tr>
+<td>P1-5</td>
+<td>TODO App</td>
+<td>"What routes does the API define?"</td>
+<td>Must read route files</td>
+</tr>
+<tr>
+<td>P1-13</td>
+<td>TODO App</td>
+<td>"How does the frontend communicate with the backend?"</td>
+<td>Must trace API client code</td>
+</tr>
+<tr>
+<td>P1-16</td>
+<td>TODO App</td>
+<td>"What data models are defined?"</td>
+<td>Must read model files</td>
+</tr>
+<tr>
+<td>P1-18</td>
+<td>TODO App</td>
+<td>"What error handling does the API have?"</td>
+<td>Must read middleware code</td>
+</tr>
+<tr>
+<td>P2-1</td>
+<td>Literature</td>
+<td>"What is this book about?"</td>
+<td>Must read the epub</td>
+</tr>
+<tr>
+<td>P2-2</td>
+<td>Literature</td>
+<td>"How many stories does it contain?"</td>
+<td>Must parse table of contents</td>
+</tr>
+<tr>
+<td>P2-12</td>
+<td>Literature</td>
+<td>"Where does Holmes live?"</td>
+<td>Must find address in text</td>
+</tr>
+<tr>
+<td>P3-1</td>
+<td>PM Docs</td>
+<td>"What project is documented here?"</td>
+<td>Must read project files</td>
+</tr>
+<tr>
+<td>P3-2</td>
+<td>PM Docs</td>
+<td>"What documents are available?"</td>
+<td>Must list document files</td>
+</tr>
+<tr>
+<td>P3-7</td>
+<td>PM Docs</td>
+<td>"What milestones are defined?"</td>
+<td>Must read roadmap</td>
+</tr>
+<tr>
+<td>P3-13</td>
+<td>PM Docs</td>
+<td>"Who are the developers working on this?"</td>
+<td>Must find names in docs</td>
+</tr>
+<tr>
+<td>P3-16</td>
+<td>PM Docs</td>
+<td>"Which issues are related to the current sprint?"</td>
+<td>Must cross-reference sprint + issues</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Pass criteria</strong>: S3 warm context contains the information needed to answer
+(verified by <code>context_contains</code> / <code>context_contains_any</code> checks).</p>
+<p><strong>Effectiveness check</strong>: <code>stateless_can_answer: false</code> marks these as turns
+where Acervo is the difference between answering and not answering.</p>
+<h4 id="ground-12-turns">GROUND (12 turns)</h4>
+<p><strong>"Does Acervo prevent hallucination by grounding answers in verified data?"</strong></p>
+<p>These questions ask about things that may or may not exist in the project.
+Acervo should provide context that confirms or denies -- and critically,
+should NOT inject context about things that aren't there.</p>
+<table>
+<thead>
+<tr>
+<th>Turn</th>
+<th>Project</th>
+<th>Question</th>
+<th>What we check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1-14</td>
+<td>TODO App</td>
+<td>"Does this project use GraphQL?"</td>
+<td>Context must NOT contain "graphql"</td>
+</tr>
+<tr>
+<td>P1-15</td>
+<td>TODO App</td>
+<td>"Is there a Python backend?"</td>
+<td>Context must NOT contain "python", "django", "flask"</td>
+</tr>
+<tr>
+<td>P1-20</td>
+<td>TODO App</td>
+<td>"This is React and Express with SQLite, right?"</td>
+<td>Context MUST contain "react", "express", "sqlite"; must NOT contain "mongodb", "nuxt"</td>
+</tr>
+<tr>
+<td>P2-3</td>
+<td>Literature</td>
+<td>"Who is Sherlock Holmes?"</td>
+<td>Context must contain "holmes", "detective", or "baker street"</td>
+</tr>
+<tr>
+<td>P2-6</td>
+<td>Literature</td>
+<td>"Who is Irene Adler?"</td>
+<td>Context must contain "adler" or "irene"</td>
+</tr>
+<tr>
+<td>P2-11</td>
+<td>Literature</td>
+<td>"Does Professor Moriarty appear in these stories?"</td>
+<td>Moriarty is barely in this collection -- should not hallucinate his presence</td>
+</tr>
+<tr>
+<td>P2-15</td>
+<td>Literature</td>
+<td>"This is by Arthur Conan Doyle, right?"</td>
+<td>Context must contain "conan doyle"</td>
+</tr>
+<tr>
+<td>P3-4</td>
+<td>PM Docs</td>
+<td>"What's the tech stack?"</td>
+<td>Context must contain "express", "sqlite", "jwt"; must NOT contain "django"</td>
+</tr>
+<tr>
+<td>P3-12</td>
+<td>PM Docs</td>
+<td>"Why was SQLite chosen over PostgreSQL?"</td>
+<td>Context must contain "sqlite" and "decision"</td>
+</tr>
+<tr>
+<td>P3-15</td>
+<td>PM Docs</td>
+<td>"Is there a CI/CD pipeline set up?"</td>
+<td>Correct answer is "no" -- context should not hallucinate one</td>
+</tr>
+<tr>
+<td>P3-19</td>
+<td>PM Docs</td>
+<td>"Is Ron Weasley part of this project?"</td>
+<td>Context must NOT contain "weasley" -- tests negative grounding</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Pass criteria</strong>: <code>context_contains</code> for positive grounding,
+<code>context_not_contains</code> for negative grounding (absence of noise).</p>
+<h4 id="recall-6-turns">RECALL (6 turns)</h4>
+<p><strong>"Can Acervo remember user-stated facts across turns?"</strong></p>
+<p>Two phases: the user <em>states</em> a fact (S1.5 extracts it into the graph),
+then later <em>asks</em> about it (S3 should retrieve it).</p>
+<table>
+<thead>
+<tr>
+<th>Turn</th>
+<th>Project</th>
+<th>Phase</th>
+<th>Message</th>
+<th>What we check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1-9</td>
+<td>TODO App</td>
+<td>Store</td>
+<td>"The lead developer is Alice and she started in January"</td>
+<td>S1.5 extracts "alice" entity into graph</td>
+</tr>
+<tr>
+<td>P1-12</td>
+<td>TODO App</td>
+<td>Recall</td>
+<td>"Who is the lead developer?"</td>
+<td>S3 context contains "alice"</td>
+</tr>
+<tr>
+<td>P2-10</td>
+<td>Literature</td>
+<td>Store</td>
+<td>"Holmes's deduction method is similar to scientific hypothesis testing"</td>
+<td>S1.5 extracts fact about "deduction"</td>
+</tr>
+<tr>
+<td>P2-13</td>
+<td>Literature</td>
+<td>Recall</td>
+<td>"What did I say about Holmes's method earlier?"</td>
+<td>S3 context contains "deduction", "scientific"</td>
+</tr>
+<tr>
+<td>P3-8</td>
+<td>PM Docs</td>
+<td>Store</td>
+<td>"The client wants the MVP ready by end of Q2"</td>
+<td>S1.5 extracts "MVP" entity</td>
+</tr>
+<tr>
+<td>P3-14</td>
+<td>PM Docs</td>
+<td>Recall</td>
+<td>"What was the deadline I mentioned?"</td>
+<td>S3 context contains "q2", "mvp"</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Pass criteria</strong>: Entity extraction creates the node (store phase),
+and later context retrieval includes the fact (recall phase).</p>
+<h4 id="focus-14-turns">FOCUS (14 turns)</h4>
+<p><strong>"Does Acervo keep context small and relevant?"</strong></p>
+<p>These turns test that Acervo doesn't over-activate nodes or waste the token budget.
+Chat messages like "thanks" should produce almost no context.
+Specific questions should activate only the relevant files.</p>
+<table>
+<thead>
+<tr>
+<th>Turn</th>
+<th>Project</th>
+<th>Question</th>
+<th>Budget check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1-3</td>
+<td>TODO App</td>
+<td>"How does authentication work?"</td>
+<td>100-600 tokens, must contain "auth", must NOT contain "todo.controller"</td>
+</tr>
+<tr>
+<td>P1-4</td>
+<td>TODO App</td>
+<td>"What database does it use?"</td>
+<td>&lt;=600 tokens, must contain "sqlite"</td>
+</tr>
+<tr>
+<td>P1-6</td>
+<td>TODO App</td>
+<td>"Interesting, well-structured project"</td>
+<td>&lt;=150 tokens (chat -- minimal context)</td>
+</tr>
+<tr>
+<td>P1-8</td>
+<td>TODO App</td>
+<td>"What React hooks does the app use?"</td>
+<td>&lt;=600 tokens, &lt;=8 nodes</td>
+</tr>
+<tr>
+<td>P1-17</td>
+<td>TODO App</td>
+<td>"High-level summary of the whole project"</td>
+<td>&lt;=300 tokens (synthesis only, no symbols)</td>
+</tr>
+<tr>
+<td>P1-19</td>
+<td>TODO App</td>
+<td>"Ok, I think I understand the project now"</td>
+<td>&lt;=150 tokens (chat)</td>
+</tr>
+<tr>
+<td>P2-4</td>
+<td>Literature</td>
+<td>"Tell me about Dr. Watson"</td>
+<td>&lt;=600 tokens, &lt;=10 nodes</td>
+</tr>
+<tr>
+<td>P2-5</td>
+<td>Literature</td>
+<td>"What happens in A Scandal in Bohemia?"</td>
+<td>100-600 tokens</td>
+</tr>
+<tr>
+<td>P2-8</td>
+<td>Literature</td>
+<td>"These are great detective stories"</td>
+<td>&lt;=150 tokens (chat)</td>
+</tr>
+<tr>
+<td>P3-3</td>
+<td>PM Docs</td>
+<td>"What issues are currently open?"</td>
+<td>100-600 tokens, &lt;=8 nodes, only issue files</td>
+</tr>
+<tr>
+<td>P3-5</td>
+<td>PM Docs</td>
+<td>"What's in the current sprint?"</td>
+<td>&lt;=600 tokens, &lt;=6 nodes, sprint files</td>
+</tr>
+<tr>
+<td>P3-9</td>
+<td>PM Docs</td>
+<td>"Thanks for the overview"</td>
+<td>&lt;=150 tokens (chat)</td>
+</tr>
+<tr>
+<td>P3-11</td>
+<td>PM Docs</td>
+<td>"What's the auth issue specifically?"</td>
+<td>&lt;=600 tokens, &lt;=6 nodes</td>
+</tr>
+<tr>
+<td>P3-17</td>
+<td>PM Docs</td>
+<td>"What progress has been made?"</td>
+<td>&lt;=600 tokens, progress files</td>
+</tr>
+<tr>
+<td>P3-20</td>
+<td>PM Docs</td>
+<td>"Give me a final summary"</td>
+<td>&lt;=300 tokens, synthesis only</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Pass criteria</strong>: Token budget within range, node count within limits,
+and correct S2 file activation (activated + not-activated checks).</p>
+<h4 id="adapt-8-turns">ADAPT (8 turns)</h4>
+<p><strong>"Can Acervo switch context cleanly when the user changes topic?"</strong></p>
+<p>The user shifts focus mid-conversation. Acervo should activate nodes for the
+NEW topic and stop injecting context from the OLD topic.</p>
+<table>
+<thead>
+<tr>
+<th>Turn</th>
+<th>Project</th>
+<th>Shift</th>
+<th>What we check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1-7</td>
+<td>TODO App</td>
+<td>Backend -&gt; Frontend</td>
+<td>Must activate "component"/"frontend"; must NOT activate "controller", "middleware"</td>
+</tr>
+<tr>
+<td>P1-10</td>
+<td>TODO App</td>
+<td>Frontend -&gt; Config</td>
+<td>Must activate "config" files</td>
+</tr>
+<tr>
+<td>P1-11</td>
+<td>TODO App</td>
+<td>Config -&gt; Auth (return)</td>
+<td>Must activate "auth", "middleware"</td>
+</tr>
+<tr>
+<td>P2-7</td>
+<td>Literature</td>
+<td>Bohemia -&gt; Red-Headed League</td>
+<td>Must contain "red-headed"/"league"; must NOT contain "adler"/"bohemia"</td>
+</tr>
+<tr>
+<td>P2-9</td>
+<td>Literature</td>
+<td>Red-Headed -&gt; Irene Adler (return)</td>
+<td>Must contain "adler"/"irene"</td>
+</tr>
+<tr>
+<td>P2-14</td>
+<td>Literature</td>
+<td>Specific story -&gt; Overall themes</td>
+<td>&lt;=400 tokens (overview mode)</td>
+</tr>
+<tr>
+<td>P3-6</td>
+<td>PM Docs</td>
+<td>Sprint -&gt; Roadmap</td>
+<td>Must activate "roadmap"; must NOT activate "sprint"/"issue"</td>
+</tr>
+<tr>
+<td>P3-10</td>
+<td>PM Docs</td>
+<td>Roadmap -&gt; Issues (return)</td>
+<td>Must activate "issue" files</td>
+</tr>
+<tr>
+<td>P3-18</td>
+<td>PM Docs</td>
+<td>Progress -&gt; Architecture decisions</td>
+<td>Must activate "decision"; must NOT activate "sprint"/"progress"</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Pass criteria</strong>: Correct S2 activation for the new topic,
+AND absence of noise from the previous topic in S3 context.</p>
+<hr />
+<h2 id="component-level-checks-internal-diagnostics">Component-Level Checks (Internal Diagnostics)</h2>
+<p>Each turn can validate specific pipeline components independently:</p>
+<h3 id="s1-intent-detection">S1 — Intent Detection</h3>
+<p>Checks that the pipeline correctly classifies the user's intent:
+- <code>overview</code>: broad questions ("what is this project?") -&gt; use synthesis nodes
+- <code>specific</code>: targeted questions ("how does auth work?") -&gt; use vector search
+- <code>chat</code>: social messages ("thanks", "ok") -&gt; minimal or no context</p>
+<h3 id="s2-node-activation">S2 — Node Activation</h3>
+<p>Checks which graph nodes the pipeline selected:
+- <code>activate_kinds</code>: which node types should appear (file, section, synthesis, entity)
+- <code>not_activate_kinds</code>: which node types should NOT appear
+- <code>activate_files_containing</code>: node labels must include these terms
+- <code>not_activate_files_containing</code>: node labels must NOT include these terms
+- <code>min_nodes</code> / <code>max_nodes</code>: bounds on how many nodes activate</p>
+<h3 id="s3-context-assembly">S3 — Context Assembly</h3>
+<p>Checks the warm context text injected into the LLM prompt:
+- <code>warm_tokens_min</code> / <code>warm_tokens_max</code>: token budget bounds
+- <code>context_contains</code>: ALL these terms must appear in context (case-insensitive)
+- <code>context_contains_any</code>: at least ONE of these terms must appear
+- <code>context_not_contains</code>: NONE of these terms should appear (noise check)</p>
+<h3 id="s15-memory-extraction">S1.5 — Memory Extraction</h3>
+<p>Only checked on RECALL-store turns:
+- <code>should_extract_entity</code>: verify that <code>process()</code> created a graph node for this entity</p>
+<hr />
+<h2 id="agent-comparison-approach-scorecard">Agent Comparison (Approach Scorecard)</h2>
+<p>24 turns include <code>agent_comparison</code> blocks that estimate what alternative
+approaches would cost to answer the same question:</p>
+<h3 id="three-approaches-compared">Three approaches compared</h3>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Stateless LLM</strong></td>
+<td>Plain model with no project access. Can only use training data.</td>
+</tr>
+<tr>
+<td><strong>Agent + Tools</strong></td>
+<td>Model with <code>list_directory</code>, <code>file_search</code>, <code>read_file</code> tools. Must discover and read files on every turn.</td>
+</tr>
+<tr>
+<td><strong>Acervo</strong></td>
+<td>Pre-indexed knowledge graph. Context injected from graph in a single step, no tool calls.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="what-gets-measured">What gets measured</h3>
+<p>For each compared turn:</p>
+<ul>
+<li><strong>Stateless</strong>: <code>can_answer</code> (true/false) -- can a plain LLM answer from training alone?</li>
+<li><strong>Agent + Tools</strong>: <code>steps</code> (number of tool calls), <code>tools</code> (which tools used),
+  <code>estimated_input_tokens</code> (total tokens consumed including tool results)</li>
+<li><strong>Acervo</strong>: <code>warm_tokens</code> (actual tokens of warm context injected)</li>
+</ul>
+<h3 id="reports-generated">Reports generated</h3>
+<p><strong>RESOLVE Scorecard</strong>: For RESOLVE turns, shows what percentage each approach can answer
+and at what token cost. Stateless typically scores 0% (can't answer without data).
+Agent scores 100% (can always read files) but at high token cost.
+Acervo scores based on effectiveness checks.</p>
+<p><strong>Efficiency Chart</strong> ("killer chart"): Per-turn comparison of agent tokens vs Acervo tokens.
+Shows the ratio -- e.g., an agent uses 9,000 tokens where Acervo uses 500 (18x reduction).</p>
+<p>Example agent estimates for P1 Turn 16 ("What data models are defined?"):
+<div class="highlight"><pre><span></span><code>Agent: file_search(&quot;model&quot;) -&gt; read_file(todo.model.ts) -&gt; read_file(user.model.ts)
+       3 steps, ~7,000 input tokens
+Acervo: warm context with model summaries
+       0 steps, ~400 tokens
+       Ratio: 17.5x fewer tokens
+</code></pre></div></p>
+<p>The key insight: the agent's cost grows with project size (more files to search)
+and conversation length (more history to carry). Acervo's cost stays bounded
+by the token budget (~2000 tokens max regardless of project size or turn count).</p>
+<hr />
+<h2 id="version-history">Version History</h2>
+<p>Each benchmark run appends results to <code>reports/version_history.json</code>.
+This tracks category scores and component scores across releases,
+enabling regression detection and progress tracking.</p>
+<hr />
+<h2 id="running-the-tests">Running the Tests</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Layer 1 only (no LLM needed, reads existing graph, ~5 seconds)</span>
+pytest<span class="w"> </span>tests/integration/test_pipeline_validation.py<span class="w"> </span>-v
+
+<span class="c1"># Full benchmark (needs LM Studio + Ollama, ~5 minutes)</span>
+pytest<span class="w"> </span>tests/integration/test_benchmarks.py<span class="w"> </span>-v<span class="w"> </span>-s
+
+<span class="c1"># Single project</span>
+pytest<span class="w"> </span>tests/integration/test_benchmarks.py<span class="w"> </span>-k<span class="w"> </span><span class="s2">&quot;p1&quot;</span><span class="w"> </span>-v<span class="w"> </span>-s
+
+<span class="c1"># Both layers</span>
+pytest<span class="w"> </span>tests/integration/<span class="w"> </span>-v<span class="w"> </span>-s
+</code></pre></div>
+<h3 id="output-files">Output files</h3>
+<p>After running, find reports in <code>tests/integration/reports/</code>:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>benchmark_public.json</code></td>
+<td>Category scores + scorecard + efficiency chart (machine-readable)</td>
+</tr>
+<tr>
+<td><code>benchmark_public.md</code></td>
+<td>Category scores + approach comparison tables (human-readable)</td>
+</tr>
+<tr>
+<td><code>benchmark_diagnostic.json</code></td>
+<td>Full per-turn detail with all component checks</td>
+</tr>
+<tr>
+<td><code>benchmark_diagnostic.md</code></td>
+<td>Component health + cross-matrix + S1 failures</td>
+</tr>
+<tr>
+<td><code>pipeline_diagnostic.json</code></td>
+<td>Graph state per project (Layer 1)</td>
+</tr>
+<tr>
+<td><code>pipeline_diagnostic.md</code></td>
+<td>Pipeline health summary (Layer 1)</td>
+</tr>
+<tr>
+<td><code>version_history.json</code></td>
+<td>Scores over time for regression tracking</td>
+</tr>
+</tbody>
+</table>
+<h3 id="interpreting-results">Interpreting results</h3>
+<p><strong>Category scores</strong> (public view): Percentage of turns where the context
+contained the information needed to answer correctly.</p>
+<ul>
+<li><strong>100%</strong> = every turn had correct context</li>
+<li><strong>&lt; 80%</strong> = some questions would fail -- investigate which turns and why</li>
+</ul>
+<p><strong>Component scores</strong> (internal view): Where the pipeline breaks down.</p>
+<ul>
+<li><strong>S1 Intent low</strong> = intent detection misfires (classifying overview as specific or vice versa)</li>
+<li><strong>S2 Activation low</strong> = wrong nodes selected (wrong files, too many nodes)</li>
+<li><strong>S3 Budget low</strong> = token budget exceeded (over-stuffing context)</li>
+<li><strong>S3 Quality low</strong> = context missing key terms or contains noise</li>
+</ul>
+<p><strong>Cross-matrix</strong> shows which categories are affected by which component failures.
+For example, if ADAPT has low S2 Activation, the pipeline isn't switching
+topics cleanly.</p>
+<p><strong>Efficiency ratio</strong> shows how many fewer tokens Acervo uses compared to a
+tool-using agent. Higher is better. Typical: 10-40x fewer tokens per turn.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.sections", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

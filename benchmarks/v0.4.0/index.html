@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Acervo Benchmark Report — v0.4.0</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+         background: #0d1117; color: #c9d1d9; line-height: 1.6; }
+
+  /* Hero */
+  .hero { text-align: center; padding: 4rem 2rem 3rem; background: linear-gradient(180deg, #161b22 0%, #0d1117 100%); }
+  .hero h1 { font-size: 2.8rem; color: #fff; margin-bottom: 0.5rem; }
+  .hero h1 span { color: #58a6ff; }
+  .hero .tagline { color: #8b949e; font-size: 1.2rem; max-width: 750px; margin: 0 auto 2rem; }
+  .hero-stats { display: flex; justify-content: center; gap: 3rem; flex-wrap: wrap; }
+  .hero-stat { text-align: center; }
+  .hero-stat .value { font-size: 3rem; font-weight: 800; color: #3fb950; }
+  .hero-stat .value.blue { color: #58a6ff; }
+  .hero-stat .value.warn { color: #d29922; }
+  .hero-stat .label { color: #8b949e; font-size: 0.9rem; }
+  .hero .version { color: #484f58; font-size: 0.85rem; margin-top: 1.5rem; }
+
+  /* Container */
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 2rem; }
+  .section { padding: 3rem 0; }
+  .section-title { color: #58a6ff; font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .section-subtitle { color: #8b949e; margin-bottom: 2rem; font-size: 1rem; }
+
+  /* Category scores */
+  .score-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1.2rem; margin-bottom: 2rem; }
+  .score-card { background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+                padding: 1.5rem; text-align: center; transition: transform 0.2s; }
+  .score-card:hover { transform: translateY(-2px); }
+  .score-card .score { font-size: 2.5rem; font-weight: 800; }
+  .score-card .score.perfect { color: #3fb950; }
+  .score-card .score.high { color: #58a6ff; }
+  .score-card .score.mid { color: #d29922; }
+  .score-card .cat-name { color: #8b949e; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.3rem; }
+  .score-card .cat-desc { color: #484f58; font-size: 0.75rem; margin-top: 0.3rem; }
+
+  /* Comparison table */
+  .comparison-section { background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+                        padding: 2rem; margin-bottom: 2rem; }
+  .comparison-section h3 { color: #fff; font-size: 1.3rem; margin-bottom: 0.5rem; }
+  .comparison-section .subtitle { color: #8b949e; font-size: 0.9rem; margin-bottom: 1.5rem; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; color: #8b949e; font-size: 0.8rem; text-transform: uppercase;
+       letter-spacing: 0.05em; padding: 0.8rem 1rem; border-bottom: 1px solid #30363d; }
+  td { padding: 0.8rem 1rem; border-bottom: 1px solid #21262d; color: #c9d1d9; font-size: 0.95rem; }
+  tr.acervo-row { background: #238636; border-radius: 8px; }
+  tr.acervo-row td { color: #fff; font-weight: 600; }
+  .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
+  .badge-green { background: #23863633; color: #3fb950; }
+  .badge-blue { background: #1f6feb33; color: #58a6ff; }
+  .badge-gray { background: #30363d; color: #8b949e; }
+
+  /* Efficiency highlight */
+  .efficiency-banner { display: flex; align-items: center; justify-content: center; gap: 2rem;
+                       background: linear-gradient(135deg, #238636 0%, #1f6feb 100%);
+                       border-radius: 12px; padding: 2rem; margin: 2rem 0; text-align: center; }
+  .efficiency-banner .big { font-size: 3.5rem; font-weight: 900; color: #fff; }
+  .efficiency-banner .desc { color: rgba(255,255,255,0.9); font-size: 1.1rem; text-align: left; max-width: 400px; }
+
+  /* Chart */
+  .chart-section { background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+                   padding: 2rem; margin: 2rem 0; }
+  .chart-section h3 { color: #fff; margin-bottom: 0.5rem; }
+  .chart-section p { color: #8b949e; font-size: 0.9rem; margin-bottom: 1rem; }
+
+  /* Diagnostic */
+  .diag-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.2rem; margin-bottom: 2rem; }
+  .diag-card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 1.5rem; text-align: center; }
+  .diag-card .diag-score { font-size: 2rem; font-weight: 700; }
+  .diag-card .diag-label { color: #8b949e; font-size: 0.8rem; margin-top: 0.3rem; }
+
+  /* Cross matrix */
+  .matrix-table th { font-size: 0.75rem; }
+  .matrix-table td { font-size: 0.85rem; text-align: center; }
+  .matrix-table td.na { color: #484f58; }
+
+  /* Pipeline */
+  .pipeline-card { background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+                   padding: 1.5rem; margin-bottom: 1rem; }
+  .pipeline-card h4 { color: #fff; margin-bottom: 0.8rem; font-size: 1.1rem; }
+  .pipeline-stat { display: flex; justify-content: space-between; padding: 0.3rem 0;
+                   border-bottom: 1px solid #21262d; }
+  .pipeline-stat:last-child { border-bottom: none; }
+  .pipeline-stat .pl-label { color: #8b949e; font-size: 0.85rem; }
+  .pipeline-stat .pl-value { color: #c9d1d9; font-weight: 600; font-size: 0.85rem; }
+  .entity-tags { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
+  .entity-tag { background: #1f6feb22; color: #58a6ff; padding: 0.2rem 0.6rem;
+                border-radius: 12px; font-size: 0.75rem; }
+
+  /* S1 failures */
+  .failure-list { list-style: none; }
+  .failure-list li { background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+                     padding: 0.8rem 1rem; margin-bottom: 0.5rem; display: flex;
+                     align-items: center; gap: 1rem; }
+  .failure-turn { background: #f8514933; color: #f85149; padding: 0.2rem 0.6rem;
+                  border-radius: 8px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+  .failure-msg { color: #c9d1d9; font-size: 0.9rem; flex: 1; }
+  .failure-expected { color: #3fb950; font-size: 0.8rem; }
+  .failure-got { color: #f85149; font-size: 0.8rem; }
+
+  /* Tech toggle */
+  .tech-toggle { text-align: center; margin: 3rem 0 1rem; }
+  .tech-toggle button { background: #21262d; border: 1px solid #30363d; color: #58a6ff;
+                        padding: 0.8rem 2rem; border-radius: 8px; cursor: pointer; font-size: 1rem; }
+  .tech-toggle button:hover { background: #30363d; }
+  .tech-details { display: none; margin-top: 2rem; }
+  .tech-details.show { display: block; }
+
+  /* Footer */
+  .footer { text-align: center; padding: 2rem; color: #484f58; font-size: 0.85rem;
+            border-top: 1px solid #30363d; margin-top: 3rem; }
+
+  @media (max-width: 768px) {
+    .hero h1 { font-size: 2rem; }
+    .hero-stats { gap: 1.5rem; }
+    .hero-stat .value { font-size: 2rem; }
+    .score-grid { grid-template-columns: repeat(2, 1fr); }
+    .diag-grid { grid-template-columns: repeat(2, 1fr); }
+    .efficiency-banner { flex-direction: column; gap: 1rem; }
+    .efficiency-banner .big { font-size: 2.5rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Hero -->
+<div class="hero">
+  <h1><span>Acervo</span> Benchmark Report</h1>
+  <p class="tagline">Indexed project benchmarks: Acervo answers questions about codebases, books, and docs using a knowledge graph &mdash; zero tool calls, constant token cost.</p>
+  <div class="hero-stats">
+    <div class="hero-stat"><div class="value">92%</div><div class="label">Avg Score</div></div>
+    <div class="hero-stat"><div class="value blue">55</div><div class="label">Turns Tested</div></div>
+    <div class="hero-stat"><div class="value">12.1x</div><div class="label">vs Agent Efficiency</div></div>
+    <div class="hero-stat"><div class="value blue">3</div><div class="label">Projects</div></div>
+    <div class="hero-stat"><div class="value">33</div><div class="label">Entities Extracted</div></div>
+  </div>
+  <p class="version">2026-04-01 &mdash; v0.4.0 &mdash; 3 fixture projects &mdash; 5 categories</p>
+</div>
+
+<div class="container">
+
+<!-- Category Scores -->
+<div class="section">
+  <h2 class="section-title">Category Scores</h2>
+  <p class="section-subtitle">Five categories test different aspects of graph-based context retrieval.</p>
+  <div class="score-grid">
+    <div class="score-card">
+      <div class="score perfect">100%</div>
+      <div class="cat-name">Resolve</div>
+      <div class="cat-desc">Can answer project-specific questions?</div>
+    </div>
+    <div class="score-card">
+      <div class="score high">92%</div>
+      <div class="cat-name">Ground</div>
+      <div class="cat-desc">Answers grounded in graph, not hallucinated?</div>
+    </div>
+    <div class="score-card">
+      <div class="score mid">67%</div>
+      <div class="cat-name">Recall</div>
+      <div class="cat-desc">Remembers facts from earlier turns?</div>
+    </div>
+    <div class="score-card">
+      <div class="score perfect">100%</div>
+      <div class="cat-name">Focus</div>
+      <div class="cat-desc">Ignores irrelevant context?</div>
+    </div>
+    <div class="score-card">
+      <div class="score perfect">100%</div>
+      <div class="cat-name">Adapt</div>
+      <div class="cat-desc">Handles graph updates mid-conversation?</div>
+    </div>
+  </div>
+</div>
+
+<!-- Efficiency Banner -->
+<div class="efficiency-banner">
+  <div class="big">12.1x</div>
+  <div class="desc">
+    <strong>fewer tokens than an agent with tools</strong><br>
+    Acervo answers RESOLVE questions with ~616 tokens of warm context.
+    An agent needs ~7,462 tokens across 2.8 tool-call steps to reach the same answer.
+  </div>
+</div>
+
+<!-- Approach Comparison -->
+<div class="section">
+  <h2 class="section-title">Approach Comparison</h2>
+  <p class="section-subtitle">How Acervo compares to a stateless LLM and an agent with tools on the same questions.</p>
+
+  <div class="comparison-section">
+    <h3>RESOLVE &mdash; 13 turns</h3>
+    <p class="subtitle">Questions that require project-specific knowledge to answer.</p>
+    <table>
+      <thead>
+        <tr><th>Approach</th><th>Can Answer</th><th>Avg Input Tokens</th><th>Avg Steps</th><th></th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Stateless LLM</td>
+          <td>8%</td>
+          <td>&mdash;</td>
+          <td>&mdash;</td>
+          <td><span class="badge badge-gray">baseline</span></td>
+        </tr>
+        <tr>
+          <td>Agent + Tools</td>
+          <td>100%</td>
+          <td>7,462</td>
+          <td>2.8</td>
+          <td><span class="badge badge-blue">multi-step</span></td>
+        </tr>
+        <tr class="acervo-row">
+          <td>Acervo</td>
+          <td>100%</td>
+          <td>616</td>
+          <td>0</td>
+          <td><span class="badge badge-green">12.1x faster</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="comparison-section">
+    <h3>GROUND &mdash; 11 turns</h3>
+    <p class="subtitle">Questions where the answer must be grounded in actual project data, not general knowledge.</p>
+    <table>
+      <thead>
+        <tr><th>Approach</th><th>Can Answer</th><th>Avg Input Tokens</th><th>Avg Steps</th><th></th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Stateless LLM</td>
+          <td>27%</td>
+          <td>&mdash;</td>
+          <td>&mdash;</td>
+          <td><span class="badge badge-gray">baseline</span></td>
+        </tr>
+        <tr>
+          <td>Agent + Tools</td>
+          <td>100%</td>
+          <td>5,500</td>
+          <td>2.3</td>
+          <td><span class="badge badge-blue">multi-step</span></td>
+        </tr>
+        <tr class="acervo-row">
+          <td>Acervo</td>
+          <td>91%</td>
+          <td>600</td>
+          <td>0</td>
+          <td><span class="badge badge-green">9.2x faster</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Efficiency Chart -->
+<div class="section">
+  <h2 class="section-title">Per-Turn Efficiency</h2>
+  <p class="section-subtitle">Token cost comparison for every RESOLVE and GROUND turn across all three projects.</p>
+  <div class="chart-section">
+    <h3>Agent Tokens vs Acervo Tokens</h3>
+    <p>Each bar pair shows one question. Red = agent with tools, green = Acervo graph context. Hover for details.</p>
+    <canvas id="efficiency-chart" height="120"></canvas>
+  </div>
+</div>
+
+<!-- Technical Details Toggle -->
+<div class="tech-toggle">
+  <button onclick="toggleDetails()">Show Diagnostics &amp; Pipeline Details</button>
+</div>
+
+<div id="tech-details" class="tech-details">
+
+  <!-- Component Health -->
+  <div class="section">
+    <h2 class="section-title">Component Health</h2>
+    <p class="section-subtitle">Internal diagnostic scores for each pipeline stage.</p>
+    <div class="diag-grid">
+      <div class="diag-card">
+        <div class="diag-score" style="color:#d29922;">78%</div>
+        <div class="diag-label">S1 Intent</div>
+      </div>
+      <div class="diag-card">
+        <div class="diag-score" style="color:#d29922;">56%</div>
+        <div class="diag-label">S2 Activation</div>
+      </div>
+      <div class="diag-card">
+        <div class="diag-score" style="color:#f85149;">32%</div>
+        <div class="diag-label">S3 Budget</div>
+      </div>
+      <div class="diag-card">
+        <div class="diag-score" style="color:#3fb950;">81%</div>
+        <div class="diag-label">S3 Quality</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cross Matrix -->
+  <div class="section">
+    <h2 class="section-title">Category &times; Component Matrix</h2>
+    <p class="section-subtitle">Where each category is strong or weak across pipeline components.</p>
+    <div class="comparison-section">
+      <table class="matrix-table">
+        <thead>
+          <tr><th>Category</th><th>S1 Intent</th><th>S2 Activation</th><th>S3 Budget</th><th>S3 Quality</th><th>Final Score</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>RESOLVE</td><td>73%</td><td>50%</td><td class="na">0%</td><td style="color:#3fb950;">100%</td><td style="color:#3fb950;font-weight:700;">100%</td>
+          </tr>
+          <tr>
+            <td>GROUND</td><td>80%</td><td>50%</td><td class="na">0%</td><td>77%</td><td style="color:#3fb950;font-weight:700;">92%</td>
+          </tr>
+          <tr>
+            <td>RECALL</td><td class="na">n/a</td><td class="na">n/a</td><td class="na">n/a</td><td style="color:#f85149;">33%</td><td style="color:#d29922;font-weight:700;">67%</td>
+          </tr>
+          <tr>
+            <td>FOCUS</td><td>73%</td><td>38%</td><td>40%</td><td>89%</td><td style="color:#3fb950;font-weight:700;">100%</td>
+          </tr>
+          <tr>
+            <td>ADAPT</td><td>89%</td><td style="color:#3fb950;">100%</td><td style="color:#3fb950;">100%</td><td>78%</td><td style="color:#3fb950;font-weight:700;">100%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- S1 Failures -->
+  <div class="section">
+    <h2 class="section-title">S1 Intent Misclassifications</h2>
+    <p class="section-subtitle">9 turns where the model classified user intent incorrectly.</p>
+    <ul class="failure-list">
+      <li>
+        <span class="failure-turn">Turn 2</span>
+        <span class="failure-msg">"What technologies does this project use?"</span>
+        <span class="failure-expected">expected: overview</span>
+        <span class="failure-got">got: specific</span>
+      </li>
+      <li>
+        <span class="failure-turn">Turn 6</span>
+        <span class="failure-msg">"Interesting, this is a well-structured project"</span>
+        <span class="failure-expected">expected: chat</span>
+        <span class="failure-got">got: overview</span>
+      </li>
+      <li>
+        <span class="failure-turn">Turn 19</span>
+        <span class="failure-msg">"Ok, I think I understand the project now"</span>
+        <span class="failure-expected">expected: chat</span>
+        <span class="failure-got">got: specific</span>
+      </li>
+      <li>
+        <span class="failure-turn">Turn 1</span>
+        <span class="failure-msg">"What is this book about?"</span>
+        <span class="failure-expected">expected: overview</span>
+        <span class="failure-got">got: specific</span>
+      </li>
+      <li>
+        <span class="failure-turn">Turn 8</span>
+        <span class="failure-msg">"These are great detective stories"</span>
+        <span class="failure-expected">expected: chat</span>
+        <span class="failure-got">got: specific</span>
+      </li>
+      <li>
+        <span class="failure-turn">Turn 14</span>
+        <span class="failure-msg">"Overall, what themes run through these stories?"</span>
+        <span class="failure-expected">expected: overview</span>
+        <span class="failure-got">got: specific</span>
+      </li>
+      <li>
+        <span class="failure-turn">Turn 1</span>
+        <span class="failure-msg">"What project is documented here?"</span>
+        <span class="failure-expected">expected: overview</span>
+        <span class="failure-got">got: specific</span>
+      </li>
+      <li>
+        <span class="failure-turn">Turn 2</span>
+        <span class="failure-msg">"What documents are available?"</span>
+        <span class="failure-expected">expected: overview</span>
+        <span class="failure-got">got: specific</span>
+      </li>
+      <li>
+        <span class="failure-turn">Turn 9</span>
+        <span class="failure-msg">"This project seems well-documented"</span>
+        <span class="failure-expected">expected: chat</span>
+        <span class="failure-got">got: overview</span>
+      </li>
+    </ul>
+  </div>
+
+  <!-- Pipeline Validation -->
+  <div class="section">
+    <h2 class="section-title">Pipeline Validation</h2>
+    <p class="section-subtitle">Index &rarr; Curate &rarr; Synthesize results for each fixture project.</p>
+
+    <div class="pipeline-card">
+      <h4>P1: Todo App <span class="badge badge-blue">TypeScript/React</span></h4>
+      <div class="pipeline-stat"><span class="pl-label">Files indexed</span><span class="pl-value">31</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Sections</span><span class="pl-value">38</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Symbols</span><span class="pl-value">134</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Folders</span><span class="pl-value">17</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Chunks</span><span class="pl-value">350</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Graph nodes</span><span class="pl-value">235</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Graph edges</span><span class="pl-value">1,163</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Entities</span><span class="pl-value">11</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Synthesis nodes</span><span class="pl-value">4</span></div>
+      <div class="entity-tags">
+        <span class="entity-tag">Express.js</span>
+        <span class="entity-tag">SQLite</span>
+        <span class="entity-tag">JWT</span>
+        <span class="entity-tag">Nuxt</span>
+        <span class="entity-tag">Tailwind CSS</span>
+        <span class="entity-tag">React</span>
+        <span class="entity-tag">MongoDB</span>
+        <span class="entity-tag">Docker</span>
+      </div>
+    </div>
+
+    <div class="pipeline-card">
+      <h4>P2: Literature <span class="badge badge-blue">Sherlock Holmes EPUB</span></h4>
+      <div class="pipeline-stat"><span class="pl-label">Files indexed</span><span class="pl-value">1</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Sections</span><span class="pl-value">33</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Chunks</span><span class="pl-value">2,056</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Graph nodes</span><span class="pl-value">43</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Graph edges</span><span class="pl-value">126</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Entities</span><span class="pl-value">8</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Synthesis nodes</span><span class="pl-value">1</span></div>
+      <div class="entity-tags">
+        <span class="entity-tag">Sherlock Holmes</span>
+        <span class="entity-tag">John Watson</span>
+        <span class="entity-tag">Baker Street</span>
+        <span class="entity-tag">Irene Adler</span>
+        <span class="entity-tag">Professor Moriarty</span>
+        <span class="entity-tag">A Scandal in Bohemia</span>
+      </div>
+    </div>
+
+    <div class="pipeline-card">
+      <h4>P3: Project Docs <span class="badge badge-blue">ADRs, Issues, Sprints</span></h4>
+      <div class="pipeline-stat"><span class="pl-label">Files indexed</span><span class="pl-value">11</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Sections</span><span class="pl-value">84</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Folders</span><span class="pl-value">3</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Chunks</span><span class="pl-value">160</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Graph nodes</span><span class="pl-value">116</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Graph edges</span><span class="pl-value">383</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Entities</span><span class="pl-value">14</span></div>
+      <div class="pipeline-stat"><span class="pl-label">Synthesis nodes</span><span class="pl-value">4</span></div>
+      <div class="entity-tags">
+        <span class="entity-tag">Todo App</span>
+        <span class="entity-tag">Svelte</span>
+        <span class="entity-tag">Express.js</span>
+        <span class="entity-tag">SQLite</span>
+        <span class="entity-tag">PostgreSQL</span>
+        <span class="entity-tag">JWT</span>
+        <span class="entity-tag">Docker Compose</span>
+        <span class="entity-tag">GitHub Actions</span>
+      </div>
+    </div>
+  </div>
+
+</div><!-- tech-details -->
+
+<div class="footer">
+  <p>Acervo &mdash; Context proxy for AI applications. Graph-based memory for indexed projects and conversations.</p>
+  <p style="margin-top:0.5rem;">Generated from benchmark data &mdash; <a href="https://github.com/sandyeveliz/acervo" style="color:#58a6ff;text-decoration:none;">github.com/sandyeveliz/acervo</a></p>
+</div>
+
+</div><!-- .container -->
+
+<script>
+// Efficiency chart data
+const efficiencyData = [
+  { turn: 1, cat: "RESOLVE", q: "How many files does this project have?", agent: 3500, acervo: 828, project: "P1" },
+  { turn: 2, cat: "GROUND", q: "What technologies does this project use?", agent: 8000, acervo: 801, project: "P1" },
+  { turn: 5, cat: "RESOLVE", q: "What routes does the API define?", agent: 6000, acervo: 833, project: "P1" },
+  { turn: 13, cat: "RESOLVE", q: "How does the frontend communicate with the backend?", agent: 9000, acervo: 827, project: "P1" },
+  { turn: 14, cat: "GROUND", q: "Does this project use GraphQL?", agent: 4000, acervo: 801, project: "P1" },
+  { turn: 15, cat: "GROUND", q: "Is there a Python backend?", agent: 3500, acervo: 828, project: "P1" },
+  { turn: 16, cat: "RESOLVE", q: "What data models are defined?", agent: 7000, acervo: 823, project: "P1" },
+  { turn: 18, cat: "RESOLVE", q: "What error handling does the API have?", agent: 6500, acervo: 826, project: "P1" },
+  { turn: 1, cat: "RESOLVE", q: "What is this book about?", agent: 12000, acervo: 413, project: "P2" },
+  { turn: 2, cat: "RESOLVE", q: "How many stories does it contain?", agent: 15000, acervo: 485, project: "P2" },
+  { turn: 3, cat: "GROUND", q: "Who is Sherlock Holmes?", agent: 8000, acervo: 511, project: "P2" },
+  { turn: 6, cat: "GROUND", q: "Who is Irene Adler?", agent: 10000, acervo: 478, project: "P2" },
+  { turn: 11, cat: "GROUND", q: "Does Professor Moriarty appear?", agent: 5000, acervo: 305, project: "P2" },
+  { turn: 12, cat: "RESOLVE", q: "Where does Holmes live?", agent: 10000, acervo: 503, project: "P2" },
+  { turn: 15, cat: "GROUND", q: "By Arthur Conan Doyle, right?", agent: 5000, acervo: 413, project: "P2" },
+  { turn: 1, cat: "RESOLVE", q: "What project is documented here?", agent: 4000, acervo: 604, project: "P3" },
+  { turn: 2, cat: "RESOLVE", q: "What documents are available?", agent: 2000, acervo: 526, project: "P3" },
+  { turn: 4, cat: "GROUND", q: "What's the tech stack?", agent: 5000, acervo: 601, project: "P3" },
+  { turn: 7, cat: "RESOLVE", q: "What milestones are defined?", agent: 6000, acervo: 528, project: "P3" },
+  { turn: 12, cat: "GROUND", q: "Why was SQLite chosen over PostgreSQL?", agent: 5500, acervo: 604, project: "P3" },
+  { turn: 13, cat: "RESOLVE", q: "Who are the developers?", agent: 7000, acervo: 210, project: "P3" },
+  { turn: 15, cat: "GROUND", q: "Is there a CI/CD pipeline?", agent: 3500, acervo: 656, project: "P3" },
+  { turn: 16, cat: "RESOLVE", q: "Issues related to current sprint?", agent: 9000, acervo: 596, project: "P3" },
+  { turn: 19, cat: "GROUND", q: "Is Ron Weasley part of this project?", agent: 3000, acervo: 601, project: "P3" },
+];
+
+// Build labels
+const labels = efficiencyData.map(d => d.project + " T" + d.turn);
+const shortLabels = efficiencyData.map(d => {
+  const q = d.q.length > 30 ? d.q.substring(0, 28) + "..." : d.q;
+  return q;
+});
+
+new Chart(document.getElementById('efficiency-chart'), {
+  type: 'bar',
+  data: {
+    labels: shortLabels,
+    datasets: [
+      {
+        label: 'Agent + Tools',
+        data: efficiencyData.map(d => d.agent),
+        backgroundColor: '#f8514988',
+        borderColor: '#f85149',
+        borderWidth: 1,
+      },
+      {
+        label: 'Acervo',
+        data: efficiencyData.map(d => d.acervo),
+        backgroundColor: '#23863688',
+        borderColor: '#238636',
+        borderWidth: 1,
+      }
+    ]
+  },
+  options: {
+    responsive: true,
+    indexAxis: 'y',
+    plugins: {
+      legend: { labels: { color: '#8b949e' } },
+      tooltip: {
+        callbacks: {
+          title: function(ctx) {
+            const d = efficiencyData[ctx[0].dataIndex];
+            return d.project + " Turn " + d.turn + " [" + d.cat + "]";
+          },
+          afterTitle: function(ctx) {
+            return efficiencyData[ctx[0].dataIndex].q;
+          },
+          label: function(ctx) {
+            const d = efficiencyData[ctx.dataIndex];
+            const ratio = (d.agent / d.acervo).toFixed(1);
+            return ctx.dataset.label + ": " + ctx.raw.toLocaleString() + " tokens" +
+              (ctx.datasetIndex === 1 ? " (" + ratio + "x savings)" : "");
+          }
+        }
+      }
+    },
+    scales: {
+      x: {
+        ticks: { color: '#8b949e' },
+        grid: { color: '#30363d22' },
+        title: { display: true, text: 'Input Tokens', color: '#8b949e' }
+      },
+      y: {
+        ticks: { color: '#8b949e', font: { size: 10 } },
+        grid: { color: '#30363d22' },
+      }
+    }
+  }
+});
+
+function toggleDetails() {
+  const el = document.getElementById('tech-details');
+  const btn = event.target;
+  el.classList.toggle('show');
+  btn.textContent = el.classList.contains('show')
+    ? 'Hide Diagnostics & Pipeline Details'
+    : 'Show Diagnostics & Pipeline Details';
+}
+</script>
+</body>
+</html>
