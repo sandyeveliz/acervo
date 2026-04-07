@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Acervo v0.5.0 Benchmark Report</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+:root{--bg:#fafaf9;--text:#1c1917;--muted:#78716c;--accent:#2563eb;--success:#16a34a;--warning:#d97706;--danger:#dc2626;--card:#fff;--border:#e7e5e4;--highlight:#dbeafe}
+*{margin:0;padding:0;box-sizing:border-box}html{scroll-behavior:smooth}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);line-height:1.7}
+.c{max-width:860px;margin:0 auto;padding:0 1.5rem}
+h1,h2,h3{font-family:'Instrument Serif',serif;font-weight:400}
+h1{font-size:3rem;line-height:1.1;margin-bottom:.5rem}
+h2{font-size:1.75rem;margin:3.5rem 0 1rem}
+p{margin-bottom:1rem;color:#44403c}
+.tl{font-size:1.15rem;color:var(--muted);margin-bottom:2rem}
+.meta{font-size:.85rem;color:var(--muted);letter-spacing:.03em}
+.hero{padding:5rem 0 3rem;text-align:center}
+.sr{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin:2.5rem 0}
+.st{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.5rem 1rem;text-align:center}
+.sv{font-size:2.25rem;font-weight:700;color:var(--accent)}
+.sl{font-size:.8rem;color:var(--muted);margin-top:.25rem}
+section{padding:1rem 0}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.75rem;margin:1.5rem 0}
+.cw{position:relative;margin:1.5rem 0}
+.co{background:var(--highlight);border-radius:10px;padding:1.5rem 2rem;margin:1.5rem 0;text-align:center}
+.cb{font-size:2.5rem;font-weight:700;color:var(--accent)}
+.cs{font-size:.9rem;color:var(--muted);margin-top:.5rem}
+.pp{display:flex;align-items:center;justify-content:center;gap:.5rem;flex-wrap:wrap;margin:1.5rem 0}
+.ps{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1rem 1.25rem;text-align:center;min-width:120px}
+.ps strong{display:block;font-size:1rem;color:var(--accent)}
+.ps span{font-size:.75rem;color:var(--muted)}
+.pa{color:var(--muted);font-size:1.25rem}
+.ex{border-left:3px solid var(--accent);padding-left:1.25rem;margin:1rem 0}
+.et{margin-bottom:1rem}
+.eu{font-weight:600}
+.em{font-size:.8rem;color:var(--muted)}
+.er{font-size:.85rem;color:var(--success);font-weight:500}
+.cg{display:grid;grid-template-columns:repeat(5,1fr);gap:.75rem;margin:1rem 0}
+.cc{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1rem;text-align:center}
+.cv{font-size:1.75rem;font-weight:700}
+.cn{font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.sp{color:var(--success)}.sw{color:var(--warning)}.sf{color:var(--danger)}
+table{width:100%;border-collapse:collapse;margin:1rem 0;font-size:.9rem}
+th{text-align:left;padding:.6rem .75rem;border-bottom:2px solid var(--border);font-weight:600;color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.04em}
+td{padding:.6rem .75rem;border-bottom:1px solid var(--border)}
+.b{display:inline-block;padding:.15rem .5rem;border-radius:4px;font-size:.75rem;font-weight:600}
+.bp{background:#dcfce7;color:var(--success)}.bf{background:#fee2e2;color:var(--danger)}
+.gi{margin-bottom:1rem}
+.gt{font-weight:600;color:var(--warning)}
+.gd{font-size:.9rem;color:#57534e}
+footer{text-align:center;padding:3rem 0;border-top:1px solid var(--border);margin-top:3rem;color:var(--muted);font-size:.85rem}
+footer a{color:var(--accent);text-decoration:none}
+@media(max-width:640px){h1{font-size:2rem}.sr{grid-template-columns:repeat(2,1fr)}.cg{grid-template-columns:repeat(3,1fr)}.pp{flex-direction:column}.pa{transform:rotate(90deg)}}
+</style>
+</head>
+<body>
+<div class="c">
+
+<div class="hero">
+<h1>Acervo</h1>
+<p class="tl">Semantic compression layer for AI agents.<br>Your agent's context window is finite. Acervo makes it infinite.</p>
+<div class="sr">
+<div class="st"><div class="sv">21x</div><div class="sl">vs Agent efficiency</div></div>
+<div class="st"><div class="sv">100%</div><div class="sl">Ground Truth</div></div>
+<div class="st"><div class="sv">79</div><div class="sl">Turns Tested</div></div>
+<div class="st"><div class="sv">3</div><div class="sl">Domains</div></div>
+</div>
+<p class="meta">v0.5.0 &middot; April 2026 &middot; Apache 2.0 &middot; Open Source</p>
+</div>
+
+<section>
+<h2>The Problem</h2>
+<p>Every AI chat sends the entire conversation history on every turn. Turn 1 costs 200 tokens. Turn 50 costs 9,000. Turn 100 hits the context window limit and starts losing information.</p>
+<div class="cw"><canvas id="ch1" height="220"></canvas></div>
+<p style="text-align:center;font-size:.85rem;color:var(--muted)">Acervo replaces growing history with a constant ~350 tokens of compressed knowledge.</p>
+</section>
+
+<section>
+<h2>How It Works</h2>
+<div class="pp">
+<div class="ps"><strong>S1</strong><span>Extract entities<br>&amp; topics</span></div>
+<span class="pa">&rarr;</span>
+<div class="ps"><strong>S2</strong><span>Search graph<br>by topic (BFS)</span></div>
+<span class="pa">&rarr;</span>
+<div class="ps"><strong>S3</strong><span>Compress to<br>~350 tokens</span></div>
+<span class="pa">&rarr;</span>
+<div class="ps"><strong>LLM</strong><span>Responds with<br>graph knowledge</span></div>
+</div>
+<p style="text-align:center;margin-top:.5rem">After the LLM responds, <strong>S1.5</strong> extracts new knowledge back into the graph. The graph grows. The context doesn't.</p>
+</section>
+
+<section>
+<h2>Live Example</h2>
+<p>Real data from the C1 test scenario. The graph grows as the user talks, and retrieval uses BFS traversal from the topic seed.</p>
+<div class="card">
+<div class="ex">
+<div class="et"><div class="eu">&#x1F464; "Tenemos 4 proyectos: Butaco con Angular, Checkear con React y Supabase, Walletfy con Next.js y Supabase, Altovallestudio con Next.js y Firebase"</div><div class="em">S1 extracts 9 entities, 18 edges &middot; Graph: 9 nodes</div></div>
+<div class="et"><div class="eu">&#x1F464; "&iquest;Qu&eacute; proyectos usan Supabase?"</div><div class="em">S2 BFS from Supabase &rarr; HOT: Supabase &middot; WARM: Checkear, Walletfy</div><div class="er">&#x1F916; "Checkear y Walletfy usan Supabase." &mdash; 81 tokens of context</div></div>
+<div class="et"><div class="eu">&#x1F464; "&iquest;Y cu&aacute;les usan Firebase?"</div><div class="em">S2 BFS from Firebase &rarr; HOT: Firebase &middot; WARM: Butaco, Altovallestudio</div><div class="er">&#x1F916; "Butaco y Altovallestudio." &mdash; same graph, different traversal</div></div>
+</div>
+</div>
+<p style="text-align:center"><strong>The graph grows. The context doesn't. Turn 50 costs the same as turn 2.</strong></p>
+</section>
+
+<section>
+<h2>The Efficiency Story</h2>
+<p>An agent with tools makes 2&ndash;3 tool calls per question, consuming 7,000+ tokens. Acervo answers the same questions with ~350 tokens and zero tool calls.</p>
+<div class="cw"><canvas id="ch2" height="280"></canvas></div>
+<div class="co"><div class="cb">21x</div><div class="cs">fewer tokens than an agent with tools &middot; same questions, same correct answers<br>12x in v0.4 &rarr; 21x in v0.5 (format compression)</div></div>
+</section>
+
+<section>
+<h2>What We Test</h2>
+<div class="cg">
+<div class="cc"><div class="cv sp">85%</div><div class="cn">Resolve</div></div>
+<div class="cc"><div class="cv sp">100%</div><div class="cn">Ground</div></div>
+<div class="cc"><div class="cv sw">67%</div><div class="cn">Recall</div></div>
+<div class="cc"><div class="cv sp">100%</div><div class="cn">Focus</div></div>
+<div class="cc"><div class="cv sp">89%</div><div class="cn">Adapt</div></div>
+</div>
+<div class="cw"><canvas id="ch3" height="260"></canvas></div>
+<div class="card">
+<p><strong>RESOLVE (85%)</strong> &mdash; Can Acervo answer questions that need project knowledge? A stateless LLM can't. An agent needs 3 tool calls. Acervo has it in the graph.</p>
+<p><strong>GROUND (100%)</strong> &mdash; Does Acervo prevent hallucination? "Does this project use GraphQL?" &mdash; Acervo checks the graph: no GraphQL node.</p>
+<p><strong>RECALL (67%)</strong> &mdash; Can Acervo remember facts from earlier? Our weakest category. Improving extraction = improving recall.</p>
+<p><strong>FOCUS (100%)</strong> &mdash; Does Acervo send only relevant context? When you ask about auth, only auth nodes arrive.</p>
+<p style="margin-bottom:0"><strong>ADAPT (89%)</strong> &mdash; Can Acervo handle topic changes? BFS starts from a different seed node &mdash; context switches instantly.</p>
+</div>
+</section>
+
+<section>
+<h2>Graph Quality</h2>
+<p>v0.5 introduced automated quality specs: verify the graph contains what it SHOULD and doesn't contain what it SHOULDN'T. No more phantom entities.</p>
+<table>
+<tr><th>Project</th><th>Checks</th><th>Entities</th><th>Nodes</th><th>Edges</th></tr>
+<tr><td>P1 Code (Todo App)</td><td><span class="b bp">28/28</span></td><td>7</td><td>231</td><td>1,109</td></tr>
+<tr><td>P2 Literature (Sherlock Holmes)</td><td><span class="b bp">21/21</span></td><td>5</td><td>40</td><td>307</td></tr>
+<tr><td>P3 PM Docs</td><td><span class="b bp">32/32</span></td><td>6</td><td>108</td><td>331</td></tr>
+</table>
+</section>
+
+<section>
+<h2>Conversation Scenarios</h2>
+<p>v0.4 only worked with pre-indexed projects. v0.5 adds real-time conversation memory: as you chat, the knowledge graph grows. Every fact becomes a node. Every relationship becomes an edge.</p>
+<div class="cw"><canvas id="ch4" height="220"></canvas></div>
+<table>
+<tr><th>Scenario</th><th>Turns</th><th>Passed</th><th>Graph</th><th>Entity Acc</th></tr>
+<tr><td>C1: Multi-project Portfolio</td><td>10</td><td><span class="b bp">7/10</span></td><td>13n / 27e</td><td>72%</td></tr>
+<tr><td>C2: Personal Knowledge</td><td>6</td><td><span class="b bf">3/6</span></td><td>5n / 4e</td><td>60%</td></tr>
+<tr><td>C3: Progressive Building</td><td>8</td><td><span class="b bp">7/8</span></td><td>6n / 5e</td><td>83%</td></tr>
+</table>
+</section>
+
+<section>
+<h2>v0.4 &rarr; v0.5</h2>
+<table>
+<tr><th>Metric</th><th>v0.4.0</th><th>v0.5.0</th><th>Change</th></tr>
+<tr><td>Architecture</td><td>God module (1,848 LOC)</td><td>Hexagonal (~200 LOC)</td><td><span class="b bp">Refactor</span></td></tr>
+<tr><td>GROUND accuracy</td><td>92%</td><td>100%</td><td class="sp">+8%</td></tr>
+<tr><td>Efficiency ratio</td><td>12.1x</td><td>21.3x</td><td class="sp">+76%</td></tr>
+<tr><td>Conversation pipeline</td><td>Not working</td><td>71% pass rate</td><td><span class="b bp">NEW</span></td></tr>
+<tr><td>BFS semantic layers</td><td>Not working</td><td>HOT/WARM/COLD</td><td><span class="b bp">NEW</span></td></tr>
+<tr><td>Graph quality specs</td><td>None</td><td>85/85 checks</td><td><span class="b bp">NEW</span></td></tr>
+<tr><td>warm_tokens &gt; 0 (conv)</td><td>0%</td><td>80%+</td><td class="sp">&uarr;</td></tr>
+<tr><td>RESOLVE accuracy</td><td>100%</td><td>85%</td><td class="sw">-15%</td></tr>
+</table>
+</section>
+
+<section>
+<h2>Known Gaps</h2>
+<p>v0.5 is not perfect. Here's what we know doesn't work well yet.</p>
+<div class="card">
+<div class="gi"><span class="gt">RECALL: 67%</span><div class="gd">S1 doesn't always extract facts from the assistant's response. Fix: more S1.5 training examples in fine-tune v3.</div></div>
+<div class="gi"><span class="gt">RESOLVE dropped 100% &rarr; 85%</span><div class="gd">BFS-based S2 is more precise but sometimes misses the right seed node. Fix: combine BFS with keyword fallback in v0.6.</div></div>
+<div class="gi"><span class="gt">Person extraction in non-technical context</span><div class="gd">The model misses person names outside code discussions. Fix: more diverse training data.</div></div>
+<div class="gi" style="margin-bottom:0"><span class="gt">S1 intent: 78% accuracy</span><div class="gd">Over-classifies as "overview" when it should be "specific." Fix: more intent training examples.</div></div>
+</div>
+</section>
+
+</div>
+
+<footer><div class="c">
+<p>Acervo &mdash; Semantic compression layer for AI agents.</p>
+<p>Todo est&aacute; p&uacute;blico. El c&oacute;digo, el training data, el modelo &mdash; todo open source bajo Apache 2.0.</p>
+<p><a href="https://github.com/sandyeveliz/acervo">GitHub</a> &middot; <a href="https://huggingface.co/SandyVeliz">HuggingFace</a> &middot; <a href="https://sandyeveliz.github.io/acervo">Docs</a> &middot; <a href="https://pypi.org/project/acervo/">PyPI</a></p>
+</div></footer>
+
+<script>
+new Chart(document.getElementById('ch1'),{type:'line',data:{labels:[1,10,20,30,40,50,60,70,80,90,100],datasets:[{label:'Without Acervo',data:[200,1800,3600,5400,7200,9000,10800,12600,14400,16200,18000],borderColor:'#dc2626',borderWidth:2,fill:false,tension:.1,pointRadius:0},{label:'Classic RAG',data:[200,2500,2500,2500,2500,2500,2500,2500,2500,2500,2500],borderColor:'#d97706',borderWidth:2,borderDash:[6,3],fill:false,tension:0,pointRadius:0},{label:'With Acervo',data:[200,350,350,350,350,350,350,350,350,350,350],borderColor:'#16a34a',borderWidth:3,fill:false,tension:0,pointRadius:0}]},options:{responsive:true,plugins:{legend:{position:'bottom',labels:{font:{family:'DM Sans'}}}},scales:{x:{title:{display:true,text:'Turn',font:{family:'DM Sans'}},grid:{display:false}},y:{title:{display:true,text:'Tokens per turn',font:{family:'DM Sans'}},grid:{color:'#e7e5e4'}}}}});
+new Chart(document.getElementById('ch2'),{type:'bar',data:{labels:['Book overview','How many stories?','Who is Sherlock?','Who are devs?','Why SQLite?','API routes?','FE↔BE comms?','Ron Weasley?'],datasets:[{label:'Agent + Tools',data:[12000,15000,8000,7000,5500,6000,9000,3000],backgroundColor:'#fca5a5',borderColor:'#dc2626',borderWidth:1},{label:'Acervo',data:[181,181,154,218,157,280,452,157],backgroundColor:'#86efac',borderColor:'#16a34a',borderWidth:1}]},options:{indexAxis:'y',responsive:true,plugins:{legend:{position:'bottom',labels:{font:{family:'DM Sans'}}}},scales:{x:{title:{display:true,text:'Input tokens',font:{family:'DM Sans'}},grid:{color:'#e7e5e4'}},y:{grid:{display:false},ticks:{font:{size:11,family:'DM Sans'}}}}}});
+new Chart(document.getElementById('ch3'),{type:'radar',data:{labels:['RESOLVE','GROUND','RECALL','FOCUS','ADAPT'],datasets:[{label:'v0.4.0',data:[100,92,67,100,100],borderColor:'#94a3b8',backgroundColor:'rgba(148,163,184,.1)',borderWidth:1,borderDash:[4,4],pointRadius:3},{label:'v0.5.0',data:[85,100,67,100,89],borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,.1)',borderWidth:2,pointRadius:4}]},options:{responsive:true,plugins:{legend:{position:'bottom',labels:{font:{family:'DM Sans'}}}},scales:{r:{beginAtZero:true,max:100,ticks:{stepSize:25,font:{family:'DM Sans'}},grid:{color:'#e7e5e4'},pointLabels:{font:{size:12,family:'DM Sans'}}}}}});
+new Chart(document.getElementById('ch4'),{type:'line',data:{labels:['T1','T2','T3','T4','T5','T6','T7','T8','T9','T10'],datasets:[{label:'Nodes',data:[9,11,11,11,11,12,12,13,13,13],borderColor:'#2563eb',fill:false,tension:.3,pointRadius:4},{label:'Edges',data:[18,24,24,24,24,26,26,27,27,27],borderColor:'#16a34a',fill:false,tension:.3,pointRadius:4},{label:'Warm Tokens',data:[246,221,103,59,0,147,143,7,358,358],borderColor:'#d97706',fill:false,tension:.3,pointRadius:4,yAxisID:'y1'}]},options:{responsive:true,plugins:{legend:{position:'bottom',labels:{font:{family:'DM Sans'}}}},scales:{y:{title:{display:true,text:'Count',font:{family:'DM Sans'}},grid:{color:'#e7e5e4'}},y1:{position:'right',title:{display:true,text:'Warm Tokens',font:{family:'DM Sans'}},grid:{drawOnChartArea:false}}}}});
+</script>
+</body>
+</html>
