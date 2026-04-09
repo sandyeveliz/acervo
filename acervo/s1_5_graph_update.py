@@ -22,7 +22,7 @@ from acervo.extractor import (
     _clean_response,
     _parse_first_json,
 )
-from acervo.graph import TopicGraph, _make_id
+from acervo.graph.ids import _make_id
 from acervo.layers import Layer
 from acervo.llm import LLMClient
 from acervo.ontology import map_extractor_type
@@ -30,17 +30,9 @@ from acervo.ontology import map_extractor_type
 log = logging.getLogger(__name__)
 
 
-# ── Default prompt (overridden by s1_5_graph_update.txt) ──
+from acervo.prompts import load_prompt
 
-_DEFAULT_PROMPT = """\
-You are a knowledge graph curator. Analyze the new entities and assistant response.
-Return JSON with: merges, new_relations, type_corrections, discards,
-assistant_entities, assistant_facts, assistant_relations.
-
-New entities: {new_entities}
-Existing nodes: {existing_nodes}
-Assistant response: {current_assistant_msg}
-"""
+_DEFAULT_PROMPT = load_prompt("s1_5_graph_update")
 
 
 # ── Data types ──
@@ -242,11 +234,15 @@ def _parse_s1_5_response(raw: str) -> S1_5Result:
 # ── Graph application ──
 
 def apply_s1_5_result(
-    graph: TopicGraph,
+    graph: object,  # GraphStorePort — works with TopicGraph or LadybugGraphStore
     result: S1_5Result,
     owner: str = "",
 ) -> dict:
-    """Apply S1.5 curation actions to the graph. Returns audit log."""
+    """Apply S1.5 curation actions to the graph. Returns audit log.
+
+    Uses only GraphStorePort methods (no dict mutation) so it works
+    with both TopicGraph (JSON) and LadybugGraphStore (LadybugDB).
+    """
     audit: dict = {
         "merges_applied": 0,
         "type_corrections": 0,
@@ -256,7 +252,7 @@ def apply_s1_5_result(
         "facts_added": 0,
     }
 
-    # 1. Apply merges
+    # 1. Apply merges — use graph.merge_nodes() instead of dict mutation
     for merge in result.merges:
         from_node = graph.get_node(merge.from_id)
         into_node = graph.get_node(merge.into_id)
@@ -264,44 +260,34 @@ def apply_s1_5_result(
             log.info("S1.5 merge skipped (node not found): %s → %s", merge.from_id, merge.into_id)
             continue
 
-        # Move facts from source to target
-        from_facts = from_node.get("facts", [])
-        if from_facts:
-            into_node.setdefault("facts", []).extend(from_facts)
+        ok = graph.merge_nodes(merge.into_id, merge.from_id)
+        if ok:
+            audit["merges_applied"] += 1
+            log.info("S1.5 merged: %s → %s (%s)", merge.from_id, merge.into_id, merge.reason)
 
-        # Move attributes
-        from_attrs = from_node.get("attributes", {})
-        if from_attrs:
-            into_node.setdefault("attributes", {}).update(from_attrs)
+    # ── OntologyValidator for S1.5 ──
+    from acervo.graph.ontology_validator import OntologyValidator
+    validator = OntologyValidator(
+        source_stage="s1_5",
+        session_id=getattr(graph, "session_id", ""),
+    )
 
-        # Re-point edges
-        for edge in graph.get_edges_for(merge.from_id):
-            if edge["source"] == merge.from_id:
-                edge["source"] = merge.into_id
-            if edge["target"] == merge.from_id:
-                edge["target"] = merge.into_id
-
-        # Remove the duplicate node
-        graph.remove_node(merge.from_id)
-        audit["merges_applied"] += 1
-        log.info("S1.5 merged: %s → %s (%s)", merge.from_id, merge.into_id, merge.reason)
-
-    # 2. Apply type corrections
+    # 2. Apply type corrections — validate new_type before applying
     for tc in result.type_corrections:
         node = graph.get_node(tc.node_id)
         if not node:
             continue
         old = node.get("type", "")
-        node["type"] = tc.new_type
+        vt = validator.validate_entity_type(tc.new_type, entity_name=tc.node_id)
+        graph.update_node(tc.node_id, type=vt.resolved)
         audit["type_corrections"] += 1
-        log.info("S1.5 type fix: %s %s → %s (%s)", tc.node_id, old, tc.new_type, tc.reason)
+        log.info("S1.5 type fix: %s %s → %s (%s)", tc.node_id, old, vt.resolved, tc.reason)
 
     # 3. Apply discards
     for discard in result.discards:
         node = graph.get_node(discard.node_id)
         if not node:
             continue
-        # Only discard nodes without significant facts
         facts = node.get("facts", [])
         if len(facts) > 2:
             log.info("S1.5 discard skipped (has %d facts): %s", len(facts), discard.node_id)
@@ -310,22 +296,27 @@ def apply_s1_5_result(
         audit["discards"] += 1
         log.info("S1.5 discarded: %s (%s)", discard.node_id, discard.reason)
 
-    # 4. Add new relations
+    # 4. Add new relations — validate relation types
     if result.new_relations:
-        relations = [(r.source, r.target, r.relation) for r in result.new_relations]
-        graph.upsert_entities(
-            [],
-            relations,
-            layer=Layer.PERSONAL,
-            source="s1_5_curation",
-            owner=owner or None,
-        )
-        audit["relations_added"] += len(result.new_relations)
+        validated = []
+        for r in result.new_relations:
+            vr = validator.validate_relation(r.relation, entity_name=r.source)
+            if vr.resolved is not None:
+                validated.append((r.source, r.target, vr.resolved))
+        if validated:
+            graph.upsert_entities(
+                [], validated,
+                layer=Layer.PERSONAL,
+                source="s1_5_curation",
+                owner=owner or None,
+            )
+        audit["relations_added"] += len(validated)
 
-    # 5. Persist assistant entities + facts
+    # 5. Persist assistant entities + facts — validate types and relations
     ext = result.assistant_extraction
     if ext.entities:
         for entity in ext.entities:
+            vt = validator.validate_entity_type(entity.type, entity_name=entity.name)
             layer = Layer.UNIVERSAL if entity.layer == "UNIVERSAL" else Layer.PERSONAL
             entity_facts = [
                 (f.entity, f.fact, f.source)
@@ -333,7 +324,7 @@ def apply_s1_5_result(
                 if f.entity == entity.name
             ]
             graph.upsert_entities(
-                [(entity.name, entity.type)],
+                [(entity.name, vt.resolved)],
                 None,
                 entity_facts if entity_facts else None,
                 layer=layer,
@@ -343,17 +334,27 @@ def apply_s1_5_result(
             audit["entities_added"] += 1
             audit["facts_added"] += len(entity_facts)
 
-        # Add assistant relations
         if ext.relations:
-            relations = [(r.source, r.target, r.relation) for r in ext.relations]
-            graph.upsert_entities(
-                [],
-                relations,
-                layer=Layer.PERSONAL,
-                source="assistant_response",
-                owner=owner or None,
-            )
-            audit["relations_added"] += len(ext.relations)
+            validated_rels = []
+            for r in ext.relations:
+                vr = validator.validate_relation(r.relation, entity_name=r.source)
+                if vr.resolved is not None:
+                    validated_rels.append((r.source, r.target, vr.resolved))
+            if validated_rels:
+                graph.upsert_entities(
+                    [], validated_rels,
+                    layer=Layer.PERSONAL,
+                    source="assistant_response",
+                    owner=owner or None,
+                )
+            audit["relations_added"] += len(validated_rels)
+
+    # Log validation summary
+    log_entries = validator.drain_log()
+    mapped = sum(1 for e in log_entries if e.action == "mapped")
+    rejected = sum(1 for e in log_entries if e.action == "rejected")
+    if mapped or rejected:
+        log.info("S1.5 validation: %d mapped, %d rejected", mapped, rejected)
 
     graph.save()
     return audit

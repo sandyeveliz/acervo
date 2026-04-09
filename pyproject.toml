@@ -41,6 +41,7 @@ tree-sitter = [
     "tree-sitter-html>=0.23",
     "tree-sitter-css>=0.23",
 ]
+graphdb = ["real_ladybug"]
 docs = ["mkdocs-material"]
 dev = [
     "pytest", "pytest-asyncio", "pyyaml", "mkdocs-material", "aiohttp>=3.9",

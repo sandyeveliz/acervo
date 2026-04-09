@@ -71,7 +71,7 @@ class OpenAIClient:
     Usage:
         client = OpenAIClient(
             base_url="http://localhost:11434/v1",
-            model="acervo-extractor-v3-Q4_K_M",
+            model="qwen2.5:3b",
             api_key="ollama",
         )
         response = await client.chat([{"role": "user", "content": "hi"}])

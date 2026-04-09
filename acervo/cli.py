@@ -86,7 +86,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     print("Next steps:")
     print("  1. Configure your model:")
     print("     acervo config set model.url http://localhost:1234/v1")
-    print("     acervo config set model.name qwen2.5-3b-instruct")
+    print("     acervo config set model.name qwen2.5:3b")
     print()
     print("  2. Index your project:")
     print("     acervo index .")

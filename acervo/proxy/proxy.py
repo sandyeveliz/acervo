@@ -68,8 +68,17 @@ class AcervoProxy:
         self._app.router.add_get("/acervo/graph/nodes", self._handle_graph_list)
         self._app.router.add_get("/acervo/graph/search", self._handle_graph_search)
         self._app.router.add_get("/acervo/graph/nodes/{node_id}", self._handle_graph_get)
+        self._app.router.add_post("/acervo/graph/nodes", self._handle_graph_create)
+        self._app.router.add_patch("/acervo/graph/nodes/{node_id}", self._handle_graph_update)
         self._app.router.add_delete("/acervo/graph/nodes/{node_id}", self._handle_graph_delete)
+        self._app.router.add_get("/acervo/graph/edges", self._handle_graph_edges_list)
+        self._app.router.add_post("/acervo/graph/edges", self._handle_graph_edge_create)
+        self._app.router.add_delete("/acervo/graph/edges", self._handle_graph_edge_delete)
+        self._app.router.add_get("/acervo/graph/orphans", self._handle_graph_orphans)
+        self._app.router.add_get("/acervo/graph/stats", self._handle_graph_stats)
+        self._app.router.add_get("/acervo/graph/validation-log", self._handle_validation_log)
         self._app.router.add_post("/acervo/graph/merge", self._handle_graph_merge)
+        self._app.router.add_post("/acervo/graph/export/training", self._handle_export_training)
         # Document management
         self._app.router.add_post("/acervo/documents", self._handle_document_upload)
         self._app.router.add_get("/acervo/documents", self._handle_documents_list)
@@ -563,6 +572,183 @@ class AcervoProxy:
             return web.json_response({"error": "one or both nodes not found"}, status=404)
         graph.save()
         return web.json_response({"merged": {"keep": keep_id, "absorbed": absorb_id}})
+
+    # ── New graph CRUD handlers ──
+
+    async def _handle_graph_create(self, request: web.Request) -> web.Response:
+        """POST /acervo/graph/nodes — create node. Body: {label, type, layer?, facts?}."""
+        graph = self._require_graph()
+        body = await request.json()
+        label = body.get("label", "")
+        ntype = body.get("type", "concept")
+        if not label:
+            return web.json_response({"error": "missing label"}, status=400)
+        from acervo.graph.ids import _make_id
+        from acervo.layers import Layer
+        layer = Layer.UNIVERSAL if body.get("layer") == "UNIVERSAL" else Layer.PERSONAL
+        facts_raw = body.get("facts", [])
+        facts = [(label, f, "api") for f in facts_raw] if facts_raw else None
+        graph.upsert_entities([(label, ntype)], facts=facts, layer=layer, source="api")
+        graph.save()
+        nid = _make_id(label)
+        node = graph.get_node(nid)
+        return web.json_response(node, status=201)
+
+    async def _handle_graph_update(self, request: web.Request) -> web.Response:
+        """PATCH /acervo/graph/nodes/{node_id} — edit type, label, description."""
+        graph = self._require_graph()
+        node_id = request.match_info["node_id"]
+        node = graph.get_node(node_id)
+        if not node:
+            return web.json_response({"error": f"node not found: {node_id}"}, status=404)
+        body = await request.json()
+        updates = {}
+        for field in ("label", "type"):
+            if field in body:
+                updates[field] = body[field]
+        if "description" in body:
+            attrs = dict(node.get("attributes", {}))
+            attrs["description"] = body["description"]
+            updates["attributes"] = attrs
+        if updates:
+            graph.update_node(node["id"], **updates)
+            graph.save()
+        return web.json_response(graph.get_node(node["id"]))
+
+    async def _handle_graph_edges_list(self, request: web.Request) -> web.Response:
+        """GET /acervo/graph/edges — list edges. Filters: relation, source, target."""
+        graph = self._require_graph()
+        nodes = graph.get_all_nodes()
+        all_edges: list[dict] = []
+        seen: set[tuple] = set()
+        for n in nodes:
+            for e in graph.get_edges_for(n.get("id", "")):
+                key = (e.get("source"), e.get("target"), e.get("relation"))
+                if key not in seen:
+                    seen.add(key)
+                    all_edges.append(e)
+        # Apply filters
+        rel_filter = request.query.get("relation")
+        src_filter = request.query.get("source")
+        tgt_filter = request.query.get("target")
+        if rel_filter:
+            all_edges = [e for e in all_edges if e.get("relation") == rel_filter]
+        if src_filter:
+            all_edges = [e for e in all_edges if e.get("source") == src_filter]
+        if tgt_filter:
+            all_edges = [e for e in all_edges if e.get("target") == tgt_filter]
+        return web.json_response(all_edges)
+
+    async def _handle_graph_edge_create(self, request: web.Request) -> web.Response:
+        """POST /acervo/graph/edges — body: {source, target, relation, weight?}."""
+        graph = self._require_graph()
+        body = await request.json()
+        src = body.get("source", "")
+        tgt = body.get("target", "")
+        rel = body.get("relation", "")
+        if not src or not tgt or not rel:
+            return web.json_response({"error": "missing source, target, or relation"}, status=400)
+        weight = body.get("weight", 1.0)
+        ok = graph.add_edge(src, tgt, rel, weight=weight, edge_type="semantic")
+        if not ok:
+            return web.json_response({"error": "edge exists or nodes not found"}, status=409)
+        graph.save()
+        return web.json_response({"created": {"source": src, "target": tgt, "relation": rel}}, status=201)
+
+    async def _handle_graph_edge_delete(self, request: web.Request) -> web.Response:
+        """DELETE /acervo/graph/edges — body or query: {source, target, relation}."""
+        graph = self._require_graph()
+        src = request.query.get("source", "")
+        tgt = request.query.get("target", "")
+        rel = request.query.get("relation", "")
+        if not src or not tgt or not rel:
+            return web.json_response({"error": "missing source, target, or relation"}, status=400)
+        ok = graph.remove_edge(src, tgt, rel)
+        if not ok:
+            return web.json_response({"error": "edge not found"}, status=404)
+        graph.save()
+        return web.json_response({"deleted": {"source": src, "target": tgt, "relation": rel}})
+
+    async def _handle_graph_orphans(self, request: web.Request) -> web.Response:
+        """GET /acervo/graph/orphans — nodes with 0 edges."""
+        graph = self._require_graph()
+        orphans = []
+        for node in graph.get_all_nodes():
+            nid = node.get("id", "")
+            if not graph.get_edges_for(nid):
+                orphans.append(node)
+        return web.json_response(orphans)
+
+    async def _handle_graph_stats(self, request: web.Request) -> web.Response:
+        """GET /acervo/graph/stats — type/relation distribution."""
+        graph = self._require_graph()
+        nodes = graph.get_all_nodes()
+        type_dist: dict[str, int] = {}
+        kind_dist: dict[str, int] = {}
+        layer_dist: dict[str, int] = {}
+        for n in nodes:
+            t = n.get("type", "unknown")
+            type_dist[t] = type_dist.get(t, 0) + 1
+            k = n.get("kind", "entity")
+            kind_dist[k] = kind_dist.get(k, 0) + 1
+            la = n.get("layer", "PERSONAL")
+            layer_dist[la] = layer_dist.get(la, 0) + 1
+        # Relations
+        rel_dist: dict[str, int] = {}
+        seen: set[tuple] = set()
+        for n in nodes:
+            for e in graph.get_edges_for(n.get("id", "")):
+                key = (e.get("source"), e.get("target"), e.get("relation"))
+                if key not in seen:
+                    seen.add(key)
+                    r = e.get("relation", "unknown")
+                    rel_dist[r] = rel_dist.get(r, 0) + 1
+        return web.json_response({
+            "node_count": graph.node_count,
+            "edge_count": graph.edge_count,
+            "types": type_dist,
+            "kinds": kind_dist,
+            "layers": layer_dist,
+            "relations": rel_dist,
+        })
+
+    async def _handle_validation_log(self, request: web.Request) -> web.Response:
+        """GET /acervo/graph/validation-log — query validation log (LadybugDB only)."""
+        graph = self._require_graph()
+        if not hasattr(graph, "_conn"):
+            return web.json_response({"error": "validation-log requires LadybugDB backend"}, status=501)
+        try:
+            r = graph._conn.execute(
+                "MATCH (v:ValidationLog) RETURN v.* ORDER BY v.timestamp DESC LIMIT 100"
+            )
+            cols = r.get_column_names()
+            entries = []
+            while r.has_next():
+                row = r.get_next()
+                entries.append({c.split(".")[-1]: v for c, v in zip(cols, row)})
+            return web.json_response(entries)
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_export_training(self, request: web.Request) -> web.Response:
+        """POST /acervo/graph/export/training — export validation log as JSONL."""
+        graph = self._require_graph()
+        if not hasattr(graph, "_conn"):
+            return web.json_response({"error": "export requires LadybugDB backend"}, status=501)
+        try:
+            r = graph._conn.execute("MATCH (v:ValidationLog) RETURN v.*")
+            cols = r.get_column_names()
+            lines = []
+            while r.has_next():
+                row = r.get_next()
+                entry = {c.split(".")[-1]: v for c, v in zip(cols, row)}
+                lines.append(json.dumps(entry, ensure_ascii=False))
+            return web.Response(
+                text="\n".join(lines),
+                content_type="application/jsonl",
+            )
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
 
     # ── Document management handlers ──
 

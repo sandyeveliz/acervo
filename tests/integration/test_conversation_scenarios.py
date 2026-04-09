@@ -116,7 +116,7 @@ async def _run_conversation(scenario_name: str) -> ConversationResult:
     with tempfile.TemporaryDirectory() as tmpdir:
         llm = OpenAIClient(
             base_url="http://localhost:11434/v1",
-            model="acervo-extractor-v3-Q4_K_M",
+            model="acervo-extractor-v3",
             api_key="ollama",
         )
         acervo = Acervo(

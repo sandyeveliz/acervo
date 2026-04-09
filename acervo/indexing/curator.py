@@ -30,43 +30,10 @@ log = logging.getLogger(__name__)
 BATCH_SIZE = 10
 MAX_SUMMARY_LEN = 200
 
-_CURATION_SYSTEM = """\
-You are an entity and fact extractor for project files. Output valid JSON only. No explanation."""
+from acervo.prompts import load_prompt
 
-_CURATION_PROMPT = """\
-You are an entity and fact extractor for project files.
-Extract structured knowledge from the project files below.
-
-═══ RULES ═══
-- Extract only what is explicitly stated. Do not infer or invent.
-- Extract at least 3-5 entities per batch (technologies, people, concepts, locations).
-- Use node IDs (provided in parentheses) when referencing existing files.
-- Valid types: person, organization, project, technology, place, event, document, concept
-- Valid relations: part_of, created_by, uses_technology, depends_on, appears_in, documented_in, related_to
-
-═══ OUTPUT FORMAT ═══
-Return ONLY valid JSON:
-
-{{
-  "entities": [
-    {{
-      "name": "exact name from text",
-      "type": "person | technology | concept",
-      "layer": "UNIVERSAL"
-    }}
-  ],
-  "relations": [
-    {{"source": "entity_name_or_node_id", "target": "entity_name_or_node_id", "relation": "verb_phrase"}}
-  ],
-  "facts": [
-    {{"entity": "entity_name_or_node_id", "fact": "specific verifiable claim", "source": "curation"}}
-  ]
-}}
-
-PROJECT FILES:
-{files_block}
-
-JSON:"""
+_CURATION_SYSTEM = load_prompt("curation_system")
+_CURATION_PROMPT = load_prompt("curation")
 
 
 @dataclass

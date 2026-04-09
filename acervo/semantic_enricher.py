@@ -465,50 +465,30 @@ class SemanticEnricher:
 
     def _build_summary_prompt(self, chunk: Chunk, content_type: str) -> str:
         """Build the LLM prompt for semantic summarization."""
+        from acervo.prompts import load_prompt
         if content_type == "prose":
-            return f"""Analyze this text passage and provide:
-1. A 1-2 sentence summary of what happens or what it covers
-2. A flat list of topic strings: characters, locations, themes, plot elements, time periods, objects, or concepts mentioned
-3. Any relationships to other parts of the work (e.g., "introduces character X", "references events from chapter Y", "continues the theme of Z")
+            template = load_prompt("enricher_prose")
+        else:
+            template = load_prompt("enricher_code")
+        return template.format(
+            file_path=chunk.file_path,
+            entity_name=chunk.entity_name,
+            entity_kind=chunk.entity_kind,
+            language=getattr(chunk, "language", ""),
+            content=chunk.content[:3000],
+        )
 
-File: {chunk.file_path}
-Section: {chunk.entity_name} ({chunk.entity_kind})
-
-Text:
-{chunk.content[:3000]}
-
-Respond ONLY with valid JSON, no markdown. Topics must be plain strings, not objects:
-{{"summary": "one sentence", "topics": ["Harry Potter", "Hogwarts", "magic"], "implicit_relations": ["introduces X", "references Y"]}}"""
-
-        return f"""Analyze this code chunk and provide:
-1. A 1-2 sentence summary of what it does
-2. A flat list of topic strings (e.g., authentication, database, CRUD, validation, routing, UI rendering)
-3. Any implicit relationships not visible from imports (e.g., "this middleware protects these routes by convention", "this is called when the user clicks submit")
-
-File: {chunk.file_path}
-Language: {chunk.language}
-Entity: {chunk.entity_name} ({chunk.entity_kind})
-
-Code:
-{chunk.content[:3000]}
-
-Respond ONLY with valid JSON, no markdown. Topics must be plain strings, not objects:
-{{"summary": "one sentence", "topics": ["auth", "database"], "implicit_relations": ["calls X", "used by Y"]}}"""
-
-    _ENRICHER_SYSTEM_PROMPT = (
-        "You are a strict semantic analyzer. "
-        "Analyze text or code and return a single JSON object with summary, topics, and implicit_relations. "
-        "Topics must be a flat list of plain strings — never objects or nested structures. "
-        "Output valid JSON only, no markdown, no explanation."
-    )
+    _ENRICHER_SYSTEM_PROMPT = ""  # loaded lazily below
 
     async def _summarize_chunk(self, chunk: Chunk) -> SemanticSummary:
         """Call the LLM to generate a semantic summary for one chunk."""
+        from acervo.prompts import load_prompt
         prompt = self._build_summary_prompt(chunk, self._effective_content_type)
+        system_prompt = load_prompt("enricher_system")
 
         response = await self._llm.chat(
             [
-                {"role": "system", "content": self._ENRICHER_SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt},
             ],
             temperature=0.0,

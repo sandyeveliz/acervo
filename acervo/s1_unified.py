@@ -1,7 +1,7 @@
 """S1 Unified — combined topic classifier + knowledge extractor.
 
 Runs ALWAYS before S2 Gather. L1/L2 results are passed as hints, not gates.
-Uses the fine-tuned acervo-extractor model with a fixed prompt format.
+Uses the utility model (qwen2.5:3b by default) with a structured prompt.
 
 Output: S1Result with topic classification + entities/relations/facts.
 """
@@ -28,28 +28,13 @@ from acervo.topic_detector import TopicVerdict
 log = logging.getLogger(__name__)
 
 
-# ── Fixed system prompt for the fine-tuned extractor model ──
+# ── System prompt for the extractor model ──
 
-_SYSTEM_PROMPT = (
-    "You are a strict knowledge extractor for a personal knowledge graph. "
-    "Analyze the conversation and return a single JSON object with topic "
-    "classification, entities, relations, and facts. "
-    "Only extract entities that are EXPLICITLY named in the conversation. "
-    "Do not infer entities, relations, or facts that are not directly stated. "
-    "If an entity is referenced by nickname or shortened name, use ONLY that form. "
-    "Also classify the user's INTENT as one of: "
-    '"overview" (user asks about the project as a whole: inventory, structure, '
-    '"what do we have?", "how many?", listing), '
-    '"specific" (user asks about specific content: a chapter, a character, a file, a concept), '
-    '"followup" (user continues the previous topic with more depth or a related sub-question), '
-    '"chat" (general conversation not about project content). '
-    'Include "intent": "overview"|"specific"|"followup"|"chat" at the top level of your JSON output. '
-    'Also include "retrieval": "summary_only" (node summaries are sufficient) '
-    'or "with_chunks" (detailed indexed content is needed to answer). '
-    "Output valid JSON only, no markdown, no explanation."
-)
+from acervo.prompts import load_prompt
 
-# Valid relation types the fine-tuned model produces
+_SYSTEM_PROMPT = load_prompt("s1_unified")
+
+# Valid relation types the extractor model produces
 _VALID_RELATIONS: frozenset[str] = frozenset({
     "part_of", "created_by", "maintains", "works_at", "member_of",
     "uses_technology", "depends_on", "alternative_to",
@@ -57,7 +42,7 @@ _VALID_RELATIONS: frozenset[str] = frozenset({
     "participated_in", "triggered_by", "resulted_in",
 })
 
-# Valid entity types the fine-tuned model produces
+# Valid entity types the extractor model produces
 _VALID_ENTITY_TYPES: frozenset[str] = frozenset({
     "person", "organization", "project", "technology",
     "place", "event", "document", "concept",
@@ -145,7 +130,7 @@ def build_graph_summary(
     if not top_nodes:
         return "[]"
 
-    # Build compact entries matching the fine-tuned model's expected format
+    # Build compact entries matching the extractor model's expected format
     items = []
     for n in top_nodes:
         entry: dict = {
@@ -180,7 +165,7 @@ def generate_topic_hint(
     l2_verdict: TopicVerdict | None,
     current_topic: str,
 ) -> str:
-    """Generate a topic hint string from L1/L2 results for the fine-tuned model."""
+    """Generate a topic hint string from L1/L2 results for the extractor model."""
     if l1_keyword:
         return "same (high confidence from keyword match)"
 
@@ -204,8 +189,8 @@ def generate_topic_hint(
 class S1Unified:
     """Combined topic classifier + knowledge extractor.
 
-    Uses the fine-tuned acervo-extractor model with a fixed system+user
-    message format. Always runs on every turn. L1/L2 provide hints, not gates.
+    Uses the utility model with a structured system+user message format.
+    Always runs on every turn. L1/L2 provide hints, not gates.
     """
 
     def __init__(self, llm: LLMClient, system_prompt: str | None = None) -> None:
@@ -219,10 +204,11 @@ class S1Unified:
         current_topic: str,
         topic_hint: str,
         existing_nodes_summary: str,
+        existing_node_names: set[str] | None = None,
     ) -> S1Result:
         """Execute S1 Unified: topic classification + extraction in one LLM call.
 
-        Builds the exact system+user message format the fine-tuned model expects.
+        Builds the system+user message format the extractor model expects.
         """
         # Limit previous assistant to first 150 chars — enough for followup detection
         # but too short to dominate topic classification with hallucinated topics
@@ -251,6 +237,7 @@ class S1Unified:
             return _fallback_result(current_topic)
 
         raw = _clean_response(raw_response)
+        log.debug("S1 raw response:\n%s", raw[:2000])
         result = _parse_s1_response(raw)
 
         # Retry once with lower temperature if JSON parse failed
@@ -271,7 +258,7 @@ class S1Unified:
 
         # Validate extraction against conversation text
         combined_text = f"{user_msg} {prev_assistant_msg}"
-        result = _validate_s1(result, combined_text)
+        result = _validate_s1(result, combined_text, existing_node_names or set())
 
         # Attach debug data for telemetry
         result.prompt_sent = json.dumps(messages, ensure_ascii=False)
@@ -283,7 +270,7 @@ class S1Unified:
 # ── Parser ──
 
 def _parse_s1_response(raw: str) -> S1Result:
-    """Parse the JSON output from the fine-tuned extractor model.
+    """Parse the JSON output from the extractor model.
 
     The model outputs fields: id, label (for entities), text (for facts).
     Falls back to name/fact fields for backwards compatibility.
@@ -296,8 +283,8 @@ def _parse_s1_response(raw: str) -> S1Result:
             extraction=ExtractionResult(),
         )
 
-    # Parse topic — fine-tuned model returns {"action": ..., "label": ...},
-    # generic models may return a plain string (e.g. "Proyectos")
+    # Parse topic — model returns {"action": ..., "label": ...},
+    # or a plain string (e.g. "Proyectos")
     topic_raw = obj.get("topic", {})
     if isinstance(topic_raw, str):
         # Generic model returned topic as string — treat as new topic
@@ -320,19 +307,29 @@ def _parse_s1_response(raw: str) -> S1Result:
 
     topic = TopicResult(action=action, label=label)
 
-    # Parse intent (v2 adds "followup")
-    intent = obj.get("intent", "specific")
-    if not isinstance(intent, str) or intent not in ("overview", "specific", "followup", "chat"):
+    # Parse intent — supports both flat string and nested {"type": ..., "retrieval": ...}
+    intent_raw = obj.get("intent", "specific")
+    if isinstance(intent_raw, dict):
+        intent = str(intent_raw.get("type", "specific")).strip()
+        retrieval = intent_raw.get("retrieval")
+        if retrieval is not None:
+            retrieval = str(retrieval).strip()
+            if retrieval not in ("summary_only", "with_chunks"):
+                retrieval = None
+    elif isinstance(intent_raw, str):
+        intent = intent_raw.strip()
+        retrieval = obj.get("retrieval")
+        if retrieval is not None:
+            if not isinstance(retrieval, str) or retrieval not in ("summary_only", "with_chunks"):
+                retrieval = None
+    else:
+        intent = "specific"
+        retrieval = None
+    if intent not in ("overview", "specific", "followup", "chat"):
         intent = "specific"
 
-    # Parse retrieval hint (v2 model only — None means v1/fallback)
-    retrieval = obj.get("retrieval")
-    if retrieval is not None:
-        if not isinstance(retrieval, str) or retrieval not in ("summary_only", "with_chunks"):
-            retrieval = None
-
-    # Parse entities — fine-tuned model uses "label" and "id", with nested "facts".
-    # Generic models may return plain strings instead of objects — handle both.
+    # Parse entities — model uses "label" and "id", with nested "facts".
+    # May also return plain strings instead of objects — handle both.
     entities: list[Entity] = []
     entity_facts: list[ExtractedFact] = []  # collected from nested entity facts
     for e_raw in obj.get("entities", []):
@@ -344,7 +341,7 @@ def _parse_s1_response(raw: str) -> S1Result:
             continue
         if not isinstance(e_raw, dict):
             continue
-        # Fine-tuned model: "label" field. Fallback: "name" for compat.
+        # Primary: "label" field. Fallback: "name" for compat.
         name = str(e_raw.get("label", "") or e_raw.get("name", "")).strip()
         raw_type = str(e_raw.get("type", "")).strip()
         if not name:
@@ -362,9 +359,13 @@ def _parse_s1_response(raw: str) -> S1Result:
         existing_id = e_raw.get("existing_id")
         if existing_id and isinstance(existing_id, str) and existing_id.lower() not in ("null", "none"):
             attrs["_existing_id"] = existing_id
+        # Preserve description for graph summary
+        description = e_raw.get("description")
+        if description and isinstance(description, str) and description.strip():
+            attrs["description"] = description.strip()
         entities.append(Entity(name=name, type=mapped_type, layer=layer, attributes=attrs))
 
-        # Collect nested facts from entity (fine-tuned model format)
+        # Collect nested facts from entity
         for f_raw in e_raw.get("facts", []):
             if not isinstance(f_raw, dict):
                 continue
@@ -418,7 +419,7 @@ def _parse_s1_response(raw: str) -> S1Result:
             str(r_raw.get("relation", "")).strip(),
         )
 
-    # Nested relations inside entities (fine-tuned model format)
+    # Nested relations inside entities
     # Use entity LABEL (not model-generated ID) for relation source,
     # so _make_id(label) in graph matches the node ID.
     for e_raw in obj.get("entities", []):
@@ -437,12 +438,14 @@ def _parse_s1_response(raw: str) -> S1Result:
                 str(r_raw.get("relation", "")).strip(),
             )
 
-    # Parse top-level facts (about existing entities) — "text" or "fact" field
+    # Parse top-level facts — supports both "entity" and "entity_id" keys
     facts: list[ExtractedFact] = []
     for f_raw in obj.get("facts", []):
         if not isinstance(f_raw, dict):
             continue
-        entity = str(f_raw.get("entity", "")).strip()
+        entity = str(f_raw.get("entity", "") or f_raw.get("entity_id", "")).strip()
+        # Resolve entity_id to label if possible
+        entity = _resolve_name(entity) if entity else ""
         fact_text = str(f_raw.get("text", "") or f_raw.get("fact", "")).strip()
         speaker = str(f_raw.get("speaker", "user")).strip().lower()
         if speaker not in ("user", "assistant"):
@@ -506,7 +509,10 @@ def _is_garbage_entity(name: str) -> bool:
     return False
 
 
-def _validate_s1(result: S1Result, conversation_text: str) -> S1Result:
+def _validate_s1(
+    result: S1Result, conversation_text: str,
+    existing_node_names: set[str] | None = None,
+) -> S1Result:
     """Post-parse validation: reject hallucinated entities, vague relations/facts."""
     conv_lower = conversation_text.lower()
     ext = result.extraction
@@ -527,6 +533,11 @@ def _validate_s1(result: S1Result, conversation_text: str) -> S1Result:
         valid_entities.append(e)
         valid_names_lower.add(name_lower)
 
+    # Facts can reference entities from this turn OR existing graph nodes
+    fact_valid_names = set(valid_names_lower)
+    if existing_node_names:
+        fact_valid_names |= {n.lower() for n in existing_node_names}
+
     # Filter relations: must reference valid entities, no vague relation names
     valid_relations = [
         r for r in ext.relations
@@ -542,10 +553,10 @@ def _validate_s1(result: S1Result, conversation_text: str) -> S1Result:
         log.info("S1: capped relations from %d to %d", len(valid_relations), max_edges)
         valid_relations = valid_relations[:max_edges]
 
-    # Filter facts: reject vague/short, must reference valid entity
+    # Filter facts: reject vague/short, must reference valid entity or existing node
     valid_facts: list[ExtractedFact] = []
     for f in ext.facts:
-        if f.entity.lower() not in valid_names_lower:
+        if f.entity.lower() not in fact_valid_names:
             continue
         fact_lower = f.fact.lower().strip()
         if len(fact_lower) < 10:

@@ -53,76 +53,10 @@ class ExtractionResult:
 
 # ── Prompts ──
 
-_CONVERSATION_PROMPT = """You are an entity extractor. Analyze ONLY the conversation below.
+from acervo.prompts import load_prompt
 
-CRITICAL RULES:
-- Extract ONLY entities explicitly named in the CONVERSATION below.
-- Do NOT invent entities. If a name does not appear in the text, do NOT include it.
-- Common words, greetings, and verbs are NOT entities. Only extract proper nouns.
-- If the conversation has no extractable entities, return {{"entities":[],"relations":[],"facts":[]}}
-
-ENTITIES — each has:
-- "name": exact name from conversation
-- "type": person | organization | project | technology | place | event | document | concept
-- "layer": "PERSONAL" if the user owns/possesses it (my project, my dog, my team) or "UNIVERSAL" if it is public knowledge (a city, a framework, a fictional character)
-
-RELATIONS — directed, typed edges between entities:
-- Only create relations explicitly stated or strongly implied in the conversation.
-- Each relation must have "source", "target", "relation".
-- Valid relations: part_of, created_by, maintains, works_at, member_of, uses_technology, depends_on, alternative_to, located_in, deployed_on, produces, serves, documented_in, participated_in, triggered_by, resulted_in
-- Do NOT create co_mentioned or generic "related_to" as a fallback. If no specific relation exists, do not create one.
-
-FACTS — specific claims from the conversation:
-- Each fact has "entity", "fact" (a specific claim, not vague), "speaker" ("user" or "assistant").
-- Good fact: "Sandy lives in Neuquén" — Bad fact: "Sandy was mentioned"
-- Only record facts explicitly stated. Never infer.
-
-Output valid JSON only. No explanation.
-
-CONVERSATION TO ANALYZE:
-User: {user_msg}
-Assistant: {assistant_msg}
-
-JSON:"""
-
-_SEARCH_PROMPT = """You are an entity and fact extractor for search results.
-Extract structured knowledge from the search results below about: "{query}".
-
-═══ RULES ═══
-- Extract only what is explicitly stated. Do not infer or invent.
-- ALL entities from search results have layer "UNIVERSAL".
-- NEVER create relations that connect to user-personal entities.
-- Only create relations between entities BOTH found in these search results.
-- Use precise verb phrases for relations. Skip if you can't name it.
-- Valid types: person, organization, project, technology, place, event, document, concept
-- Valid relations: part_of, created_by, maintains, works_at, member_of, uses_technology, depends_on, alternative_to, located_in, deployed_on, produces, serves, documented_in, participated_in, triggered_by, resulted_in
-
-═══ OUTPUT FORMAT ═══
-Return ONLY valid JSON:
-
-{{
-  "entities": [
-    {{
-      "id": "snake_case_id",
-      "name": "exact name from text",
-      "type": "person | organization | project | technology | place | event | document | concept",
-      "layer": "UNIVERSAL",
-      "attributes": {{}},
-      "facts": [{{"text": "specific claim", "speaker": "assistant"}}]
-    }}
-  ],
-  "relations": [
-    {{"source": "entity_id", "target": "entity_id", "relation": "verb_phrase"}}
-  ],
-  "facts": [
-    {{"entity": "entity_id", "text": "specific verifiable claim", "speaker": "assistant"}}
-  ]
-}}
-
-SEARCH RESULTS:
-{text}
-
-JSON:"""
+_CONVERSATION_PROMPT = load_prompt("extractor_conversation")
+_SEARCH_PROMPT = load_prompt("extractor_search")
 
 
 # ── Shared JSON parsing ──
@@ -181,7 +115,7 @@ def _clean_response(content: str) -> str:
 # ── Extractors ──
 
 VALID_TYPES = frozenset((
-    # Core types (matching fine-tuned model + S1.5 schema)
+    # Core types (matching extractor model + S1.5 schema)
     "person", "organization", "project", "technology",
     "place", "event", "document", "concept",
     # Legacy types (accepted for backward compatibility, mapped by ontology)
@@ -193,7 +127,7 @@ VALID_TYPES = frozenset((
     "universo", "editorial",
 ))
 VALID_RELATIONS = frozenset((
-    # Core relations (matching fine-tuned model + S1.5 schema)
+    # Core relations (matching extractor model + S1.5 schema)
     "part_of", "created_by", "maintains", "works_at", "member_of",
     "uses_technology", "depends_on", "alternative_to",
     "located_in", "deployed_on", "produces", "serves", "documented_in",

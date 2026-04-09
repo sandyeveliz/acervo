@@ -1,0 +1,14 @@
+Analyze this code chunk and provide:
+1. A 1-2 sentence summary of what it does
+2. A flat list of topic strings (e.g., authentication, database, CRUD, validation, routing, UI rendering)
+3. Any implicit relationships not visible from imports (e.g., "this middleware protects these routes by convention", "this is called when the user clicks submit")
+
+File: {file_path}
+Language: {language}
+Entity: {entity_name} ({entity_kind})
+
+Code:
+{content}
+
+Respond ONLY with valid JSON, no markdown. Topics must be plain strings, not objects:
+{{"summary": "one sentence", "topics": ["auth", "database"], "implicit_relations": ["calls X", "used by Y"]}}

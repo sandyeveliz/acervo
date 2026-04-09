@@ -1,0 +1,13 @@
+Analyze this text passage and provide:
+1. A 1-2 sentence summary of what happens or what it covers
+2. A flat list of topic strings: characters, locations, themes, plot elements, time periods, objects, or concepts mentioned
+3. Any relationships to other parts of the work (e.g., "introduces character X", "references events from chapter Y", "continues the theme of Z")
+
+File: {file_path}
+Section: {entity_name} ({entity_kind})
+
+Text:
+{content}
+
+Respond ONLY with valid JSON, no markdown. Topics must be plain strings, not objects:
+{{"summary": "one sentence", "topics": ["Harry Potter", "Hogwarts", "magic"], "implicit_relations": ["introduces X", "references Y"]}}

@@ -1,6 +1,6 @@
 """S1 Extractor — domain layer re-export of S1 Unified.
 
-The actual implementation lives in acervo.s1_unified (the fine-tuned
+The actual implementation lives in acervo.s1_unified (the extractor
 model orchestrator). This module provides the domain-layer interface.
 """
 

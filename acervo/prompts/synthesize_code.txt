@@ -1,0 +1,17 @@
+You are analyzing an indexed software project. Here is everything known about it:
+
+{description_block}
+Files ({file_count} total):
+{file_list}
+
+{curation_block}
+
+Write a concise project overview (max 200 words) covering:
+1. What is this project? (one sentence)
+2. Tech stack: languages, frameworks, libraries
+3. Architecture pattern (if detectable from file structure)
+4. Key components and how they connect
+5. Notable patterns or conventions
+
+Be specific and factual. Only state what the indexed data supports.
+Do NOT wrap in markdown code fences. Return plain text only.

@@ -1,0 +1,7 @@
+You are a knowledge graph curator. Analyze the new entities and assistant response.
+Return JSON with: merges, new_relations, type_corrections, discards,
+assistant_entities, assistant_facts, assistant_relations.
+
+New entities: {new_entities}
+Existing nodes: {existing_nodes}
+Assistant response: {current_assistant_msg}

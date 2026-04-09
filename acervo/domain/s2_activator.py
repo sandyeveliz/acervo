@@ -37,7 +37,18 @@ class S2Activator:
         seeds = self._find_seeds(user_text, s1_result, graph, intent)
 
         # ── Step 2: BFS traversal with depth layers ──
-        layered = self._traverse(graph, seeds, max_depth=2)
+        # Use graph.traverse_bfs() if available (Cypher-backed), else Python BFS
+        seed_ids = [s.get("id", "") for s in seeds if s.get("id")]
+        if hasattr(graph, "traverse_bfs") and seed_ids:
+            depth_map = graph.traverse_bfs(seed_ids, max_depth=2)
+            layered = LayeredContext(
+                hot=depth_map.get(0, []),
+                warm=depth_map.get(1, []),
+                cold=depth_map.get(2, []),
+                seeds_used=[s.get("label", "") for s in seeds],
+            )
+        else:
+            layered = self._traverse(graph, seeds, max_depth=2)
 
         # ── Step 3: Optional vector search (adds to warm) ──
         vector_hits: list[dict] = []
@@ -179,6 +190,4 @@ class S2Activator:
             return []
 
 
-def _make_id(name: str) -> str:
-    """Stable node ID from name (must match graph.py:_make_id)."""
-    return name.lower().strip().replace(" ", "_")
+from acervo.graph.ids import _make_id  # noqa: E402 — shared ID generation

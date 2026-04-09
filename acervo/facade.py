@@ -32,7 +32,8 @@ from acervo.context_builder import (
     select_chunks_by_budget,
     format_chunks_compact,
 )
-from acervo.graph import TopicGraph, _make_id
+from acervo.graph import TopicGraph
+from acervo.graph.ids import _make_id
 from acervo.extractor import (
     ConversationExtractor,
     SearchExtractor,
@@ -130,9 +131,11 @@ class Acervo:
         structural_parser: object | None = None,
         role_llms: dict[str, LLMClient] | None = None,
         description: str = "",
+        graph_backend: str = "json",
     ) -> None:
         self._project_description = description
-        self._graph = TopicGraph(Path(persist_path))
+        self._graph = self._create_graph(Path(persist_path), graph_backend)
+
         self._llm = llm
         p = prompts or {}
         roles = role_llms or {}
@@ -229,6 +232,15 @@ class Acervo:
 
         return cls._from_project(project, llm=llm, **overrides)
 
+    @staticmethod
+    def _create_graph(persist_path: Path, backend: str = "json"):
+        """Factory: create graph store based on backend config."""
+        if backend == "ladybug":
+            from acervo.adapters.ladybug_store import LadybugGraphStore
+            db_path = persist_path.parent / "graphdb" / "acervo.db"
+            return LadybugGraphStore(db_path)
+        return TopicGraph(persist_path)
+
     @classmethod
     def _from_project(
         cls,
@@ -280,6 +292,7 @@ class Acervo:
             prompts=merged_prompts,
             role_llms=role_llms if role_llms else None,
             description=project.config.description,
+            graph_backend=project.config.graph_backend,
             **overrides,
         )
 
@@ -308,7 +321,7 @@ class Acervo:
         from acervo.openai_client import OpenAIClient
 
         base_url = os.environ.get("ACERVO_LIGHT_MODEL_URL", "http://localhost:11434/v1")
-        model = os.environ.get("ACERVO_LIGHT_MODEL", "acervo-extractor-v3-Q4_K_M")
+        model = os.environ.get("ACERVO_LIGHT_MODEL", "qwen2.5:3b")
         api_key = os.environ.get("ACERVO_LIGHT_API_KEY", "ollama")
 
         llm = OpenAIClient(base_url=base_url, model=model, api_key=api_key)

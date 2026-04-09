@@ -166,12 +166,14 @@ class Pipeline:
                 break
 
         # Run S1
+        existing_node_names = {n.get("label", "") for n in all_nodes if n.get("label")}
         s1_result = await self._s1.run(
             user_msg=user_text,
             prev_assistant_msg=prev_assistant_msg,
             current_topic=current_topic,
             topic_hint=topic_hint,
             existing_nodes_summary=existing_nodes_summary,
+            existing_node_names=existing_node_names,
         )
         _s1_ms = round((time.perf_counter() - _s1_t0) * 1000)
 
@@ -344,13 +346,27 @@ class Pipeline:
     def _persist_s1_entities(
         self, extraction: ExtractionResult, user_text: str, current_topic: str,
     ) -> None:
-        """Persist S1 entities, relations, and facts to the graph."""
-        from acervo.graph import _make_id
+        """Persist S1 entities, relations, and facts to the graph.
+
+        Validates entity types and relation types via OntologyValidator
+        before persisting. Invalid types are mapped; invalid relations are dropped.
+        """
+        from acervo.graph.ids import _make_id
+        from acervo.graph.ontology_validator import OntologyValidator
         from acervo.layers import Layer
         from acervo.ontology import is_likely_universal
 
+        validator = OntologyValidator(
+            source_stage="s1",
+            session_id=getattr(self._graph, "session_id", ""),
+        )
+
         for entity in extraction.entities:
-            layer = Layer.UNIVERSAL if is_likely_universal(entity.type) else Layer.PERSONAL
+            # Validate entity type
+            vt = validator.validate_entity_type(entity.type, entity_name=entity.name)
+            resolved_type = vt.resolved
+
+            layer = Layer.UNIVERSAL if is_likely_universal(resolved_type) else Layer.PERSONAL
             if entity.layer == "UNIVERSAL":
                 layer = Layer.UNIVERSAL
             elif entity.layer == "PERSONAL":
@@ -362,7 +378,7 @@ class Pipeline:
             ]
 
             self._graph.upsert_entities(
-                [(entity.name, entity.type)],
+                [(entity.name, resolved_type)],
                 None,
                 entity_facts if entity_facts else None,
                 layer=layer,
@@ -371,30 +387,31 @@ class Pipeline:
             )
 
         if extraction.relations:
-            # Build a map from model IDs to entity labels for normalization.
-            # The model may use IDs like "supabase_db" in relations but the
-            # entity was created with label "Supabase" → node ID "supabase".
             entity_label_map: dict[str, str] = {}
             for e in extraction.entities:
                 entity_label_map[e.name.lower()] = e.name
-                # Also map the model's generated ID if it has one
                 eid = e.attributes.get("_model_id") or e.name.lower().replace(" ", "_")
                 entity_label_map[eid.lower()] = e.name
 
             def _resolve(name: str) -> str:
-                """Resolve a relation endpoint to an entity label."""
                 return entity_label_map.get(name.lower(), name)
 
-            relations = [
-                (_resolve(r.source), _resolve(r.target), r.relation)
-                for r in extraction.relations
-            ]
-            self._graph.upsert_entities(
-                [], relations,
-                layer=Layer.PERSONAL,
-                source="user_assertion",
-                owner=self._owner or None,
-            )
+            # Validate each relation
+            validated_relations = []
+            for r in extraction.relations:
+                vr = validator.validate_relation(r.relation, entity_name=r.source)
+                if vr.resolved is not None:
+                    validated_relations.append(
+                        (_resolve(r.source), _resolve(r.target), vr.resolved)
+                    )
+
+            if validated_relations:
+                self._graph.upsert_entities(
+                    [], validated_relations,
+                    layer=Layer.PERSONAL,
+                    source="user_assertion",
+                    owner=self._owner or None,
+                )
 
         # Topic membership
         if current_topic != "none":
@@ -406,6 +423,14 @@ class Pipeline:
                         [], [(entity.name, current_topic, "part_of")],
                         layer=Layer.PERSONAL, source="user_assertion",
                     )
+
+        # Log validation decisions
+        log_entries = validator.drain_log()
+        if log_entries:
+            mapped = sum(1 for e in log_entries if e.action == "mapped")
+            rejected = sum(1 for e in log_entries if e.action == "rejected")
+            if mapped or rejected:
+                log.info("S1 validation: %d mapped, %d rejected", mapped, rejected)
 
         self._graph.save()
 

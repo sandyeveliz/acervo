@@ -1,0 +1,17 @@
+You are analyzing an indexed collection of documents or books. Here is everything known:
+
+{description_block}
+Files ({file_count} total):
+{file_list}
+
+{curation_block}
+
+Write a concise collection overview (max 200 words) covering:
+1. What is this collection? (one sentence)
+2. Author(s), genre, time period (if detectable)
+3. How the works relate: series order, shared universe, thematic connections
+4. Key characters, locations, or concepts across the collection
+5. Notable themes or patterns
+
+Be specific and factual. Only state what the indexed data supports.
+Do NOT wrap in markdown code fences. Return plain text only.

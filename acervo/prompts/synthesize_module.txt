@@ -1,0 +1,14 @@
+You are analyzing a group of files within a larger project. Describe what this module/group does.
+
+Group: {group_name}
+Files:
+{file_list}
+
+{curation_block}
+
+Write a concise module summary (max 100 words):
+1. What does this module/group do?
+2. Key components and their roles
+3. How they interact
+
+Be specific and factual. Return plain text only.

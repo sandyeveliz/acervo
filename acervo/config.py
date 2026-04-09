@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 class ModelConfig:
     """Configuration for the utility model used by Acervo's pipeline."""
 
-    name: str = "acervo-extractor-v3-Q4_K_M"
+    name: str = "acervo-extractor-v3"
     url: str = "http://localhost:11434/v1"
     api_key: str = ""
 
@@ -162,7 +162,7 @@ class ModelsConfig:
     Empty name = use default model.
     """
 
-    extractor: ModelConfig = field(default_factory=ModelConfig)    # S1 Unified (fine-tuned extractor)
+    extractor: ModelConfig = field(default_factory=ModelConfig)    # S1 Unified (extractor)
     summarizer: ModelConfig = field(default_factory=ModelConfig)   # hot layer compaction
 
     def resolve_for_role(self, role: str, default: ModelConfig) -> ModelConfig:
@@ -190,6 +190,7 @@ class AcervoConfig:
 
     workspace: str = "."
     data_dir: str = ".acervo/data"
+    graph_backend: str = "json"  # "json" | "ladybug"
     owner: str = ""
     description: str = ""
     model: ModelConfig = field(default_factory=ModelConfig)
@@ -235,6 +236,7 @@ class AcervoConfig:
         config = AcervoConfig(
             workspace=acervo.get("workspace", "."),
             data_dir=acervo.get("data_dir", ".acervo/data"),
+            graph_backend=acervo.get("graph_backend", "json"),
             owner=acervo.get("owner", ""),
             description=acervo.get("description", ""),
         )
@@ -359,11 +361,12 @@ class AcervoConfig:
 [acervo]
 workspace = "{self.workspace}"
 data_dir = "{self.data_dir}"
+graph_backend = "{self.graph_backend}"
 owner = "{self.owner}"
 description = "{self.description}"
 
 [acervo.model]
-# Single model for everything — fine-tuned Qwen3.5-9B handles chat + extraction.
+# Single model for everything — qwen2.5:3b handles chat + extraction.
 # Behavior is determined by the system prompt, not the model.
 name = "{self.model.name}"
 url = "{self.model.url}"

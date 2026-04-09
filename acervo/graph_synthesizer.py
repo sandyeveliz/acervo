@@ -45,62 +45,11 @@ class SynthesisResult:
 
 # ── Prompts ──
 
-_CODE_PROJECT_PROMPT = """\
-You are analyzing an indexed software project. Here is everything known about it:
+from acervo.prompts import load_prompt
 
-{description_block}
-Files ({file_count} total):
-{file_list}
-
-{curation_block}
-
-Write a concise project overview (max 200 words) covering:
-1. What is this project? (one sentence)
-2. Tech stack: languages, frameworks, libraries
-3. Architecture pattern (if detectable from file structure)
-4. Key components and how they connect
-5. Notable patterns or conventions
-
-Be specific and factual. Only state what the indexed data supports.
-Do NOT wrap in markdown code fences. Return plain text only.
-"""
-
-_LITERARY_PROJECT_PROMPT = """\
-You are analyzing an indexed collection of documents or books. Here is everything known:
-
-{description_block}
-Files ({file_count} total):
-{file_list}
-
-{curation_block}
-
-Write a concise collection overview (max 200 words) covering:
-1. What is this collection? (one sentence)
-2. Author(s), genre, time period (if detectable)
-3. How the works relate: series order, shared universe, thematic connections
-4. Key characters, locations, or concepts across the collection
-5. Notable themes or patterns
-
-Be specific and factual. Only state what the indexed data supports.
-Do NOT wrap in markdown code fences. Return plain text only.
-"""
-
-_MODULE_SUMMARY_PROMPT = """\
-You are analyzing a group of files within a larger project. Describe what this module/group does.
-
-Group: {group_name}
-Files:
-{file_list}
-
-{curation_block}
-
-Write a concise module summary (max 100 words):
-1. What does this module/group do?
-2. Key components and their roles
-3. How they interact
-
-Be specific and factual. Return plain text only.
-"""
+_CODE_PROJECT_PROMPT = load_prompt("synthesize_code")
+_LITERARY_PROJECT_PROMPT = load_prompt("synthesize_literary")
+_MODULE_SUMMARY_PROMPT = load_prompt("synthesize_module")
 
 
 # ── Main entry point ──

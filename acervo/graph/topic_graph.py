@@ -17,11 +17,10 @@ from __future__ import annotations
 
 import json
 import logging
-import re
-import unicodedata
 from datetime import datetime
 from pathlib import Path
 
+from acervo.graph.ids import _make_id, _normalize_for_dedup, make_symbol_id  # noqa: F401
 from acervo.layers import Layer, NodeMeta
 from acervo.ontology import is_known_type
 
@@ -30,30 +29,10 @@ log = logging.getLogger(__name__)
 _DEFAULT_PATH = Path("data/graph")
 
 
-def _make_id(name: str) -> str:
-    """Convert a name to a stable ASCII node ID. Strips accents."""
-    nfkd = unicodedata.normalize("NFKD", name.lower())
-    ascii_str = nfkd.encode("ascii", "ignore").decode("ascii")
-    return re.sub(r"[^a-z0-9]+", "_", ascii_str).strip("_")
-
-
-_DEDUP_STRIP = re.compile(r"[^a-z0-9\s]")
-_DEDUP_ARTICLES = re.compile(r"\b(el|la|los|las|un|una|de|del|en|the|a|an|of|in)\b")
-
-
 # Relations that are too generic — should be replaced by more specific ones
 _GENERIC_RELATIONS = frozenset({
     "related_to", "uses", "uses_technology", "belongs_to", "associated_with",
 })
-
-
-def _normalize_for_dedup(text: str) -> str:
-    """Normalize text for dedup comparison: lowercase, no punctuation, no articles."""
-    nfkd = unicodedata.normalize("NFKD", text.lower())
-    ascii_str = nfkd.encode("ascii", "ignore").decode("ascii")
-    no_punct = _DEDUP_STRIP.sub("", ascii_str)
-    no_articles = _DEDUP_ARTICLES.sub("", no_punct)
-    return " ".join(no_articles.split())
 
 
 def _default_node_meta(etype: str, owner: str | None = None) -> NodeMeta:
@@ -63,7 +42,7 @@ def _default_node_meta(etype: str, owner: str | None = None) -> NodeMeta:
     return NodeMeta.incomplete(owner=owner, pending=["type"])
 
 
-# Legacy type → canonical type (fine-tuned model uses lowercase, ontology capitalizes)
+# Legacy type → canonical type (extractor model uses lowercase, ontology capitalizes)
 _TYPE_MIGRATION: dict[str, str] = {
     "Framework": "Technology",
     "Library": "Technology",
@@ -105,20 +84,6 @@ def _migrate_node(node: dict) -> dict:
     if old_type in _TYPE_MIGRATION:
         node["type"] = _TYPE_MIGRATION[old_type]
     return node
-
-
-def make_symbol_id(file_path: str, name: str, parent: str | None = None) -> str:
-    """Build a stable ID for a structural symbol node.
-
-    Convention:
-        file: _make_id(path)
-        symbol: _make_id(path) + "__" + _make_id(name)
-        nested: _make_id(path) + "__" + _make_id(parent) + "__" + _make_id(name)
-    """
-    path_part = _make_id(file_path)
-    if parent:
-        return f"{path_part}__{_make_id(parent)}__{_make_id(name)}"
-    return f"{path_part}__{_make_id(name)}"
 
 
 class TopicGraph:
