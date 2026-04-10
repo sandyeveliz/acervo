@@ -206,6 +206,10 @@ class TopicGraph:
             encoding="utf-8",
         )
 
+    def persist_validation_log(self, entries: list) -> int:
+        """No-op: JSON backend doesn't store validation logs."""
+        return 0
+
     def upsert_entities(
         self,
         entities: list[tuple[str, str]],

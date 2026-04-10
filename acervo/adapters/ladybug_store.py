@@ -971,6 +971,39 @@ class LadybugGraphStore:
         )
         return True
 
+    # ── GraphStorePort: Validation log ────────────────────────────────────────
+
+    def persist_validation_log(self, entries: list) -> int:
+        """Persist validation log entries as ValidationLog nodes."""
+        import uuid
+        count = 0
+        for entry in entries:
+            try:
+                self._conn.execute(
+                    "CREATE (v:ValidationLog {"
+                    "id: $id, timestamp: $ts, input_type: $it, mapped_type: $mt, "
+                    "input_relation: $ir, mapped_relation: $mr, action: $action, "
+                    "reason: $reason, source_stage: $ss, entity_name: $en, "
+                    "session_id: $sid})",
+                    {
+                        "id": str(uuid.uuid4()),
+                        "ts": entry.timestamp,
+                        "it": entry.input_type,
+                        "mt": entry.mapped_type,
+                        "ir": entry.input_relation,
+                        "mr": entry.mapped_relation,
+                        "action": entry.action,
+                        "reason": entry.reason,
+                        "ss": entry.source_stage,
+                        "en": entry.entity_name,
+                        "sid": entry.session_id,
+                    },
+                )
+                count += 1
+            except Exception:
+                log.debug("Failed to persist validation log entry: %s", entry)
+        return count
+
     # ── GraphStorePort: Persistence & lifecycle ──────────────────────────────
 
     def save(self) -> None:

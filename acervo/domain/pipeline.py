@@ -424,9 +424,10 @@ class Pipeline:
                         layer=Layer.PERSONAL, source="user_assertion",
                     )
 
-        # Log validation decisions
+        # Persist validation decisions
         log_entries = validator.drain_log()
         if log_entries:
+            self._graph.persist_validation_log(log_entries)
             mapped = sum(1 for e in log_entries if e.action == "mapped")
             rejected = sum(1 for e in log_entries if e.action == "rejected")
             if mapped or rejected:
@@ -483,6 +484,13 @@ class Pipeline:
                     {"entity": f.entity, "fact": f.fact, "speaker": f.speaker}
                     for f in s1_extraction.facts[:10]
                 ],
+            },
+            "s1_validation": {
+                "raw_entities": s1_result.raw_entity_count,
+                "raw_relations": s1_result.raw_relation_count,
+                "raw_facts": s1_result.raw_fact_count,
+                "parsed_facts": len(s1_extraction.facts),
+                "dropped_facts": s1_result.dropped_facts,
             },
             "s1_prompt": s1_result.prompt_sent,
             "s1_raw_response": s1_result.raw_response,

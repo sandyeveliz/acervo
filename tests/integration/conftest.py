@@ -40,7 +40,7 @@ def llm_client():
     """Create an OpenAIClient from environment variables."""
     return OpenAIClient(
         base_url=os.getenv("ACERVO_LIGHT_MODEL_URL", "http://localhost:11434/v1"),
-        model=os.getenv("ACERVO_LIGHT_MODEL", "acervo-extractor-v3"),
+        model=os.getenv("ACERVO_LIGHT_MODEL", "qwen2.5:7b"),
         api_key=os.getenv("ACERVO_LIGHT_API_KEY", "ollama"),
     )
 

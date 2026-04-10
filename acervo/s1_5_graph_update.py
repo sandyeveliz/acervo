@@ -349,12 +349,14 @@ def apply_s1_5_result(
                 )
             audit["relations_added"] += len(validated_rels)
 
-    # Log validation summary
+    # Persist validation decisions
     log_entries = validator.drain_log()
-    mapped = sum(1 for e in log_entries if e.action == "mapped")
-    rejected = sum(1 for e in log_entries if e.action == "rejected")
-    if mapped or rejected:
-        log.info("S1.5 validation: %d mapped, %d rejected", mapped, rejected)
+    if log_entries:
+        graph.persist_validation_log(log_entries)
+        mapped = sum(1 for e in log_entries if e.action == "mapped")
+        rejected = sum(1 for e in log_entries if e.action == "rejected")
+        if mapped or rejected:
+            log.info("S1.5 validation: %d mapped, %d rejected", mapped, rejected)
 
     graph.save()
     return audit

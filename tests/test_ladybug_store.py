@@ -351,6 +351,41 @@ class TestLifecycle:
     def test_session_id(self, store):
         assert store.session_id.startswith("s_")
 
+    def test_persist_validation_log(self, store):
+        from acervo.graph.ontology_validator import ValidationLogEntry
+        entries = [
+            ValidationLogEntry(
+                timestamp="2026-04-09T12:00:00",
+                input_type="Framework",
+                mapped_type="technology",
+                action="mapped",
+                reason="synonym",
+                source_stage="s1",
+                entity_name="React",
+                session_id=store.session_id,
+            ),
+            ValidationLogEntry(
+                timestamp="2026-04-09T12:00:01",
+                input_relation="RELATED_TO",
+                mapped_relation="",
+                action="rejected",
+                reason="too generic",
+                source_stage="s1",
+                entity_name="Alice",
+                session_id=store.session_id,
+            ),
+        ]
+        count = store.persist_validation_log(entries)
+        assert count == 2
+        # Verify they're queryable
+        r = store._conn.execute(
+            "MATCH (v:ValidationLog) RETURN v.action ORDER BY v.timestamp"
+        )
+        actions = []
+        while r.has_next():
+            actions.append(r.get_next()[0])
+        assert actions == ["mapped", "rejected"]
+
     def test_dedup_log(self, store):
         store.upsert_entities(
             [("A", "person")],

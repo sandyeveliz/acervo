@@ -13,6 +13,7 @@ import logging
 from dataclasses import dataclass, field
 
 from acervo._text import strip_think_blocks
+from acervo.graph.ids import _make_id
 from acervo.extractor import (
     Entity,
     ExtractionResult,
@@ -66,6 +67,11 @@ class S1Result:
     # Debug: prompt and raw response for telemetry/annotation
     prompt_sent: str = ""       # JSON of messages array sent to extractor
     raw_response: str = ""      # Raw model output before JSON parsing
+    # Validation diagnostics (populated by _validate_s1)
+    raw_entity_count: int = 0
+    raw_relation_count: int = 0
+    raw_fact_count: int = 0
+    dropped_facts: list[dict] = field(default_factory=list)
 
 
 # ── Graph summary builder ──
@@ -509,6 +515,44 @@ def _is_garbage_entity(name: str) -> bool:
     return False
 
 
+def _fuzzy_match(name: str, candidates: set[str], threshold: float = 0.60) -> str | None:
+    """Find the best fuzzy match for a name among candidates.
+
+    Uses difflib.SequenceMatcher (Ratcliff/Obershelp) which handles
+    typos like ciplinetti→cipolletti, plus substring containment
+    and _make_id normalization for ID-level matches.
+    """
+    if not name or not candidates:
+        return None
+
+    from difflib import get_close_matches
+
+    name_lower = name.lower().strip()
+    name_id = _make_id(name)
+
+    # 1. Exact _make_id match (accents, case, punctuation)
+    for cand in candidates:
+        if _make_id(cand) == name_id:
+            return cand
+
+    # 2. Substring containment (min 4 chars to avoid matching "en", "la", etc.)
+    if len(name_lower) >= 4:
+        for cand in candidates:
+            cand_lower = cand.lower().strip()
+            if len(cand_lower) >= 4 and (name_lower in cand_lower or cand_lower in name_lower):
+                return cand
+
+    # 3. difflib fuzzy match (handles typos)
+    matches = get_close_matches(name_lower, [c.lower() for c in candidates], n=1, cutoff=threshold)
+    if matches:
+        # Return the original-case candidate
+        for cand in candidates:
+            if cand.lower() == matches[0]:
+                return cand
+
+    return None
+
+
 def _validate_s1(
     result: S1Result, conversation_text: str,
     existing_node_names: set[str] | None = None,
@@ -516,6 +560,7 @@ def _validate_s1(
     """Post-parse validation: reject hallucinated entities, vague relations/facts."""
     conv_lower = conversation_text.lower()
     ext = result.extraction
+    _existing_lower = {n.lower() for n in (existing_node_names or set())}
 
     # Filter entities: must appear in conversation text, not garbage
     valid_entities: list[Entity] = []
@@ -526,22 +571,43 @@ def _validate_s1(
             log.info("S1: rejected garbage entity: %s", e.name)
             continue
         if name_lower not in conv_lower:
-            # Also check if existing_id was set (LLM matched to graph node)
-            if not e.attributes.get("_existing_id"):
+            # Try fuzzy match against conversation text words
+            conv_words = set(conv_lower.split())
+            fuzzy = _fuzzy_match(name_lower, conv_words, threshold=0.75)
+            if fuzzy:
+                log.info("S1: fuzzy matched entity '%s' → '%s' in conversation", e.name, fuzzy)
+            elif e.attributes.get("_existing_id"):
+                pass  # LLM matched to graph node, allow
+            elif _fuzzy_match(name_lower, _existing_lower, threshold=0.75):
+                log.info("S1: fuzzy matched entity '%s' to existing graph node", e.name)
+            else:
                 log.info("S1: rejected hallucinated entity: %s", e.name)
                 continue
         valid_entities.append(e)
         valid_names_lower.add(name_lower)
 
     # Facts can reference entities from this turn OR existing graph nodes
-    fact_valid_names = set(valid_names_lower)
-    if existing_node_names:
-        fact_valid_names |= {n.lower() for n in existing_node_names}
+    # Build a combined set + fuzzy resolution map
+    fact_valid_names = set(valid_names_lower) | _existing_lower
+
+    def _resolve_fact_entity(entity_name: str) -> str | None:
+        """Resolve a fact's entity reference, with fuzzy fallback."""
+        lower = entity_name.lower()
+        if lower in fact_valid_names:
+            return entity_name
+        # Fuzzy match against all known entities
+        match = _fuzzy_match(lower, fact_valid_names, threshold=0.70)
+        if match:
+            log.info("S1: fuzzy resolved fact entity '%s' → '%s'", entity_name, match)
+            return match
+        return None
 
     # Filter relations: must reference valid entities, no vague relation names
     valid_relations = [
         r for r in ext.relations
-        if (r.source.lower() in valid_names_lower or r.target.lower() in valid_names_lower)
+        if (r.source.lower() in valid_names_lower or r.target.lower() in valid_names_lower
+            or _fuzzy_match(r.source.lower(), valid_names_lower, 0.75) is not None
+            or _fuzzy_match(r.target.lower(), valid_names_lower, 0.75) is not None)
         and r.relation.lower().replace(" ", "_") not in (
             "related_to", "co_mentioned", "is_related_to", "mentioned_with",
         )
@@ -555,14 +621,23 @@ def _validate_s1(
 
     # Filter facts: reject vague/short, must reference valid entity or existing node
     valid_facts: list[ExtractedFact] = []
+    dropped_facts: list[dict] = []
     for f in ext.facts:
-        if f.entity.lower() not in fact_valid_names:
+        resolved = _resolve_fact_entity(f.entity)
+        if resolved is None:
+            dropped_facts.append({"entity": f.entity, "text": f.fact, "reason": f"entity_not_found: {f.entity}"})
+            log.info("S1: dropped fact (entity not found): %s → %s", f.entity, f.fact[:60])
             continue
+        # Use the resolved entity name
+        if resolved != f.entity:
+            f = ExtractedFact(entity=resolved, fact=f.fact, source=f.source, speaker=f.speaker)
         fact_lower = f.fact.lower().strip()
         if len(fact_lower) < 10:
+            dropped_facts.append({"entity": f.entity, "text": f.fact, "reason": "too_short"})
             log.info("S1: rejected short fact for %s: %s", f.entity, f.fact)
             continue
         if fact_lower in _VAGUE_FACTS:
+            dropped_facts.append({"entity": f.entity, "text": f.fact, "reason": "vague"})
             log.info("S1: rejected vague fact for %s: %s", f.entity, f.fact)
             continue
         valid_facts.append(f)
@@ -576,6 +651,10 @@ def _validate_s1(
         ),
         intent=result.intent,
         retrieval=result.retrieval,
+        raw_entity_count=len(ext.entities),
+        raw_relation_count=len(ext.relations),
+        raw_fact_count=len(ext.facts),
+        dropped_facts=dropped_facts,
     )
 
 

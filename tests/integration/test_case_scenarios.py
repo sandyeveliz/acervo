@@ -72,6 +72,12 @@ class TurnResult:
     missing_facts: list[str] = field(default_factory=list)
     fact_accuracy: float = -1.0
 
+    # Fact validation diagnostics
+    raw_facts: int = 0
+    parsed_facts: int = 0
+    dropped_facts: int = 0
+    drop_reasons: list[str] = field(default_factory=list)
+
     # Graph state
     graph_nodes: int = 0
     graph_edges: int = 0
@@ -104,6 +110,12 @@ class CaseResult:
 
     # Timing
     total_elapsed_ms: int = 0
+
+    # Fact validation diagnostics
+    total_raw_facts: int = 0
+    total_parsed_facts: int = 0
+    total_dropped_facts: int = 0
+    drop_rate: float = 0.0
 
     # Failure analysis
     entity_misses: list[dict] = field(default_factory=list)
@@ -294,7 +306,7 @@ async def _run_case(case_name: str, graph_backend: str | None = None) -> CaseRes
     try:
         llm = OpenAIClient(
             base_url="http://localhost:11434/v1",
-            model="acervo-extractor-v3",
+            model="qwen2.5:7b",
             api_key="ollama",
         )
         graph_path = Path(tmpdir) / "graph"
@@ -369,6 +381,15 @@ async def _run_case(case_name: str, graph_backend: str | None = None) -> CaseRes
                     tr.failures.append(
                         f"topic: expected={tr.expected_topic_action}, got={tr.actual_topic_action}"
                     )
+
+            # ── Capture fact validation diagnostics ──
+            s1_val = debug.get("s1_validation", {})
+            tr.raw_facts = s1_val.get("raw_facts", 0)
+            tr.parsed_facts = s1_val.get("parsed_facts", 0)
+            tr.dropped_facts = tr.raw_facts - tr.parsed_facts
+            tr.drop_reasons = [
+                d.get("reason", "") for d in s1_val.get("dropped_facts", [])
+            ]
 
             # ── Run process (S1.5 — extract + persist) ──
             assistant_sim = "Entendido, lo tengo registrado."
@@ -464,6 +485,12 @@ async def _run_case(case_name: str, graph_backend: str | None = None) -> CaseRes
             final_nodes=prev_nodes,
             final_edges=prev_edges,
             total_elapsed_ms=total_ms,
+            total_raw_facts=sum(t.raw_facts for t in results),
+            total_parsed_facts=sum(t.parsed_facts for t in results),
+            total_dropped_facts=sum(t.dropped_facts for t in results),
+            drop_rate=(
+                sum(t.dropped_facts for t in results) / max(sum(t.raw_facts for t in results), 1)
+            ),
             entity_misses=entity_misses,
             relation_misses=relation_misses,
             fact_misses=fact_misses,
@@ -488,6 +515,8 @@ def _log_turn(tr: TurnResult) -> None:
         parts.append(f"rel={tr.relation_accuracy:.0%}")
     if tr.fact_accuracy >= 0:
         parts.append(f"fact={tr.fact_accuracy:.0%}")
+    if tr.raw_facts > 0:
+        parts.append(f"facts={tr.parsed_facts}/{tr.raw_facts}")
     parts.append(f"graph={tr.graph_nodes}n/{tr.graph_edges}e")
     if tr.node_delta:
         parts.append(f"Δ+{tr.node_delta}n")
@@ -504,6 +533,8 @@ def _print_summary(result: CaseResult) -> None:
     print(f"    Relation acc: {result.relation_accuracy_avg:.0%}")
     print(f"    Fact acc:     {result.fact_accuracy_avg:.0%}")
     print(f"    Topic acc:    {result.topic_accuracy:.0%}")
+    print(f"    Facts:        {result.total_parsed_facts}/{result.total_raw_facts} "
+          f"(drop={result.drop_rate:.0%})")
     print(f"    Total time:   {result.total_elapsed_ms / 1000:.1f}s")
     if result.entity_misses:
         print(f"    Entity misses: {len(result.entity_misses)} turns")
@@ -543,6 +574,12 @@ def _write_case_report(result: CaseResult, version: str | None = None) -> None:
         "topic_accuracy": round(result.topic_accuracy * 100),
         "final_graph": {"nodes": result.final_nodes, "edges": result.final_edges},
         "total_elapsed_ms": result.total_elapsed_ms,
+        "fact_diagnostics": {
+            "total_raw_facts": result.total_raw_facts,
+            "total_parsed_facts": result.total_parsed_facts,
+            "total_dropped_facts": result.total_dropped_facts,
+            "drop_rate": round(result.drop_rate * 100),
+        },
         "entity_misses": result.entity_misses,
         "relation_misses": result.relation_misses,
         "fact_misses": result.fact_misses,
@@ -559,6 +596,10 @@ def _write_case_report(result: CaseResult, version: str | None = None) -> None:
                 "graph_nodes": t.graph_nodes,
                 "graph_edges": t.graph_edges,
                 "node_delta": t.node_delta,
+                "raw_facts": t.raw_facts,
+                "parsed_facts": t.parsed_facts,
+                "dropped_facts": t.dropped_facts,
+                "drop_reasons": t.drop_reasons,
                 "failures": t.failures,
                 "missing_entities": t.missing_entities,
                 "missing_facts": t.missing_facts,
@@ -816,12 +857,19 @@ class TestCaseScenarios:
 
         total = sum(r.total_turns for r in all_results)
         passed = sum(r.passed_turns for r in all_results)
+        total_raw = sum(r.total_raw_facts for r in all_results)
+        total_parsed = sum(r.total_parsed_facts for r in all_results)
+        total_dropped = sum(r.total_dropped_facts for r in all_results)
+        overall_drop = total_dropped / max(total_raw, 1)
+
         print(f"\n  {'='*60}")
         print(f"  ALL CASES: {passed}/{total} turns passed ({round(passed/total*100) if total else 0}%)")
+        print(f"  FACTS: {total_parsed}/{total_raw} parsed (drop={overall_drop:.0%})")
         for r in all_results:
             print(f"    {r.name:20s}: {r.passed_turns:3d}/{r.total_turns:3d} "
                   f"ent={r.entity_accuracy_avg:.0%} rel={r.relation_accuracy_avg:.0%} "
-                  f"fact={r.fact_accuracy_avg:.0%}")
+                  f"fact={r.fact_accuracy_avg:.0%} "
+                  f"facts={r.total_parsed_facts}/{r.total_raw_facts}")
         print(f"  {'='*60}")
 
 

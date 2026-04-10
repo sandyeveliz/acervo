@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 class ModelConfig:
     """Configuration for the utility model used by Acervo's pipeline."""
 
-    name: str = "acervo-extractor-v3"
+    name: str = "qwen2.5:7b"
     url: str = "http://localhost:11434/v1"
     api_key: str = ""
 

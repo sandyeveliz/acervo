@@ -70,6 +70,11 @@ class S1Result:
     # Debug data for telemetry/annotation
     prompt_sent: str = ""
     raw_response: str = ""
+    # Validation diagnostics (populated by _validate_s1)
+    raw_entity_count: int = 0
+    raw_relation_count: int = 0
+    raw_fact_count: int = 0
+    dropped_facts: list[dict] = field(default_factory=list)  # [{entity, text, reason}]
 
 
 # ── S2 result types ──

@@ -175,6 +175,16 @@ class GraphStorePort(Protocol):
         """Clear chunk_ids on a node."""
         ...
 
+    # ── Validation log ──
+
+    def persist_validation_log(self, entries: list) -> int:
+        """Persist validation log entries. Returns count written.
+
+        Default no-op for backends that don't support it (e.g. JSON).
+        LadybugDB stores entries as ValidationLog nodes.
+        """
+        ...
+
     # ── Persistence & lifecycle ──
 
     def save(self) -> None:
