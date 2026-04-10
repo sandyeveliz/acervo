@@ -306,7 +306,7 @@ async def _run_case(case_name: str, graph_backend: str | None = None) -> CaseRes
     try:
         llm = OpenAIClient(
             base_url="http://localhost:11434/v1",
-            model="qwen2.5:7b",
+            model=os.getenv("ACERVO_LIGHT_MODEL", "qwen2.5:7b"),
             api_key="ollama",
         )
         graph_path = Path(tmpdir) / "graph"

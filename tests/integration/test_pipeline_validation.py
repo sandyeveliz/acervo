@@ -136,8 +136,9 @@ class TestCurateP1:
         if not entities:
             pytest.skip("No entities to validate (curate didn't produce any)")
         valid_types = {
-            "person", "organization", "project", "technology",
-            "place", "event", "document", "concept", "symbol",
+            "person", "character", "organization", "project", "technology",
+            "place", "event", "document", "concept", "work", "rule",
+            "symbol", "section",
         }
         for e in entities:
             etype = e.get("type", "").lower()

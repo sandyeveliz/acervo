@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import tempfile
 import time
 from dataclasses import dataclass, field, asdict
@@ -116,7 +117,7 @@ async def _run_conversation(scenario_name: str) -> ConversationResult:
     with tempfile.TemporaryDirectory() as tmpdir:
         llm = OpenAIClient(
             base_url="http://localhost:11434/v1",
-            model="qwen2.5:7b",
+            model=os.getenv("ACERVO_LIGHT_MODEL", "qwen2.5:7b"),
             api_key="ollama",
         )
         acervo = Acervo(
