@@ -242,7 +242,7 @@ class S1Unified:
             log.error("S1 Unified LLM call failed: %s", e)
             return _fallback_result(current_topic)
 
-        raw = _clean_response(raw_response)
+        raw = strip_think_blocks(_clean_response(raw_response))
         log.debug("S1 raw response:\n%s", raw[:2000])
         result = _parse_s1_response(raw)
 
@@ -257,7 +257,7 @@ class S1Unified:
                         temperature=0.0,
                         max_tokens=2048,
                     )
-                    raw = _clean_response(raw_response)
+                    raw = strip_think_blocks(_clean_response(raw_response))
                     result = _parse_s1_response(raw)
                 except Exception as e:
                     log.warning("S1 Unified retry failed: %s", e)

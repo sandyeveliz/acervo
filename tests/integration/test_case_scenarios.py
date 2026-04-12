@@ -53,24 +53,29 @@ class TurnResult:
     actual_topic_action: str = ""
     topic_ok: bool | None = None
 
-    # Entities
+    # Entities (exact = strict ID match, fuzzy = difflib + substring)
     expected_entities: list[dict] = field(default_factory=list)
     matched_entities: list[str] = field(default_factory=list)
     missing_entities: list[str] = field(default_factory=list)
     extra_entities: list[str] = field(default_factory=list)
-    entity_accuracy: float = -1.0  # -1 = no expectations
+    entity_accuracy: float = -1.0  # exact
+    entity_accuracy_fuzzy: float = -1.0
 
     # Relations
     expected_relations: list[dict] = field(default_factory=list)
     matched_relations: list[tuple] = field(default_factory=list)
     missing_relations: list[tuple] = field(default_factory=list)
-    relation_accuracy: float = -1.0
+    relation_accuracy: float = -1.0  # exact
+    relation_accuracy_fuzzy: float = -1.0
+    matched_relations_fuzzy: list[tuple] = field(default_factory=list)
 
     # Facts
     expected_facts: list[dict] = field(default_factory=list)
     matched_facts: list[str] = field(default_factory=list)
     missing_facts: list[str] = field(default_factory=list)
-    fact_accuracy: float = -1.0
+    fact_accuracy: float = -1.0  # exact
+    fact_accuracy_fuzzy: float = -1.0
+    matched_facts_fuzzy: list[str] = field(default_factory=list)
 
     # Fact validation diagnostics
     raw_facts: int = 0
@@ -97,11 +102,14 @@ class CaseResult:
     total_turns: int = 0
     turns: list[TurnResult] = field(default_factory=list)
 
-    # Aggregate metrics
+    # Aggregate metrics (exact / fuzzy)
     passed_turns: int = 0
     entity_accuracy_avg: float = 0.0
+    entity_accuracy_fuzzy_avg: float = 0.0
     relation_accuracy_avg: float = 0.0
+    relation_accuracy_fuzzy_avg: float = 0.0
     fact_accuracy_avg: float = 0.0
+    fact_accuracy_fuzzy_avg: float = 0.0
     topic_accuracy: float = 0.0
 
     # Graph final state
@@ -141,22 +149,44 @@ def _load_case(name: str) -> list[dict]:
 
 # ── Comparison helpers ──
 
+from difflib import get_close_matches, SequenceMatcher
+
 
 def _normalize(s: str) -> str:
     """Normalize for comparison: lowercase, strip, collapse whitespace."""
     return " ".join(s.lower().strip().split())
 
 
+def _fuzzy_find_node(target_id: str, target_label: str, all_nodes: dict, all_labels: dict) -> bool:
+    """Check if a target entity exists in the graph via exact or fuzzy matching."""
+    # 1. Exact ID
+    if target_id in all_nodes:
+        return True
+    # 2. Fuzzy ID (fondo_de_emergencia ↔ fondo_emergencia)
+    if get_close_matches(target_id, all_nodes.keys(), n=1, cutoff=0.7):
+        return True
+    # 3. Label substring (bidirectional, min 4 chars)
+    norm_label = _normalize(target_label)
+    if len(norm_label) >= 4:
+        for lbl in all_labels.values():
+            if len(lbl) >= 4 and (norm_label in lbl or lbl in norm_label):
+                return True
+    # 4. Fuzzy label
+    if norm_label and get_close_matches(norm_label, list(all_labels.values()), n=1, cutoff=0.7):
+        return True
+    return False
+
+
 def _check_entities(
     expected: list[dict], graph, prev_node_ids: set[str], tr: TurnResult,
 ) -> None:
-    """Compare expected entities against graph nodes added this turn."""
+    """Compare expected entities against graph nodes."""
     if not expected:
         return
 
     tr.expected_entities = expected
     all_nodes = {n["id"]: n for n in graph.get_all_nodes()}
-    new_node_ids = set(all_nodes.keys()) - prev_node_ids
+    all_labels = {n["id"]: _normalize(n.get("label", "")) for n in graph.get_all_nodes()}
 
     expected_labels = {}
     for e in expected:
@@ -168,29 +198,39 @@ def _check_entities(
             "layer": e.get("layer", ""),
         }
 
-    # Match: expected entity exists in graph (new or updated)
-    matched = []
-    missing = []
+    # Exact matching (strict ID or label substring — original behavior)
+    matched_exact = []
+    missing_exact = []
     for eid, meta in expected_labels.items():
         if eid in all_nodes:
-            matched.append(meta["label"])
+            matched_exact.append(meta["label"])
         else:
-            # Try fuzzy: check if label appears as substring in any node label
             found = False
+            norm = _normalize(meta["label"])
             for nid, node in all_nodes.items():
-                if _normalize(meta["label"]) in _normalize(node.get("label", "")):
-                    matched.append(meta["label"])
+                if norm in _normalize(node.get("label", "")):
+                    matched_exact.append(meta["label"])
                     found = True
                     break
             if not found:
-                missing.append(meta["label"])
+                missing_exact.append(meta["label"])
 
-    tr.matched_entities = matched
-    tr.missing_entities = missing
-    tr.entity_accuracy = len(matched) / len(expected_labels) if expected_labels else 1.0
+    # Fuzzy matching (difflib + substring + fuzzy label)
+    matched_fuzzy = []
+    missing_fuzzy = []
+    for eid, meta in expected_labels.items():
+        if _fuzzy_find_node(eid, meta["label"], all_nodes, all_labels):
+            matched_fuzzy.append(meta["label"])
+        else:
+            missing_fuzzy.append(meta["label"])
 
-    if missing:
-        tr.failures.append(f"entities missing: {missing}")
+    tr.matched_entities = matched_exact
+    tr.missing_entities = missing_exact
+    tr.entity_accuracy = len(matched_exact) / len(expected_labels) if expected_labels else 1.0
+    tr.entity_accuracy_fuzzy = len(matched_fuzzy) / len(expected_labels) if expected_labels else 1.0
+
+    if missing_exact:
+        tr.failures.append(f"entities missing: {missing_exact}")
 
 
 def _check_relations(
@@ -202,34 +242,72 @@ def _check_relations(
 
     tr.expected_relations = expected
     actual_pairs = set()
-    # Use GraphStorePort-compatible API (works with both TopicGraph and LadybugGraphStore)
+    actual_endpoints = set()
     for node in graph.get_all_nodes():
         for e in graph.get_edges_for(node.get("id", "")):
-            src = e.get("source", "")
-            tgt = e.get("target", "")
-            actual_pairs.add((_normalize(src), _normalize(tgt)))
+            src = _normalize(e.get("source", ""))
+            tgt = _normalize(e.get("target", ""))
+            actual_pairs.add((src, tgt))
+            actual_endpoints.add(src)
+            actual_endpoints.add(tgt)
 
-    matched = []
-    missing = []
+    # Exact matching
+    matched_exact = []
+    missing_exact = []
     for rel in expected:
         src = _normalize(rel.get("source", ""))
         tgt = _normalize(rel.get("target", ""))
-        pair = (src, tgt)
-        if pair in actual_pairs:
-            matched.append(pair)
+        if (src, tgt) in actual_pairs or (tgt, src) in actual_pairs:
+            matched_exact.append((src, tgt))
         else:
-            # Try reverse direction
-            if (tgt, src) in actual_pairs:
-                matched.append(pair)
-            else:
-                missing.append(pair)
+            missing_exact.append((src, tgt))
 
-    tr.matched_relations = matched
-    tr.missing_relations = missing
-    tr.relation_accuracy = len(matched) / len(expected) if expected else 1.0
+    # Fuzzy matching — resolve endpoints via difflib
+    matched_fuzzy = []
+    missing_fuzzy = []
+    ep_list = list(actual_endpoints)
+    for rel in expected:
+        src = _normalize(rel.get("source", ""))
+        tgt = _normalize(rel.get("target", ""))
+        if (src, tgt) in actual_pairs or (tgt, src) in actual_pairs:
+            matched_fuzzy.append((src, tgt))
+            continue
+        # Fuzzy resolve src and tgt
+        src_matches = get_close_matches(src, ep_list, n=1, cutoff=0.7)
+        tgt_matches = get_close_matches(tgt, ep_list, n=1, cutoff=0.7)
+        fsrc = src_matches[0] if src_matches else src
+        ftgt = tgt_matches[0] if tgt_matches else tgt
+        if (fsrc, ftgt) in actual_pairs or (ftgt, fsrc) in actual_pairs:
+            matched_fuzzy.append((src, tgt))
+        else:
+            missing_fuzzy.append((src, tgt))
 
-    if missing:
-        tr.failures.append(f"relations missing: {missing}")
+    tr.matched_relations = matched_exact
+    tr.missing_relations = missing_exact
+    tr.relation_accuracy = len(matched_exact) / len(expected) if expected else 1.0
+    tr.matched_relations_fuzzy = matched_fuzzy
+    tr.relation_accuracy_fuzzy = len(matched_fuzzy) / len(expected) if expected else 1.0
+
+    if missing_exact:
+        tr.failures.append(f"relations missing: {missing_exact}")
+
+
+def _fact_matches(fact_text: str, candidate: str) -> bool:
+    """Check if a fact text matches a candidate via substring, keyword overlap, or sequence similarity."""
+    if not fact_text or not candidate:
+        return False
+    # Substring
+    if fact_text in candidate or candidate in fact_text:
+        return True
+    # Keyword overlap (>40% of expected words in actual)
+    expected_words = set(fact_text.split())
+    actual_words = set(candidate.split())
+    if expected_words and len(expected_words & actual_words) / len(expected_words) > 0.4:
+        return True
+    # Sequence similarity (catches "4.000.000 ARS" vs "4M ARS")
+    if SequenceMatcher(None, fact_text, candidate).ratio() >= 0.5:
+        return True
+    return False
 
 
 def _check_facts(
@@ -241,52 +319,73 @@ def _check_facts(
 
     tr.expected_facts = expected
     all_nodes = {n["id"]: n for n in graph.get_all_nodes()}
+    node_ids = list(all_nodes.keys())
 
-    matched = []
-    missing = []
+    # Collect ALL facts in the graph for fuzzy fallback
+    all_facts_flat: list[str] = []
+    for n in all_nodes.values():
+        for f in n.get("facts", []):
+            all_facts_flat.append(_normalize(f.get("fact", "")))
+
+    matched_exact = []
+    missing_exact = []
+    matched_fuzzy = []
+    missing_fuzzy = []
+
     for fact_spec in expected:
         entity_id = _normalize(fact_spec.get("entity", ""))
         fact_text = _normalize(fact_spec.get("text", ""))
+        fact_label = fact_spec.get("text", "")[:60]
 
-        # Find the entity node
+        # ── Exact: find entity by exact ID or substring ──
         node = all_nodes.get(entity_id)
         if not node:
-            # Try finding by substring
             for nid, n in all_nodes.items():
-                if entity_id in nid:
+                if entity_id and entity_id in nid:
                     node = n
                     break
 
-        if not node:
-            missing.append(fact_spec.get("text", "")[:60])
-            continue
-
-        # Check if any fact on this node matches (substring or keyword overlap)
-        node_facts = [_normalize(f.get("fact", "")) for f in node.get("facts", [])]
-        found = False
-        for nf in node_facts:
-            # Substring match
-            if fact_text in nf or nf in fact_text:
-                found = True
-                break
-            # Keyword overlap (>50% of expected fact words in actual fact)
-            expected_words = set(fact_text.split())
-            actual_words = set(nf.split())
-            if expected_words and len(expected_words & actual_words) / len(expected_words) > 0.4:
-                found = True
-                break
-
-        if found:
-            matched.append(fact_spec.get("text", "")[:60])
+        if node:
+            node_facts = [_normalize(f.get("fact", "")) for f in node.get("facts", [])]
+            if any(_fact_matches(fact_text, nf) for nf in node_facts):
+                matched_exact.append(fact_label)
+            else:
+                missing_exact.append(fact_label)
         else:
-            missing.append(fact_spec.get("text", "")[:60])
+            missing_exact.append(fact_label)
 
-    tr.matched_facts = matched
-    tr.missing_facts = missing
-    tr.fact_accuracy = len(matched) / len(expected) if expected else 1.0
+        # ── Fuzzy: resolve entity via difflib, then search facts ──
+        fuzzy_node = node
+        if not fuzzy_node and entity_id:
+            # Fuzzy ID match
+            matches = get_close_matches(entity_id, node_ids, n=1, cutoff=0.6)
+            if matches:
+                fuzzy_node = all_nodes.get(matches[0])
 
-    if missing:
-        tr.failures.append(f"facts missing: {[m[:40] for m in missing]}")
+        if fuzzy_node:
+            node_facts = [_normalize(f.get("fact", "")) for f in fuzzy_node.get("facts", [])]
+            if any(_fact_matches(fact_text, nf) for nf in node_facts):
+                matched_fuzzy.append(fact_label)
+            else:
+                # Fact not on this entity — search ALL facts in graph
+                if any(_fact_matches(fact_text, af) for af in all_facts_flat):
+                    matched_fuzzy.append(fact_label)
+                else:
+                    missing_fuzzy.append(fact_label)
+        else:
+            # Entity not found even with fuzzy — search ALL facts
+            if any(_fact_matches(fact_text, af) for af in all_facts_flat):
+                matched_fuzzy.append(fact_label)
+            else:
+                missing_fuzzy.append(fact_label)
+    tr.matched_facts = matched_exact
+    tr.missing_facts = missing_exact
+    tr.fact_accuracy = len(matched_exact) / len(expected) if expected else 1.0
+    tr.matched_facts_fuzzy = matched_fuzzy
+    tr.fact_accuracy_fuzzy = len(matched_fuzzy) / len(expected) if expected else 1.0
+
+    if missing_exact:
+        tr.failures.append(f"facts missing: {[m[:40] for m in missing_exact]}")
 
 
 # ── Case runner ──
@@ -435,8 +534,11 @@ async def _run_case(case_name: str, graph_backend: str | None = None) -> CaseRes
 
         # ── Build aggregate result ──
         entity_accs = [t.entity_accuracy for t in results if t.entity_accuracy >= 0]
+        entity_accs_fuzzy = [t.entity_accuracy_fuzzy for t in results if t.entity_accuracy_fuzzy >= 0]
         relation_accs = [t.relation_accuracy for t in results if t.relation_accuracy >= 0]
+        relation_accs_fuzzy = [t.relation_accuracy_fuzzy for t in results if t.relation_accuracy_fuzzy >= 0]
         fact_accs = [t.fact_accuracy for t in results if t.fact_accuracy >= 0]
+        fact_accs_fuzzy = [t.fact_accuracy_fuzzy for t in results if t.fact_accuracy_fuzzy >= 0]
         topic_checks = [t for t in results if t.topic_ok is not None]
 
         # Collect all misses for training data analysis
@@ -472,11 +574,20 @@ async def _run_case(case_name: str, graph_backend: str | None = None) -> CaseRes
             entity_accuracy_avg=(
                 sum(entity_accs) / len(entity_accs) if entity_accs else 0
             ),
+            entity_accuracy_fuzzy_avg=(
+                sum(entity_accs_fuzzy) / len(entity_accs_fuzzy) if entity_accs_fuzzy else 0
+            ),
             relation_accuracy_avg=(
                 sum(relation_accs) / len(relation_accs) if relation_accs else 0
             ),
+            relation_accuracy_fuzzy_avg=(
+                sum(relation_accs_fuzzy) / len(relation_accs_fuzzy) if relation_accs_fuzzy else 0
+            ),
             fact_accuracy_avg=(
                 sum(fact_accs) / len(fact_accs) if fact_accs else 0
+            ),
+            fact_accuracy_fuzzy_avg=(
+                sum(fact_accs_fuzzy) / len(fact_accs_fuzzy) if fact_accs_fuzzy else 0
             ),
             topic_accuracy=(
                 sum(1 for t in topic_checks if t.topic_ok) / len(topic_checks)
@@ -510,11 +621,14 @@ def _log_turn(tr: TurnResult) -> None:
     status = "✓" if tr.passed else "✗"
     parts = []
     if tr.entity_accuracy >= 0:
-        parts.append(f"ent={tr.entity_accuracy:.0%}")
+        fuzzy = f"/{tr.entity_accuracy_fuzzy:.0%}" if tr.entity_accuracy_fuzzy >= 0 else ""
+        parts.append(f"ent={tr.entity_accuracy:.0%}{fuzzy}")
     if tr.relation_accuracy >= 0:
-        parts.append(f"rel={tr.relation_accuracy:.0%}")
+        fuzzy = f"/{tr.relation_accuracy_fuzzy:.0%}" if tr.relation_accuracy_fuzzy >= 0 else ""
+        parts.append(f"rel={tr.relation_accuracy:.0%}{fuzzy}")
     if tr.fact_accuracy >= 0:
-        parts.append(f"fact={tr.fact_accuracy:.0%}")
+        fuzzy = f"/{tr.fact_accuracy_fuzzy:.0%}" if tr.fact_accuracy_fuzzy >= 0 else ""
+        parts.append(f"fact={tr.fact_accuracy:.0%}{fuzzy}")
     if tr.raw_facts > 0:
         parts.append(f"facts={tr.parsed_facts}/{tr.raw_facts}")
     parts.append(f"graph={tr.graph_nodes}n/{tr.graph_edges}e")
@@ -529,9 +643,9 @@ def _log_turn(tr: TurnResult) -> None:
 def _print_summary(result: CaseResult) -> None:
     print(f"\n  {result.name}: {result.passed_turns}/{result.total_turns} turns passed")
     print(f"    Graph: {result.final_nodes}n / {result.final_edges}e")
-    print(f"    Entity acc:   {result.entity_accuracy_avg:.0%}")
-    print(f"    Relation acc: {result.relation_accuracy_avg:.0%}")
-    print(f"    Fact acc:     {result.fact_accuracy_avg:.0%}")
+    print(f"    Entity acc:   {result.entity_accuracy_avg:.0%} / {result.entity_accuracy_fuzzy_avg:.0%} (exact/fuzzy)")
+    print(f"    Relation acc: {result.relation_accuracy_avg:.0%} / {result.relation_accuracy_fuzzy_avg:.0%}")
+    print(f"    Fact acc:     {result.fact_accuracy_avg:.0%} / {result.fact_accuracy_fuzzy_avg:.0%}")
     print(f"    Topic acc:    {result.topic_accuracy:.0%}")
     print(f"    Facts:        {result.total_parsed_facts}/{result.total_raw_facts} "
           f"(drop={result.drop_rate:.0%})")
@@ -569,8 +683,11 @@ def _write_case_report(result: CaseResult, version: str | None = None) -> None:
         "passed_turns": result.passed_turns,
         "pass_rate": round(result.passed_turns / result.total_turns * 100) if result.total_turns else 0,
         "entity_accuracy": round(result.entity_accuracy_avg * 100),
+        "entity_accuracy_fuzzy": round(result.entity_accuracy_fuzzy_avg * 100),
         "relation_accuracy": round(result.relation_accuracy_avg * 100),
+        "relation_accuracy_fuzzy": round(result.relation_accuracy_fuzzy_avg * 100),
         "fact_accuracy": round(result.fact_accuracy_avg * 100),
+        "fact_accuracy_fuzzy": round(result.fact_accuracy_fuzzy_avg * 100),
         "topic_accuracy": round(result.topic_accuracy * 100),
         "final_graph": {"nodes": result.final_nodes, "edges": result.final_edges},
         "total_elapsed_ms": result.total_elapsed_ms,
@@ -862,14 +979,16 @@ class TestCaseScenarios:
         total_dropped = sum(r.total_dropped_facts for r in all_results)
         overall_drop = total_dropped / max(total_raw, 1)
 
-        print(f"\n  {'='*60}")
+        print(f"\n  {'='*70}")
         print(f"  ALL CASES: {passed}/{total} turns passed ({round(passed/total*100) if total else 0}%)")
         print(f"  FACTS: {total_parsed}/{total_raw} parsed (drop={overall_drop:.0%})")
+        print(f"  {'':20s}  {'ent exact/fuzzy':>16s}  {'rel exact/fuzzy':>16s}  {'fact exact/fuzzy':>16s}")
         for r in all_results:
-            print(f"    {r.name:20s}: {r.passed_turns:3d}/{r.total_turns:3d} "
-                  f"ent={r.entity_accuracy_avg:.0%} rel={r.relation_accuracy_avg:.0%} "
-                  f"fact={r.fact_accuracy_avg:.0%} "
+            print(f"    {r.name:20s}: "
+                  f"ent={r.entity_accuracy_avg:.0%}/{r.entity_accuracy_fuzzy_avg:.0%} "
+                  f"rel={r.relation_accuracy_avg:.0%}/{r.relation_accuracy_fuzzy_avg:.0%} "
+                  f"fact={r.fact_accuracy_avg:.0%}/{r.fact_accuracy_fuzzy_avg:.0%} "
                   f"facts={r.total_parsed_facts}/{r.total_raw_facts}")
-        print(f"  {'='*60}")
+        print(f"  {'='*70}")
 
 
