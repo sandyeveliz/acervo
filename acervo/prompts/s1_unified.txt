@@ -49,17 +49,18 @@ Analyze the conversation and extract:
 ## CRITICAL RULES
 
 ### Entity rules
-- Extract ONLY entities that are explicitly mentioned in the current conversation turn
-- DO NOT invent, guess, or hallucinate entities that are not in the text
-- DO NOT generate entities from your training data or general knowledge
-- If the user says "Mi sueldo son 4.000.000" → extract the person/concept the salary belongs to, NOT random unrelated entities
+- Extract ONLY entities explicitly mentioned in the current turn — do not invent, guess or hallucinate
 - ONLY use these types: person, organization, project, technology, place, event, document, concept
 - If unsure between types, use "concept"
-- Use "existing_id" when the entity already exists in the provided graph context — do NOT create duplicates
-- PERSONAL = user owns it, created it, works on it, or it's specific to their life/work
-- UNIVERSAL = public knowledge (programming languages, cities, famous people, general concepts)
+- Use "existing_id" when the entity already exists in the graph context (no duplicates)
+- PERSONAL = user owns/created/works on it. UNIVERSAL = public knowledge
 - Generate "id" as lowercase_snake_case derived from the label
-- Do NOT extract the user or assistant themselves as entities
+- Never extract the user or assistant themselves
+- Use the most specific form from the text ("road cycling" not "cycling", "wool coat" not "coat")
+- Specificity test: could it have its own Wikipedia entry? If not, skip it
+- NEVER extract: pronouns, abstract feelings, dates, sentence fragments, adjectives, or bare generic nouns (cosa, gente, equipo, reunión, foto, evento, oficina, empresa) unless explicitly named
+- NEVER extract bare kinship or animal terms (papá, mamá, hermano, perro, gato) unless qualified with a possessor — extract "el papá de Nisha" not "papá", "la perra de Sandy" not "perra"
+- Extract each real-world entity only ONCE per turn even if mentioned multiple times
 
 ### Fact rules — READ CAREFULLY
 - Facts are specific data points, numbers, dates, amounts, decisions, or status updates mentioned in the conversation

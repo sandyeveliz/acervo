@@ -1,7 +1,12 @@
 """S1 Unified — combined topic classifier + knowledge extractor.
 
 Runs ALWAYS before S2 Gather. L1/L2 results are passed as hints, not gates.
-Uses the utility model (qwen2.5:3b by default) with a structured prompt.
+Uses the extraction LLM (qwen3.5:9b by default) with a structured prompt.
+
+Entity deduplication during validation is delegated to
+``acervo.extraction.dedup_helpers`` (MinHash LSH + entropy gate, adapted from
+Graphiti — see ``acervo/THIRD_PARTY.md``). The legacy difflib-based path was
+replaced in Phase 1 of the graph build quality work.
 
 Output: S1Result with topic classification + entities/relations/facts.
 """
@@ -11,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
+from typing import Any
 
 from acervo._text import strip_think_blocks
 from acervo.graph.ids import _make_id
@@ -199,9 +205,19 @@ class S1Unified:
     Always runs on every turn. L1/L2 provide hints, not gates.
     """
 
-    def __init__(self, llm: LLMClient, system_prompt: str | None = None) -> None:
+    def __init__(
+        self,
+        llm: LLMClient,
+        system_prompt: str | None = None,
+        embedder: Any = None,
+    ) -> None:
         self._llm = llm
         self._system_prompt = system_prompt or _SYSTEM_PROMPT
+        # Optional embedder — when set, S1 batch-embeds entity names after
+        # validation so downstream entity resolution and S2 retrieval can
+        # use semantic similarity. Without it, the pipeline falls back to
+        # the Phase-1 deterministic path (MinHash LSH only).
+        self._embedder = embedder
 
     async def run(
         self,
@@ -211,10 +227,19 @@ class S1Unified:
         topic_hint: str,
         existing_nodes_summary: str,
         existing_node_names: set[str] | None = None,
+        existing_nodes: list[dict] | None = None,
+        graph: Any = None,
     ) -> S1Result:
         """Execute S1 Unified: topic classification + extraction in one LLM call.
 
         Builds the system+user message format the extractor model expects.
+
+        When ``existing_nodes`` is provided (list of full graph-store dicts),
+        the validated entities are additionally passed through
+        ``entity_resolution.resolve_extracted_nodes`` so duplicates against
+        the existing graph are merged deterministically (exact normalization
+        + MinHash LSH via dedup_helpers). Relations and facts referencing the
+        merged entities are rewritten to use the canonical name.
         """
         # Limit previous assistant to first 150 chars — enough for followup detection
         # but too short to dominate topic classification with hallucinated topics
@@ -265,6 +290,22 @@ class S1Unified:
         # Validate extraction against conversation text
         combined_text = f"{user_msg} {prev_assistant_msg}"
         result = _validate_s1(result, combined_text, existing_node_names or set())
+
+        # Phase 2: batch-embed NEW entity names BEFORE resolving against the
+        # graph, so that resolve_extracted_nodes can use those embeddings
+        # for semantic candidate pre-filter against the graph.
+        if self._embedder is not None and result.extraction.entities:
+            await _embed_new_entities(result.extraction.entities, self._embedder)
+
+        # Resolve entities against the existing graph via deterministic dedup.
+        # Runs even when ``existing_nodes`` is empty so the per-turn log line
+        # is always emitted (makes the Phase 1 path visible in diagnostics)
+        # and the graph semantic-search hook gets exercised. The function
+        # short-circuits internally when there's nothing to compare against.
+        if result.extraction.entities:
+            result = _resolve_against_graph(
+                result, existing_nodes or [], graph=graph,
+            )
 
         # Attach debug data for telemetry
         result.prompt_sent = json.dumps(messages, ensure_ascii=False)
@@ -515,40 +556,78 @@ def _is_garbage_entity(name: str) -> bool:
     return False
 
 
-def _fuzzy_match(name: str, candidates: set[str], threshold: float = 0.60) -> str | None:
-    """Find the best fuzzy match for a name among candidates.
+def _fuzzy_match(name: str, candidates: set[str], threshold: float = 0.85) -> str | None:
+    """Find the best fuzzy match for a name among candidate strings.
 
-    Uses difflib.SequenceMatcher (Ratcliff/Obershelp) which handles
-    typos like ciplinetti→cipolletti, plus substring containment
-    and _make_id normalization for ID-level matches.
+    Uses the same primitives as ``acervo.extraction.dedup_helpers`` so the
+    whole S1 pipeline shares a single normalization + similarity strategy.
+
+    The algorithm runs in three passes, from cheapest to costliest:
+
+    1. **Exact normalized match.** Lowercase + whitespace collapse (same rule
+       as MinHash dedup) — catches "Sandy Veliz" vs "sandy veliz".
+    2. **ID-level match.** ``_make_id`` strips accents and punctuation so
+       "josé pérez" and "Jose Perez" map to the same canonical ID.
+    3. **Jaccard over 3-gram character shingles.** Only runs if the name has
+       enough entropy (skips short/repetitive strings) so we don't get false
+       positives on generic tokens like "app" or "data". Matches the
+       0.85 default, tunable by the caller.
+
+    The ``threshold`` argument is the minimum Jaccard similarity required for
+    the fuzzy pass; it defaults to 0.85 (matching
+    ``dedup_helpers._FUZZY_JACCARD_THRESHOLD``). Callers that want looser
+    matching can pass a lower value (e.g. 0.70 for fact-entity resolution).
+
+    Adapted from Graphiti's approach (see acervo/THIRD_PARTY.md).
     """
     if not name or not candidates:
         return None
 
-    from difflib import get_close_matches
+    from acervo.extraction.dedup_helpers import (
+        _cached_shingles,
+        _has_high_entropy,
+        _jaccard_similarity,
+        _normalize_name_for_fuzzy,
+        _normalize_string_exact,
+    )
 
-    name_lower = name.lower().strip()
+    normalized_name_exact = _normalize_string_exact(name)
+    normalized_name_fuzzy = _normalize_name_for_fuzzy(name)
     name_id = _make_id(name)
 
-    # 1. Exact _make_id match (accents, case, punctuation)
+    # 1. Exact normalized match — lowercase + whitespace collapsed.
+    for cand in candidates:
+        if _normalize_string_exact(cand) == normalized_name_exact:
+            return cand
+
+    # 2. ID-level match — strips accents and punctuation.
     for cand in candidates:
         if _make_id(cand) == name_id:
             return cand
 
-    # 2. Substring containment (min 4 chars to avoid matching "en", "la", etc.)
-    if len(name_lower) >= 4:
-        for cand in candidates:
-            cand_lower = cand.lower().strip()
-            if len(cand_lower) >= 4 and (name_lower in cand_lower or cand_lower in name_lower):
-                return cand
+    # 3. Jaccard fuzzy over 3-gram shingles. Entropy gate blocks unreliable
+    #    short / low-information names from reaching this path.
+    if not _has_high_entropy(normalized_name_fuzzy):
+        return None
 
-    # 3. difflib fuzzy match (handles typos)
-    matches = get_close_matches(name_lower, [c.lower() for c in candidates], n=1, cutoff=threshold)
-    if matches:
-        # Return the original-case candidate
-        for cand in candidates:
-            if cand.lower() == matches[0]:
-                return cand
+    name_shingles = _cached_shingles(normalized_name_fuzzy)
+    if not name_shingles:
+        return None
+
+    best_cand: str | None = None
+    best_score = 0.0
+    for cand in candidates:
+        cand_fuzzy = _normalize_name_for_fuzzy(cand)
+        if not _has_high_entropy(cand_fuzzy):
+            continue
+        cand_shingles = _cached_shingles(cand_fuzzy)
+        score = _jaccard_similarity(name_shingles, cand_shingles)
+        if score > best_score:
+            best_score = score
+            best_cand = cand
+
+    if best_cand is not None and best_score >= threshold:
+        return best_cand
 
     return None
 
@@ -571,14 +650,16 @@ def _validate_s1(
             log.info("S1: rejected garbage entity: %s", e.name)
             continue
         if name_lower not in conv_lower:
-            # Try fuzzy match against conversation text words
+            # Try fuzzy match against conversation text words.
+            # Threshold 0.85 matches the dedup_helpers default; short names
+            # are filtered out by the entropy gate inside _fuzzy_match.
             conv_words = set(conv_lower.split())
-            fuzzy = _fuzzy_match(name_lower, conv_words, threshold=0.75)
+            fuzzy = _fuzzy_match(name_lower, conv_words, threshold=0.85)
             if fuzzy:
                 log.info("S1: fuzzy matched entity '%s' → '%s' in conversation", e.name, fuzzy)
             elif e.attributes.get("_existing_id"):
                 pass  # LLM matched to graph node, allow
-            elif _fuzzy_match(name_lower, _existing_lower, threshold=0.75):
+            elif _fuzzy_match(name_lower, _existing_lower, threshold=0.85):
                 log.info("S1: fuzzy matched entity '%s' to existing graph node", e.name)
             else:
                 log.info("S1: rejected hallucinated entity: %s", e.name)
@@ -591,23 +672,30 @@ def _validate_s1(
     fact_valid_names = set(valid_names_lower) | _existing_lower
 
     def _resolve_fact_entity(entity_name: str) -> str | None:
-        """Resolve a fact's entity reference, with fuzzy fallback."""
+        """Resolve a fact's entity reference, with fuzzy fallback.
+
+        Uses a slightly looser threshold (0.80) than the 0.85 default
+        because fact entities are often referred to with variations the
+        LLM introduces (e.g. "Sandy" vs "Sandy Veliz" inside the same turn),
+        and we prefer to attach the fact rather than drop it.
+        """
         lower = entity_name.lower()
         if lower in fact_valid_names:
             return entity_name
         # Fuzzy match against all known entities
-        match = _fuzzy_match(lower, fact_valid_names, threshold=0.70)
+        match = _fuzzy_match(lower, fact_valid_names, threshold=0.80)
         if match:
             log.info("S1: fuzzy resolved fact entity '%s' → '%s'", entity_name, match)
             return match
         return None
 
-    # Filter relations: must reference valid entities, no vague relation names
+    # Filter relations: must reference valid entities, no vague relation names.
+    # Threshold 0.85 matches the dedup_helpers default.
     valid_relations = [
         r for r in ext.relations
         if (r.source.lower() in valid_names_lower or r.target.lower() in valid_names_lower
-            or _fuzzy_match(r.source.lower(), valid_names_lower, 0.75) is not None
-            or _fuzzy_match(r.target.lower(), valid_names_lower, 0.75) is not None)
+            or _fuzzy_match(r.source.lower(), valid_names_lower, 0.85) is not None
+            or _fuzzy_match(r.target.lower(), valid_names_lower, 0.85) is not None)
         and r.relation.lower().replace(" ", "_") not in (
             "related_to", "co_mentioned", "is_related_to", "mentioned_with",
         )
@@ -656,6 +744,131 @@ def _validate_s1(
         raw_fact_count=len(ext.facts),
         dropped_facts=dropped_facts,
     )
+
+
+def _resolve_against_graph(
+    result: S1Result,
+    existing_nodes: list[dict],
+    graph: Any = None,
+) -> S1Result:
+    """Merge extracted entities against the existing graph via dedup_helpers.
+
+    For each extracted entity, runs the deterministic resolution pipeline
+    (exact normalize → MinHash LSH fuzzy → entropy gate). When a match
+    against an existing graph node is found, mutates the Entity in-place to:
+      - adopt the canonical name from the existing node
+      - stamp ``_existing_id`` in attributes so downstream upserts target
+        the correct row
+
+    Also rewrites Relation.source/target and ExtractedFact.entity references
+    whose names changed during canonicalization, keeping the S1Result
+    self-consistent.
+
+    When ``graph`` is provided and exposes ``entity_similarity_search``,
+    Phase 2 semantic pre-filter is active: the candidate universe per
+    entity is narrowed from ``existing_nodes`` to the top-K most similar
+    graph nodes using the entity's name embedding. Otherwise we fall back
+    to the Phase 1 path (MinHash LSH over the full list).
+    """
+    from acervo.extraction.entity_resolution import resolve_extracted_nodes
+
+    entities = result.extraction.entities
+    if not entities:
+        return result
+
+    existing_ids: set[str] = {
+        str(n.get("id") or n.get("uuid") or "") for n in existing_nodes
+    }
+    existing_ids.discard("")
+
+    resolved_nodes, _uuid_map, _duplicate_pairs = resolve_extracted_nodes(
+        entities, existing_nodes, graph=graph
+    )
+
+    name_rewrites: dict[str, str] = {}
+    merged_count = 0
+    for orig_entity, canonical in zip(entities, resolved_nodes, strict=False):
+        # An entity is "merged" when its canonical resolution points at a
+        # real graph node id. Fresh entities get a synthetic uuid that is not
+        # in existing_ids.
+        if canonical.uuid in existing_ids:
+            old_name = orig_entity.name
+            if canonical.name and canonical.name != old_name:
+                name_rewrites[old_name.lower()] = canonical.name
+                orig_entity.name = canonical.name
+                log.info(
+                    "S1._resolve_against_graph: merged %r -> canonical %r (existing_id=%s)",
+                    old_name, canonical.name, canonical.uuid,
+                )
+            else:
+                log.info(
+                    "S1._resolve_against_graph: stamped _existing_id=%s on %r",
+                    canonical.uuid, old_name,
+                )
+            orig_entity.attributes["_existing_id"] = canonical.uuid
+            merged_count += 1
+
+    if merged_count:
+        log.info(
+            "S1: merged %d/%d extracted entities against existing graph nodes",
+            merged_count,
+            len(entities),
+        )
+
+    if name_rewrites:
+        for rel in result.extraction.relations:
+            new_source = name_rewrites.get(rel.source.lower())
+            if new_source is not None:
+                rel.source = new_source
+            new_target = name_rewrites.get(rel.target.lower())
+            if new_target is not None:
+                rel.target = new_target
+        for fact in result.extraction.facts:
+            new_entity = name_rewrites.get(fact.entity.lower())
+            if new_entity is not None:
+                fact.entity = new_entity
+
+    return result
+
+
+async def _embed_new_entities(entities: list[Entity], embedder: Any) -> None:
+    """Batch-embed names of newly extracted entities in place.
+
+    Puts the embedding on ``entity.attributes['name_embedding']`` so
+    downstream upsert paths can persist it (LadybugGraphStore reads
+    ``attributes['name_embedding']`` when writing EntityNode rows; the
+    Phase 2 DDL gives the column a dedicated slot).
+
+    Entities that were already merged against a graph node (``_existing_id``
+    is stamped) are skipped — their embedding already lives on the canonical
+    row.
+    """
+    targets: list[Entity] = [
+        e for e in entities
+        if not e.attributes.get("_existing_id")
+        and not e.attributes.get("name_embedding")
+        and e.name.strip()
+    ]
+    if not targets:
+        return
+
+    names = [e.name.replace("\n", " ") for e in targets]
+    try:
+        vectors = await embedder.embed_batch(names)
+    except Exception as exc:
+        log.warning("S1: entity batch embedding failed (%d names): %s", len(names), exc)
+        return
+
+    if len(vectors) != len(targets):
+        log.warning(
+            "S1: embedder returned %d vectors for %d entities; skipping attach",
+            len(vectors),
+            len(targets),
+        )
+        return
+
+    for entity, vec in zip(targets, vectors, strict=True):
+        entity.attributes["name_embedding"] = list(vec)
 
 
 def _fallback_result(current_topic: str) -> S1Result:

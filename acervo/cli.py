@@ -147,14 +147,16 @@ def cmd_index(args: argparse.Namespace) -> None:
         FileIndexed, IndexingComplete, IndexingError,
     )
 
-    # Set up LLM client
+    # Set up LLM client (uses Ollama /api/chat + think=false for thinking models)
     llm = None
     if llm_endpoint:
+        from acervo.facade import _ollama_dialect_kwargs
         from acervo.openai_client import OpenAIClient
         llm = OpenAIClient(
             base_url=llm_endpoint,
             model=llm_model,
             api_key=model_cfg.api_key,
+            **_ollama_dialect_kwargs(llm_endpoint, llm_model),
         )
 
     # Set up embedder
@@ -281,12 +283,14 @@ def cmd_synthesize(args: argparse.Namespace) -> None:
     from acervo.graph import TopicGraph
     from acervo.graph_synthesizer import synthesize_graph
 
-    # Set up LLM client
+    # Set up LLM client (uses Ollama /api/chat + think=false for thinking models)
+    from acervo.facade import _ollama_dialect_kwargs
     from acervo.openai_client import OpenAIClient
     llm = OpenAIClient(
         base_url=model_cfg.url,
         model=model_cfg.name,
         api_key=model_cfg.api_key,
+        **_ollama_dialect_kwargs(model_cfg.url, model_cfg.name),
     )
 
     graph = TopicGraph(project.graph_path)

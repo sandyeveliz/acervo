@@ -28,7 +28,7 @@ async def test_extract_entities_from_json():
     llm = make_mock_llm(response)
     extractor = ConversationExtractor(llm)
 
-    result = await extractor.extract("Vivo en Cipolletti", "Buena ciudad!")
+    result = await extractor.extract("Sandy vive en Cipolletti", "Buena ciudad!")
     assert len(result.entities) == 2
     assert result.entities[0].name == "Sandy"
     assert result.entities[1].name == "Cipolletti"
@@ -54,7 +54,10 @@ async def test_extract_maps_types_to_ontology():
     llm = make_mock_llm(response)
     extractor = ConversationExtractor(llm)
 
-    result = await extractor.extract("test", "test")
+    # user_msg must contain every entity name — ConversationExtractor._validate
+    # rejects entities whose name doesn't appear in the conversation text.
+    user_msg = "Sandy vive en Cipolletti, trabaja en Altovallestudio y le encanta Harry Potter"
+    result = await extractor.extract(user_msg, "ok")
     types = {e.name: e.type for e in result.entities}
     assert types["Cipolletti"] == "Place"
     assert types["Sandy"] == "Person"
@@ -77,7 +80,9 @@ async def test_extract_filters_blacklisted_entities():
     llm = make_mock_llm(response)
     extractor = ConversationExtractor(llm)
 
-    result = await extractor.extract("test", "test")
+    # Text must contain the entities we expect to survive validation;
+    # blacklist filtering happens regardless of what's in the text.
+    result = await extractor.extract("Sandy says user and today are irrelevant", "ok")
     names = [e.name for e in result.entities]
     assert "user" not in names
     assert "today" not in names
@@ -122,7 +127,9 @@ async def test_extract_filters_short_names():
     llm = make_mock_llm(response)
     extractor = ConversationExtractor(llm)
 
-    result = await extractor.extract("test", "test")
+    # Text must contain Sandy so the anti-hallucination check lets it through;
+    # short-name filtering happens independently of text content.
+    result = await extractor.extract("Sandy is here", "ok")
     names = [e.name for e in result.entities]
     assert "AB" not in names
     assert "X" not in names
@@ -145,5 +152,7 @@ async def test_extract_new_relation_auto_registered():
     llm = make_mock_llm(response)
     extractor = ConversationExtractor(llm)
 
-    result = await extractor.extract("test", "test")
+    # Both entity names must appear in the conversation text for validation
+    # to let them (and the relation that references them) through.
+    result = await extractor.extract("Sandy es fan de River", "ok")
     assert result.relations[0].relation == "fan_of"

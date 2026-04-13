@@ -165,8 +165,13 @@ class Pipeline:
                 prev_assistant_msg = msg.get("content", "")
                 break
 
-        # Run S1
+        # Run S1 — passes both the string-set of names (for anti-hallucination
+        # validation), the full dict list (for deterministic dedup against
+        # the graph via acervo.extraction.entity_resolution), and the graph
+        # itself so Phase 2 semantic pre-filter can call
+        # graph.entity_similarity_search per entity.
         existing_node_names = {n.get("label", "") for n in all_nodes if n.get("label")}
+        existing_nodes_dicts = [dict(n) for n in all_nodes]
         s1_result = await self._s1.run(
             user_msg=user_text,
             prev_assistant_msg=prev_assistant_msg,
@@ -174,6 +179,8 @@ class Pipeline:
             topic_hint=topic_hint,
             existing_nodes_summary=existing_nodes_summary,
             existing_node_names=existing_node_names,
+            existing_nodes=existing_nodes_dicts,
+            graph=self._graph,
         )
         _s1_ms = round((time.perf_counter() - _s1_t0) * 1000)
 
@@ -240,6 +247,9 @@ class Pipeline:
             history=history,
             current_topic=current_topic,
             warm_budget_override=self._warm_token_budget,
+            # Phase 4: pass the user embedding so S3 can MMR-rerank the
+            # WARM/COLD layers for diversity before truncating by budget.
+            query_embedding=user_embedding,
         )
 
         _stages.append(
@@ -280,7 +290,11 @@ class Pipeline:
         self, user_text: str, assistant_text: str, web_results: str = "",
     ) -> ExtractionResult:
         """Post-LLM pipeline: S1.5 graph curation."""
-        from acervo.s1_5_graph_update import S1_5GraphUpdate, apply_s1_5_result
+        from acervo.s1_5_graph_update import (
+            S1_5GraphUpdate,
+            apply_s1_5_result,
+            resolve_s1_5_facts,
+        )
         _s15_t0 = time.perf_counter()
 
         # Skip no-data responses
@@ -313,12 +327,24 @@ class Pipeline:
         )
         _s15_ms = round((time.perf_counter() - _s15_t0) * 1000)
 
+        # Phase 3: resolve assistant facts against the graph before applying
+        # curation. This mutates s15_result.assistant_extraction.facts to
+        # drop duplicates / keep only the ones we actually need to persist,
+        # and applies invalidations to contradicted existing facts.
+        fact_audit = await resolve_s1_5_facts(
+            s15_result, self._graph, llm=self._s15_llm,
+        )
+
         # Apply curation
         audit = apply_s1_5_result(self._graph, s15_result, owner=self._owner)
+        audit.update(fact_audit)
         log.info(
-            "[acervo] S1.5 — merges=%d, fixes=%d, discards=%d, entities=%d, facts=%d (%dms)",
+            "[acervo] S1.5 — merges=%d, fixes=%d, discards=%d, entities=%d, "
+            "facts=%d, resolved_new=%d, dropped=%d, invalidated=%d (%dms)",
             audit["merges_applied"], audit["type_corrections"],
-            audit["discards"], audit["entities_added"], audit["facts_added"], _s15_ms,
+            audit["discards"], audit["entities_added"], audit["facts_added"],
+            audit.get("resolved_new", 0), audit.get("resolved_duplicates_dropped", 0),
+            audit.get("resolved_invalidations", 0), _s15_ms,
         )
 
         # Always save after mutations
@@ -350,16 +376,34 @@ class Pipeline:
 
         Validates entity types and relation types via OntologyValidator
         before persisting. Invalid types are mapped; invalid relations are dropped.
+
+        Facts are persisted in two passes:
+          1. Attached to the entity they reference when that entity is in
+             the current S1 extraction (new entities + explicit re-emits).
+          2. Any remaining facts whose ``f.entity`` matches an existing
+             graph node (exact ``_make_id`` or fuzzy by label) are upserted
+             against that existing node. Before this second pass existed,
+             facts about entities the LLM chose NOT to re-emit (because it
+             saw them in EXISTING NODES) were silently dropped — the root
+             cause of the Phase 3 benchmark's 0% fact accuracy on turns
+             after the first few, since later turns mostly mention
+             pre-existing entities like Sandy, Cipolletti, etc.
         """
         from acervo.graph.ids import _make_id
         from acervo.graph.ontology_validator import OntologyValidator
         from acervo.layers import Layer
         from acervo.ontology import is_likely_universal
+        from acervo.s1_unified import _fuzzy_match
 
         validator = OntologyValidator(
             source_stage="s1",
             session_id=getattr(self._graph, "session_id", ""),
         )
+
+        # Track which facts got attached in pass 1 so pass 2 can pick up
+        # the leftovers. We key by (entity_lower, fact_lower) so the same
+        # fact can't be persisted twice.
+        attached_keys: set[tuple[str, str]] = set()
 
         for entity in extraction.entities:
             # Validate entity type
@@ -376,12 +420,89 @@ class Pipeline:
                 (f.entity, f.fact, f.source) for f in extraction.facts
                 if f.entity.lower() == entity.name.lower()
             ]
+            for f_entity, f_text, _ in entity_facts:
+                attached_keys.add((f_entity.lower(), f_text.lower()))
 
             self._graph.upsert_entities(
                 [(entity.name, resolved_type)],
                 None,
                 entity_facts if entity_facts else None,
                 layer=layer,
+                source="user_assertion",
+                owner=self._owner or None,
+            )
+
+            # Phase 2: persist the name_embedding computed in S1 so Phase 2
+            # semantic search + entity_resolution can use it next turn.
+            emb = entity.attributes.get("name_embedding")
+            if emb and hasattr(self._graph, "set_entity_embedding"):
+                try:
+                    self._graph.set_entity_embedding(_make_id(entity.name), emb)
+                except Exception as exc:  # pragma: no cover — defensive
+                    log.warning(
+                        "pipeline: failed to persist name_embedding for %r: %s",
+                        entity.name,
+                        exc,
+                    )
+
+        # Pass 2: orphan facts (referencing entities NOT in this extraction
+        # but present in the graph). Fuzzy-resolve the fact's entity name to
+        # an existing graph node and persist there. This is the fix for the
+        # "fact_acc=0%" regression where later turns' facts were dropped
+        # because the LLM correctly chose to not re-emit existing entities.
+        existing_name_map: dict[str, str] = {}
+        for node in self._graph.get_all_nodes():
+            label = node.get("label", "")
+            if label:
+                existing_name_map[label.lower()] = label
+
+        orphan_facts_by_entity: dict[str, list[tuple[str, str, str]]] = {}
+        for f in extraction.facts:
+            key = (f.entity.lower(), f.fact.lower())
+            if key in attached_keys:
+                continue
+            # Try exact match via canonical id first
+            canonical_name: str | None = None
+            fact_id = _make_id(f.entity)
+            for existing_label_low, existing_label in existing_name_map.items():
+                if _make_id(existing_label) == fact_id:
+                    canonical_name = existing_label
+                    break
+            # Fall back to fuzzy on the label set
+            if canonical_name is None:
+                fuzzy = _fuzzy_match(
+                    f.entity.lower(),
+                    set(existing_name_map.values()),
+                    threshold=0.85,
+                )
+                if fuzzy:
+                    canonical_name = fuzzy
+            if canonical_name is None:
+                log.info(
+                    "pipeline: dropped orphan fact for %r (no matching graph node): %.80s",
+                    f.entity, f.fact,
+                )
+                continue
+            orphan_facts_by_entity.setdefault(canonical_name, []).append(
+                (canonical_name, f.fact, f.source)
+            )
+            log.info(
+                "pipeline: attaching orphan fact to existing node %r: %.80s",
+                canonical_name, f.fact,
+            )
+
+        for canonical_name, facts in orphan_facts_by_entity.items():
+            existing_node = self._graph.get_node(canonical_name) or {}
+            existing_type = existing_node.get("type") or "concept"
+            existing_layer_name = (existing_node.get("layer") or "PERSONAL").upper()
+            existing_layer = (
+                Layer.UNIVERSAL if existing_layer_name == "UNIVERSAL" else Layer.PERSONAL
+            )
+            self._graph.upsert_entities(
+                [(canonical_name, existing_type)],
+                None,
+                facts,
+                layer=existing_layer,
                 source="user_assertion",
                 owner=self._owner or None,
             )

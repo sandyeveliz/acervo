@@ -89,11 +89,21 @@ class S1_5GraphUpdate:
         existing_nodes_json: str,
         current_assistant_msg: str,
     ) -> S1_5Result:
-        """Execute S1.5: graph curation + assistant response extraction."""
-        prompt = self._prompt.format(
-            new_entities=new_entities_json[:1500],
-            existing_nodes=existing_nodes_json[:2000],
-            current_assistant_msg=current_assistant_msg[:1500],
+        """Execute S1.5: graph curation + assistant response extraction.
+
+        Uses ``str.replace`` instead of ``str.format`` to inject the three
+        input placeholders, so the prompt can freely contain literal
+        ``{``/``}`` characters in JSON examples without Python trying to
+        interpret them as format-spec placeholders. The Phase 3 prompt
+        rewrite adds several JSON few-shot examples — before this change
+        ``format()`` raised ``KeyError('\\n  "merges"')`` on every turn
+        because it parsed the first ``{`` in the body as a placeholder.
+        """
+        prompt = (
+            self._prompt
+            .replace("{new_entities}", new_entities_json[:1500])
+            .replace("{existing_nodes}", existing_nodes_json[:2000])
+            .replace("{current_assistant_msg}", current_assistant_msg[:1500])
         )
 
         try:
@@ -118,12 +128,18 @@ class S1_5GraphUpdate:
 
 def _parse_s1_5_response(raw: str) -> S1_5Result:
     """Parse the JSON output from S1.5 Graph Update."""
+    from acervo.graph.ids import _make_id
+
     obj = _parse_first_json(raw, "object")
     if not isinstance(obj, dict):
         log.warning("S1.5: failed to parse JSON response")
         return S1_5Result()
 
-    # Parse merges
+    # Parse merges. The LLM often emits display names in one field and
+    # snake_case ids in the other (e.g. {"from": "Cipolletti", "into":
+    # "cipolletti"}); comparing the raw strings lets self-merges slip
+    # through and causes graph.merge_nodes to delete the surviving node.
+    # We normalize via _make_id before the equality check to catch those.
     merges: list[MergeAction] = []
     for m in obj.get("merges", []):
         if not isinstance(m, dict):
@@ -131,8 +147,15 @@ def _parse_s1_5_response(raw: str) -> S1_5Result:
         from_id = str(m.get("from", "")).strip()
         into_id = str(m.get("into", "")).strip()
         reason = str(m.get("reason", "")).strip()
-        if from_id and into_id and from_id != into_id:
-            merges.append(MergeAction(from_id=from_id, into_id=into_id, reason=reason))
+        if not (from_id and into_id):
+            continue
+        if _make_id(from_id) == _make_id(into_id):
+            log.info(
+                "S1.5: dropping self-merge %s → %s (same canonical id)",
+                from_id, into_id,
+            )
+            continue
+        merges.append(MergeAction(from_id=from_id, into_id=into_id, reason=reason))
 
     # Parse new relations
     new_relations: list[Relation] = []
@@ -191,7 +214,10 @@ def _parse_s1_5_response(raw: str) -> S1_5Result:
             attrs["_existing_id"] = existing_id
         entities.append(Entity(name=name, type=mapped_type, layer=layer, attributes=attrs))
 
-    # Parse assistant facts
+    # Parse assistant facts. Phase 3 added optional ``valid_at``/
+    # ``invalid_at`` fields the LLM can populate when the assistant text
+    # contains explicit temporal bounds. Both stay None when not present —
+    # edge_resolution's temporal arbitrator handles the None case safely.
     facts: list[ExtractedFact] = []
     for f_raw in obj.get("assistant_facts", []):
         if not isinstance(f_raw, dict):
@@ -199,8 +225,20 @@ def _parse_s1_5_response(raw: str) -> S1_5Result:
         entity = str(f_raw.get("entity", "")).strip()
         fact = str(f_raw.get("fact", "")).strip()
         if entity and fact and len(fact) >= 10:
+            valid_at = f_raw.get("valid_at")
+            invalid_at = f_raw.get("invalid_at")
+            # Coerce "null"/"none" strings that some local models emit.
+            if isinstance(valid_at, str) and valid_at.strip().lower() in ("", "null", "none"):
+                valid_at = None
+            if isinstance(invalid_at, str) and invalid_at.strip().lower() in ("", "null", "none"):
+                invalid_at = None
             facts.append(ExtractedFact(
-                entity=entity, fact=fact, source="assistant", speaker="assistant",
+                entity=entity,
+                fact=fact,
+                source="assistant",
+                speaker="assistant",
+                valid_at=valid_at if isinstance(valid_at, str) else None,
+                invalid_at=invalid_at if isinstance(invalid_at, str) else None,
             ))
 
     # Parse assistant relations
@@ -233,6 +271,112 @@ def _parse_s1_5_response(raw: str) -> S1_5Result:
 
 # ── Graph application ──
 
+async def resolve_s1_5_facts(
+    result: S1_5Result,
+    graph: object,
+    llm: object | None,
+) -> dict:
+    """Phase 3 hook: run edge_resolution on the assistant-side facts before
+    ``apply_s1_5_result`` persists them.
+
+    This is a pre-processing step: the S1.5 LLM call produces candidate
+    facts from the assistant response, and here we run them through
+    ``acervo.extraction.edge_resolution.resolve_extracted_edges`` to:
+
+        1. Drop exact duplicates already present on the same entity.
+        2. Ask the LLM for semantic duplicates and contradictions against
+           related facts retrieved via ``graph.fact_fulltext_search``.
+        3. Compute ``FactInvalidation`` instructions for contradicted
+           facts via deterministic temporal arbitration.
+
+    The function mutates ``result.assistant_extraction.facts`` in place to
+    keep only the facts that should be persisted as new. The returned
+    dict includes the list of invalidations the caller must apply via
+    ``graph.invalidate_fact`` after ``apply_s1_5_result`` finishes.
+
+    When ``llm`` is None or ``edge_resolution`` isn't available the hook
+    is a no-op: all assistant facts are persisted as-is (Phase 1 behaviour).
+
+    Returns a small dict with audit counters that the caller can log.
+    """
+    audit = {
+        "resolved_new": 0,
+        "resolved_duplicates_dropped": 0,
+        "resolved_invalidations": 0,
+    }
+
+    assistant_ext = getattr(result, "assistant_extraction", None)
+    if assistant_ext is None or not getattr(assistant_ext, "facts", None):
+        return audit
+
+    if llm is None:
+        # Phase 1 fallback — no LLM available, keep all facts as-is.
+        return audit
+
+    try:
+        from acervo.extraction.edge_resolution import resolve_extracted_edges
+    except Exception as exc:
+        log.warning("resolve_s1_5_facts: edge_resolution unavailable: %s", exc)
+        return audit
+
+    try:
+        resolution = await resolve_extracted_edges(
+            list(assistant_ext.facts),
+            graph=graph,
+            llm=llm,
+        )
+    except Exception as exc:
+        log.warning("resolve_s1_5_facts: edge resolution failed: %s", exc)
+        return audit
+
+    # Rebuild the assistant facts list from the resolved set, preserving
+    # the legacy ExtractedFact shape so apply_s1_5_result can persist them
+    # unchanged.
+    kept_facts: list[ExtractedFact] = []
+    for new_fact in resolution.new_facts:
+        kept_facts.append(
+            ExtractedFact(
+                entity=new_fact.entity_name,
+                fact=new_fact.fact_text,
+                source=new_fact.source,
+                speaker=new_fact.speaker,
+            )
+        )
+    assistant_ext.facts = kept_facts
+
+    audit["resolved_new"] = len(kept_facts)
+    audit["resolved_duplicates_dropped"] = len(resolution.duplicates_dropped)
+    audit["resolved_invalidations"] = len(resolution.invalidations)
+
+    # Persist invalidations right away — this keeps apply_s1_5_result
+    # unchanged and avoids threading the invalidation list through another
+    # return channel.
+    if resolution.invalidations and hasattr(graph, "invalidate_fact"):
+        for inv in resolution.invalidations:
+            try:
+                graph.invalidate_fact(
+                    inv.fact_id,
+                    expired_at=inv.expired_at,
+                    invalid_at=inv.invalid_at,
+                )
+            except Exception as exc:
+                log.warning(
+                    "resolve_s1_5_facts: invalidate_fact(%s) failed: %s",
+                    inv.fact_id,
+                    exc,
+                )
+
+    if audit["resolved_duplicates_dropped"] or audit["resolved_invalidations"]:
+        log.info(
+            "S1.5 edge resolution: kept=%d dropped=%d invalidated=%d",
+            audit["resolved_new"],
+            audit["resolved_duplicates_dropped"],
+            audit["resolved_invalidations"],
+        )
+
+    return audit
+
+
 def apply_s1_5_result(
     graph: object,  # GraphStorePort — works with TopicGraph or LadybugGraphStore
     result: S1_5Result,
@@ -252,12 +396,25 @@ def apply_s1_5_result(
         "facts_added": 0,
     }
 
-    # 1. Apply merges — use graph.merge_nodes() instead of dict mutation
+    # 1. Apply merges — use graph.merge_nodes() instead of dict mutation.
+    # Defense in depth: the parser already rejects self-merges by canonical
+    # id, but we double-check here after resolving the nodes in case either
+    # side references a node whose current id differs from the LLM's input.
+    from acervo.graph.ids import _make_id as _make_id_apply
     for merge in result.merges:
         from_node = graph.get_node(merge.from_id)
         into_node = graph.get_node(merge.into_id)
         if not from_node or not into_node:
             log.info("S1.5 merge skipped (node not found): %s → %s", merge.from_id, merge.into_id)
+            continue
+
+        from_resolved = from_node.get("id") or _make_id_apply(merge.from_id)
+        into_resolved = into_node.get("id") or _make_id_apply(merge.into_id)
+        if from_resolved == into_resolved:
+            log.info(
+                "S1.5 merge skipped (both sides resolve to %s): %s → %s",
+                from_resolved, merge.from_id, merge.into_id,
+            )
             continue
 
         ok = graph.merge_nodes(merge.into_id, merge.from_id)

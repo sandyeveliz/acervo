@@ -81,9 +81,22 @@ class S3Assembler:
         history: list[dict] | None = None,
         current_topic: str = "none",
         warm_budget_override: int | None = None,
+        query_embedding: list[float] | None = None,
     ) -> S3Result:
-        """Execute S3: format nodes by layer, assemble within budget."""
+        """Execute S3: format nodes by layer, assemble within budget.
+
+        When ``query_embedding`` is provided, Phase 4 MMR reranking runs on
+        the WARM and COLD layers before the per-layer truncation. This
+        favours diverse results within each layer instead of straight BFS
+        order, without changing the HOT/WARM/COLD semantics.
+        """
         budget = warm_budget_override or _BUDGETS.get(intent, 400)
+
+        # Phase 4: optional MMR rerank within WARM and COLD layers. HOT is
+        # left alone — those are the direct seeds and reordering would hide
+        # the most relevant items.
+        if query_embedding:
+            layered = _mmr_rerank_layers(layered, query_embedding)
 
         # Build context block from layers
         warm_content = self._build_context_block(
@@ -292,3 +305,62 @@ def _grounding_instruction(intent: str) -> str:
     elif intent == "followup":
         return "Continue based on the knowledge context and previous conversation."
     return ""  # chat: no grounding
+
+
+# ── Phase 4: MMR reranking ──
+
+def _node_embedding(node: dict) -> list[float] | None:
+    """Extract the name embedding from a graph-store node dict.
+
+    Supports both the LadybugGraphStore layout (top-level
+    ``name_embedding`` column, lifted into the dict by _row_to_node) and
+    the TopicGraph layout (embedding nested inside ``attributes``).
+    Returns None when no embedding is present.
+    """
+    emb = node.get("name_embedding")
+    if emb:
+        return list(emb)
+    attrs = node.get("attributes") or {}
+    emb = attrs.get("name_embedding")
+    return list(emb) if emb else None
+
+
+def _mmr_rerank_layers(
+    layered: LayeredContext,
+    query_embedding: list[float],
+) -> LayeredContext:
+    """Reorder WARM and COLD layers via Maximal Marginal Relevance.
+
+    Nodes without an embedding keep their BFS order at the tail of each
+    layer (MMR only reorders the ones it can score). HOT is left alone
+    intentionally: those are the direct seeds the user explicitly named.
+    """
+    from acervo.search.fusion import maximal_marginal_relevance
+
+    def _rerank(nodes: list[dict]) -> list[dict]:
+        if len(nodes) < 2:
+            return nodes
+        with_emb: dict[str, list[float]] = {}
+        order_by_id: dict[str, dict] = {}
+        tail: list[dict] = []
+        for n in nodes:
+            nid = n.get("id") or n.get("uuid") or ""
+            emb = _node_embedding(n)
+            if nid and emb:
+                with_emb[nid] = emb
+                order_by_id[nid] = n
+            else:
+                tail.append(n)
+        if not with_emb:
+            return nodes
+        ids, _scores = maximal_marginal_relevance(query_embedding, with_emb)
+        reordered = [order_by_id[i] for i in ids if i in order_by_id]
+        reordered.extend(tail)
+        return reordered
+
+    return LayeredContext(
+        hot=layered.hot,
+        warm=_rerank(layered.warm),
+        cold=_rerank(layered.cold),
+        seeds_used=layered.seeds_used,
+    )

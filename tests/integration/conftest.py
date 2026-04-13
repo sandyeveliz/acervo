@@ -29,19 +29,36 @@ _FIXTURES = _REPO_ROOT / "tests" / "fixtures"
 def _test_backend() -> str:
     """Get the graph backend for integration tests.
 
-    Set ACERVO_TEST_BACKEND=ladybug to run against LadybugDB.
-    Default: "json" (TopicGraph).
+    Default is ``ladybug`` as of v0.6.0 — it's the production backend
+    and everything we ship needs to work against it. Set
+    ``ACERVO_TEST_BACKEND=json`` to force the TopicGraph (JSON) fallback
+    path, which is useful when debugging graph-store-agnostic code or
+    running in an environment without the Ladybug/Kuzu driver.
     """
-    return os.getenv("ACERVO_TEST_BACKEND", "json")
+    return os.getenv("ACERVO_TEST_BACKEND", "ladybug")
 
 
 @pytest.fixture
 def llm_client():
-    """Create an OpenAIClient from environment variables."""
+    """Create an OpenAIClient from environment variables.
+
+    Applies the facade's Ollama auto-detection so qwen3+/qwq/deepseek-r1
+    models running on a local Ollama daemon use the native ``/api/chat``
+    dialect with ``think: false``. Without this switch, thinking-model
+    calls to ``/v1/chat/completions`` silently route their answer to
+    ``message.reasoning`` and leave ``message.content`` empty, which
+    corrupts every downstream benchmark result.
+    """
+    from acervo.facade import _ollama_dialect_kwargs
+
+    base_url = os.getenv("ACERVO_LIGHT_MODEL_URL", "http://localhost:11434/v1")
+    model = os.getenv("ACERVO_LIGHT_MODEL", "qwen3.5:9b")
+    api_key = os.getenv("ACERVO_LIGHT_API_KEY", "ollama")
     return OpenAIClient(
-        base_url=os.getenv("ACERVO_LIGHT_MODEL_URL", "http://localhost:11434/v1"),
-        model=os.getenv("ACERVO_LIGHT_MODEL", "qwen2.5:7b"),
-        api_key=os.getenv("ACERVO_LIGHT_API_KEY", "ollama"),
+        base_url=base_url,
+        model=model,
+        api_key=api_key,
+        **_ollama_dialect_kwargs(base_url, model),
     )
 
 

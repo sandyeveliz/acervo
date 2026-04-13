@@ -4,6 +4,8 @@ import json
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from acervo.graph import TopicGraph, _make_id
 from acervo.layers import Layer, NodeMeta
 
@@ -204,6 +206,15 @@ class TestGraphQuality:
         self_refs = [e for e in edges if e["source"] == e["target"]]
         assert len(self_refs) == 0
 
+    @pytest.mark.skip(
+        reason=(
+            "Feature removed: co_mentioned edges are no longer auto-created when "
+            "two entities are upserted together. 'co_mentioned' is blacklisted in "
+            "acervo/graph/ontology_validator.py and filtered out in S1/S1.5 "
+            "validation — see _validate_s1 in s1_unified.py. Kept as a historical "
+            "marker; delete once confirmed unused."
+        )
+    )
     def test_co_mentioned_weight_capped(self):
         """co_mentioned edge weight should not exceed 10.0."""
         graph = self._make_graph()

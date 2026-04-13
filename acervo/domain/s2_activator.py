@@ -4,6 +4,13 @@ Finds seed nodes from the user message, then does breadth-first
 traversal of the knowledge graph. Nodes at depth 0 are HOT (direct
 match), depth 1 are WARM (neighbors), depth 2 are COLD (2 hops away).
 
+Phase 4 adds an optional hybrid enrichment: after the BFS layering we
+run ``acervo.search.hybrid.hybrid_search`` which fuses BFS + vector +
+fulltext via Reciprocal Rank Fusion and exposes the result as
+``vector_hits`` on the returned ``S2Result``. This replaces the old
+orphan vector-search path while keeping the HOT/WARM/COLD layer
+semantics intact for S3.
+
 ONE code path. No conversation/project divergence.
 """
 
@@ -50,10 +57,19 @@ class S2Activator:
         else:
             layered = self._traverse(graph, seeds, max_depth=2)
 
-        # ── Step 3: Optional vector search (adds to warm) ──
+        # ── Step 3: Phase 4 hybrid enrichment — BFS + vector + BM25 fused with RRF.
+        # Replaces the legacy orphan _vector_search path. When the graph
+        # supports entity_similarity_search / fact_fulltext_search, these
+        # contribute extra candidates that are fused with the BFS output.
         vector_hits: list[dict] = []
-        if vector_store is not None and user_embedding is not None and intent != "chat":
-            vector_hits = self._vector_search(vector_store, user_embedding)
+        if intent != "chat":
+            vector_hits = self._hybrid_enrich(
+                graph=graph,
+                query=user_text,
+                seed_ids=seed_ids,
+                user_embedding=user_embedding,
+                existing_ids={n.get("id") for n in layered.hot + layered.warm + layered.cold},
+            )
 
         # Collect all active node IDs for telemetry
         active_ids: set[str] = set()
@@ -61,7 +77,7 @@ class S2Activator:
             active_ids.add(node.get("id", ""))
 
         log.info(
-            "[acervo] S2 — seeds=%d, hot=%d, warm=%d, cold=%d, vector=%d",
+            "[acervo] S2 — seeds=%d, hot=%d, warm=%d, cold=%d, hybrid_extra=%d",
             len(seeds), len(layered.hot), len(layered.warm),
             len(layered.cold), len(vector_hits),
         )
@@ -71,6 +87,48 @@ class S2Activator:
             active_node_ids=active_ids,
             vector_hits=vector_hits,
         )
+
+    # ── Phase 4: hybrid enrichment ──
+
+    def _hybrid_enrich(
+        self,
+        *,
+        graph: Any,
+        query: str,
+        seed_ids: list[str],
+        user_embedding: list[float] | None,
+        existing_ids: set[str],
+    ) -> list[dict]:
+        """Run hybrid_search and return nodes not already in the BFS layers.
+
+        Returns an empty list when hybrid_search doesn't add anything or
+        when the graph doesn't support any of the required methods. Never
+        raises — failures degrade to BFS-only silently.
+        """
+        try:
+            from acervo.search.hybrid import hybrid_search
+        except Exception as exc:  # pragma: no cover — import guard
+            log.warning("S2 hybrid: import failed: %s", exc)
+            return []
+
+        try:
+            result = hybrid_search(
+                graph=graph,
+                query=query,
+                seed_ids=seed_ids,
+                query_embedding=user_embedding,
+                limit=10,
+            )
+        except Exception as exc:
+            log.warning("S2 hybrid: hybrid_search failed: %s", exc)
+            return []
+
+        extra: list[dict] = []
+        for node in result.fused_nodes:
+            nid = node.get("id") or node.get("uuid") or ""
+            if nid and nid not in existing_ids:
+                extra.append(node)
+        return extra
 
     # ── Seed selection ──
 
@@ -172,22 +230,10 @@ class S2Activator:
             seeds_used=[s.get("label", "") for s in seeds],
         )
 
-    # ── Vector search (optional enrichment) ──
-
-    def _vector_search(self, vector_store: Any, user_embedding: list[float]) -> list[dict]:
-        """Perform vector search. Returns hits. Graceful on error."""
-        try:
-            import asyncio
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                return []
-            hits = loop.run_until_complete(
-                vector_store.search_with_embedding(user_embedding, n_results=5)
-            )
-            return hits
-        except Exception as e:
-            log.warning("S2 vector search failed: %s", e)
-            return []
+    # (Phase 4 replaced the old _vector_search helper with _hybrid_enrich
+    # which fuses BFS + vector + fulltext through RRF. The vector_store
+    # parameter on run() is kept for backwards compat but is now a no-op —
+    # hybrid retrieval reads directly from the graph store.)
 
 
 from acervo.graph.ids import _make_id  # noqa: E402 — shared ID generation

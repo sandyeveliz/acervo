@@ -53,6 +53,57 @@ from acervo.context_index import ContextIndex
 log = logging.getLogger(__name__)
 
 
+# Models whose default behaviour is to emit <think> blocks — we want
+# Ollama's /api/chat dialect with ``think: false`` for these so the
+# reasoning doesn't eat the token budget and leave ``content`` empty.
+# Keep this list conservative; any thinking model can be added here.
+_THINKING_MODEL_PREFIXES = (
+    "qwen3",
+    "qwen-3",
+    "qwq",
+    "deepseek-r1",
+    "o1",
+    "o3",
+)
+
+
+def _looks_like_ollama(base_url: str) -> bool:
+    """Heuristic: does ``base_url`` point at a local Ollama daemon?"""
+    if not base_url:
+        return False
+    lowered = base_url.lower()
+    return (
+        ":11434" in lowered
+        or "ollama" in lowered
+    )
+
+
+def _is_thinking_model(model_name: str) -> bool:
+    lowered = (model_name or "").lower()
+    return any(lowered.startswith(p) for p in _THINKING_MODEL_PREFIXES)
+
+
+def _ollama_dialect_kwargs(base_url: str, model_name: str) -> dict:
+    """Return OpenAIClient kwargs that force Ollama native dialect + think off.
+
+    Returns an empty dict when the target does not look like Ollama or the
+    model is not a known thinking model — preserving backward compat for
+    OpenAI proper / LM Studio / vLLM.
+
+    When the target IS an Ollama daemon serving a thinking model (qwen3,
+    qwq, deepseek-r1, etc.), we switch to the native ``/api/chat`` surface
+    and pass ``think=False`` top-level. Ollama's /v1 compat layer silently
+    ignores ``chat_template_kwargs`` on qwen3, so this is the only way to
+    stop the model from spending its entire ``max_tokens`` budget on
+    reasoning (verified empirically — see tests/integration/test_llm_parse.py).
+    """
+    if not _looks_like_ollama(base_url):
+        return {}
+    if not _is_thinking_model(model_name):
+        return {}
+    return {"api_style": "ollama", "think": False}
+
+
 @dataclass
 class PrepareResult:
     """Result of Acervo.prepare() — everything the client needs to call the LLM."""
@@ -131,7 +182,7 @@ class Acervo:
         structural_parser: object | None = None,
         role_llms: dict[str, LLMClient] | None = None,
         description: str = "",
-        graph_backend: str = "json",
+        graph_backend: str = "ladybug",
     ) -> None:
         self._project_description = description
         self._graph = self._create_graph(Path(persist_path), graph_backend)
@@ -145,7 +196,11 @@ class Acervo:
         summarizer_llm = roles.get("summarizer", llm)
 
         self._extractor_llm = extractor_llm
-        self._s1_unified = S1Unified(extractor_llm, system_prompt=p.get("s1_unified"))
+        self._s1_unified = S1Unified(
+            extractor_llm,
+            system_prompt=p.get("s1_unified"),
+            embedder=embedder,
+        )
         self._s1_5_prompt = p.get("s1_5_graph_update")
         self._extractor = ConversationExtractor(extractor_llm, prompt_template=p.get("extractor_conversation"))
         self._search_extractor = SearchExtractor(llm, prompt_template=p.get("extractor_search"))
@@ -233,13 +288,41 @@ class Acervo:
         return cls._from_project(project, llm=llm, **overrides)
 
     @staticmethod
-    def _create_graph(persist_path: Path, backend: str = "json"):
-        """Factory: create graph store based on backend config."""
+    def _create_graph(persist_path: Path, backend: str = "ladybug"):
+        """Factory: create graph store based on backend config.
+
+        ``ladybug`` is the default backend as of v0.6.0 — it's the
+        LadybugDB (KuzuDB fork) embedded Cypher store that supports
+        native vector search, fulltext indexes, and the Phase 2
+        bi-temporal Fact schema. ``json`` is kept as an explicit fallback
+        for environments where the ``kuzu``/``real_ladybug`` driver isn't
+        installed or for lightweight tooling that doesn't need a real
+        graph database.
+
+        Auto-fallback behaviour: if ``backend == "ladybug"`` and the
+        driver import fails, we log a warning and fall back to
+        ``TopicGraph`` so the caller doesn't hard-crash on environments
+        missing the optional dep.
+        """
         if backend == "ladybug":
-            from acervo.adapters.ladybug_store import LadybugGraphStore
-            db_path = persist_path.parent / "graphdb" / "acervo.db"
-            return LadybugGraphStore(db_path)
-        return TopicGraph(persist_path)
+            try:
+                from acervo.adapters.ladybug_store import LadybugGraphStore
+                db_path = persist_path.parent / "graphdb" / "acervo.db"
+                return LadybugGraphStore(db_path)
+            except ImportError as exc:
+                log.warning(
+                    "Ladybug backend requested but driver unavailable (%s). "
+                    "Falling back to TopicGraph (JSON). Install with "
+                    "'pip install acervo[graph]' or set graph_backend='json' "
+                    "explicitly to silence this warning.",
+                    exc,
+                )
+                return TopicGraph(persist_path)
+        if backend == "json":
+            return TopicGraph(persist_path)
+        raise ValueError(
+            f"Unknown graph_backend {backend!r}. Expected 'ladybug' or 'json'."
+        )
 
     @classmethod
     def _from_project(
@@ -260,6 +343,7 @@ class Acervo:
                 base_url=llm_cfg["base_url"],
                 model=llm_cfg["model"],
                 api_key=llm_cfg["api_key"],
+                **_ollama_dialect_kwargs(llm_cfg["base_url"], llm_cfg["model"]),
             )
 
         # Per-role LLM overrides from [acervo.models.*]
@@ -273,6 +357,7 @@ class Acervo:
                     base_url=role_model.url,
                     model=role_model.name,
                     api_key=role_model.api_key or default_model.api_key,
+                    **_ollama_dialect_kwargs(role_model.url, role_model.name),
                 )
                 log.info("Model override for %s: %s @ %s", role, role_model.name, role_model.url)
 
@@ -321,10 +406,15 @@ class Acervo:
         from acervo.openai_client import OpenAIClient
 
         base_url = os.environ.get("ACERVO_LIGHT_MODEL_URL", "http://localhost:11434/v1")
-        model = os.environ.get("ACERVO_LIGHT_MODEL", "qwen2.5:3b")
+        model = os.environ.get("ACERVO_LIGHT_MODEL", "qwen3.5:9b")
         api_key = os.environ.get("ACERVO_LIGHT_API_KEY", "ollama")
 
-        llm = OpenAIClient(base_url=base_url, model=model, api_key=api_key)
+        llm = OpenAIClient(
+            base_url=base_url,
+            model=model,
+            api_key=api_key,
+            **_ollama_dialect_kwargs(base_url, model),
+        )
         return cls(llm=llm, owner=owner, persist_path=persist_path)
 
     # ── Public properties ──
@@ -741,14 +831,22 @@ class Acervo:
                 prev_assistant_msg = msg.get("content", "")
                 break
 
-        # S1 Unified: topic classification + extraction in one LLM call (ALWAYS runs)
+        # S1 Unified: topic classification + extraction in one LLM call (ALWAYS runs).
+        # Pass full existing_nodes list so the post-validation dedup pass
+        # (entity_resolution.resolve_extracted_nodes) can merge duplicates
+        # against the graph using MinHash LSH.
         _s1_t0 = time.perf_counter()
+        existing_node_names = {n.get("label", "") for n in all_nodes if n.get("label")}
+        existing_nodes_dicts = [dict(n) for n in all_nodes]
         s1_result = await self._s1_unified.run(
             user_msg=user_text,
             prev_assistant_msg=prev_assistant_msg,
             current_topic=current_topic,
             topic_hint=topic_hint,
             existing_nodes_summary=existing_nodes_summary,
+            existing_node_names=existing_node_names,
+            existing_nodes=existing_nodes_dicts,
+            graph=self._graph,
         )
         _s1_ms = round((time.perf_counter() - _s1_t0) * 1000)
 
@@ -1253,7 +1351,11 @@ class Acervo:
         Returns:
             ExtractionResult with extracted entities, relations, facts
         """
-        from acervo.s1_5_graph_update import S1_5GraphUpdate, apply_s1_5_result
+        from acervo.s1_5_graph_update import (
+            S1_5GraphUpdate,
+            apply_s1_5_result,
+            resolve_s1_5_facts,
+        )
 
         # Check if LLM response is a "no data" instruction-following response
         _SKIP_PHRASES = ("i don't have information", "i don't have data", "i can search",
@@ -1297,12 +1399,23 @@ class Acervo:
         )
         _s15_ms = round((time.perf_counter() - _s15_t0) * 1000)
 
+        # Phase 3: resolve assistant facts against the graph before applying
+        # curation — mutates s1_5_result.assistant_extraction.facts in place
+        # and applies invalidations to contradicted existing facts.
+        fact_audit = await resolve_s1_5_facts(
+            s1_5_result, self._graph, llm=self._extractor_llm,
+        )
+
         # Apply curation actions + persist assistant entities
         audit = apply_s1_5_result(self._graph, s1_5_result, owner=self._owner)
+        audit.update(fact_audit)
         log.info(
-            "[acervo] S1.5 — merges=%d, fixes=%d, discards=%d, entities=%d, facts=%d",
+            "[acervo] S1.5 — merges=%d, fixes=%d, discards=%d, entities=%d, "
+            "facts=%d, resolved_new=%d, dropped=%d, invalidated=%d",
             audit["merges_applied"], audit["type_corrections"],
             audit["discards"], audit["entities_added"], audit["facts_added"],
+            audit.get("resolved_new", 0), audit.get("resolved_duplicates_dropped", 0),
+            audit.get("resolved_invalidations", 0),
         )
 
         # Store S1.5 debug data for proxy to expose via /acervo/last-turn

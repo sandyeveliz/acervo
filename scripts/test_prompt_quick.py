@@ -208,12 +208,23 @@ def load_turn(case: str, turn_idx: int) -> dict | None:
     return None
 
 
-async def run_quick_test(count: int = 20, model: str = "qwen2.5:7b"):
+async def run_quick_test(count: int = 20, model: str = "qwen3.5:9b"):
     worst = find_worst_turns(count)
     print(f"Testing {len(worst)} worst turns across {len(set(w['case'] for w in worst))} cases")
     print(f"Model: {model}\n")
 
-    llm = OpenAIClient(base_url="http://localhost:11434/v1", model=model, api_key="ollama")
+    # Use the facade's Ollama auto-detection so qwen3+ / qwq / deepseek-r1
+    # models call /api/chat with think=false instead of /v1. Without this,
+    # thinking models put their answer in message.reasoning and leave
+    # content empty — which silently corrupts every iteration.
+    from acervo.facade import _ollama_dialect_kwargs
+    base_url = "http://localhost:11434/v1"
+    llm = OpenAIClient(
+        base_url=base_url,
+        model=model,
+        api_key="ollama",
+        **_ollama_dialect_kwargs(base_url, model),
+    )
 
     # Aggregates
     better = same = worse = errors = 0

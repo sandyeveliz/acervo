@@ -43,7 +43,8 @@ CREATE NODE TABLE IF NOT EXISTS EntityNode (
     source STRING,
     confidence_for_owner DOUBLE DEFAULT 1.0,
     status STRING DEFAULT 'complete',
-    pending_fields STRING[]
+    pending_fields STRING[],
+    name_embedding DOUBLE[]
 )"""
 
 _STRUCTURAL_NODE_DDL = """\
@@ -76,7 +77,13 @@ CREATE NODE TABLE IF NOT EXISTS Fact (
     date STRING,
     session STRING,
     source STRING,
-    speaker STRING
+    speaker STRING,
+    valid_at STRING,
+    invalid_at STRING,
+    expired_at STRING,
+    reference_time STRING,
+    fact_embedding DOUBLE[],
+    episodes STRING[]
 )"""
 
 _VALIDATION_LOG_DDL = """\
@@ -124,11 +131,50 @@ class LadybugGraphStore:
         self._ensure_schema()
 
     def _ensure_schema(self) -> None:
-        """Create all tables if they don't exist."""
+        """Create all tables if they don't exist.
+
+        For fresh databases the new schema (including ``name_embedding`` on
+        EntityNode and bi-temporal fields on Fact) is applied immediately.
+
+        For pre-existing databases created with the pre-Phase-2 schema, Kuzu's
+        ``CREATE TABLE IF NOT EXISTS`` silently keeps the old table and the
+        new columns never get added. That later breaks inserts with confusing
+        errors. We detect this here and raise a clear, actionable message
+        pointing at ``scripts/migrate_bi_temporal.py``.
+        """
         for ddl in [_ENTITY_NODE_DDL, _STRUCTURAL_NODE_DDL, _FACT_NODE_DDL, _VALIDATION_LOG_DDL]:
             self._conn.execute(ddl)
         for ddl in _REL_DDLS:
             self._conn.execute(ddl)
+
+        self._assert_bi_temporal_schema()
+
+    def _assert_bi_temporal_schema(self) -> None:
+        """Fail fast if the current DB is still on the pre-Phase-2 schema.
+
+        We probe two columns that Phase 2 introduced:
+          - EntityNode.name_embedding
+          - Fact.valid_at
+
+        If either is missing, Kuzu raises a binder error when we try to
+        RETURN it. We catch that and re-raise with a clear migration hint.
+        """
+        probes = [
+            ("EntityNode", "name_embedding"),
+            ("Fact", "valid_at"),
+        ]
+        for table, column in probes:
+            try:
+                self._conn.execute(f"MATCH (n:{table}) RETURN n.{column} LIMIT 0")
+            except Exception as exc:
+                raise RuntimeError(
+                    f"LadybugDB schema is out of date: column '{column}' missing from "
+                    f"table '{table}'. This database was created with a pre-Phase-2 "
+                    "schema and needs to be migrated. Run:\n"
+                    f"    python scripts/migrate_bi_temporal.py {self._db_path}\n"
+                    "See docs/research/graphiti-analysis.md for context on why "
+                    "this schema change was needed."
+                ) from exc
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -213,43 +259,103 @@ class LadybugGraphStore:
         return nodes
 
     def _get_facts_for(self, node_id: str, node_table: str) -> list[dict]:
-        """Get all facts linked to a node."""
+        """Get all facts linked to a node.
+
+        Returns the legacy flat-temporal fields (``date``, ``session``,
+        ``source``) plus the Phase 2 bi-temporal fields (``valid_at``,
+        ``invalid_at``, ``expired_at``, ``reference_time``) and provenance
+        (``episodes``). ``fact_id`` is also surfaced so callers can
+        invalidate or link facts back.
+        """
         rel = self._fact_rel_table(node_table)
         r = self._conn.execute(
             f"MATCH (n:{node_table} {{id: $id}})-[:{rel}]->(f:Fact) "
-            f"RETURN f.fact_text, f.date, f.session, f.source, f.speaker",
+            "RETURN f.id, f.fact_text, f.date, f.session, f.source, f.speaker, "
+            "f.valid_at, f.invalid_at, f.expired_at, f.reference_time, f.episodes",
             {"id": node_id},
         )
         facts = []
         while r.has_next():
             row = r.get_next()
             facts.append({
-                "fact": row[0],
-                "date": row[1] or "",
-                "session": row[2] or "",
-                "source": row[3] or "",
+                "fact_id": row[0],
+                "fact": row[1],
+                "date": row[2] or "",
+                "session": row[3] or "",
+                "source": row[4] or "",
+                "speaker": row[5] or "",
+                "valid_at": row[6],
+                "invalid_at": row[7],
+                "expired_at": row[8],
+                "reference_time": row[9],
+                "episodes": row[10] or [],
             })
         return facts
 
-    def _add_fact(self, node_id: str, node_table: str, fact_text: str,
-                  date: str, session: str, source: str) -> None:
-        """Add a fact node and link it to a parent node."""
+    def _add_fact(
+        self,
+        node_id: str,
+        node_table: str,
+        fact_text: str,
+        date: str,
+        session: str,
+        source: str,
+        *,
+        valid_at: str | None = None,
+        invalid_at: str | None = None,
+        reference_time: str | None = None,
+        fact_embedding: list[float] | None = None,
+        episodes: list[str] | None = None,
+    ) -> str:
+        """Add a fact node and link it to a parent node.
+
+        Phase 2 extended the signature with bi-temporal fields
+        (``valid_at``, ``invalid_at``, ``reference_time``), a
+        ``fact_embedding`` for vector retrieval, and an ``episodes`` list
+        for provenance. All new parameters are optional so legacy callers
+        (e.g. indexing files, RAG ingestion) keep working unchanged.
+
+        Returns the generated fact_id so callers can refer back to the fact
+        (e.g. to mark it as duplicate, or to stamp it on an episode).
+        """
         # Generate fact ID: count existing facts for this node
         existing = self._get_facts_for(node_id, node_table)
         fact_id = f"{node_id}_f{len(existing)}"
         rel = self._fact_rel_table(node_table)
 
+        # reference_time defaults to ingestion date when the caller didn't
+        # provide one — lets us backfill Phase 3 contradiction logic with a
+        # best-effort anchor.
+        if reference_time is None:
+            reference_time = date
+
         self._conn.execute(
-            "CREATE (f:Fact {id: $id, fact_text: $text, date: $date, "
-            "session: $session, source: $source, speaker: 'user'})",
-            {"id": fact_id, "text": fact_text, "date": date,
-             "session": session, "source": source},
+            "CREATE (f:Fact {"
+            "id: $id, fact_text: $text, date: $date, "
+            "session: $session, source: $source, speaker: 'user', "
+            "valid_at: $valid_at, invalid_at: $invalid_at, "
+            "expired_at: NULL, reference_time: $reference_time, "
+            "fact_embedding: $fact_embedding, episodes: $episodes"
+            "})",
+            {
+                "id": fact_id,
+                "text": fact_text,
+                "date": date,
+                "session": session,
+                "source": source,
+                "valid_at": valid_at,
+                "invalid_at": invalid_at,
+                "reference_time": reference_time,
+                "fact_embedding": fact_embedding,
+                "episodes": episodes or [],
+            },
         )
         self._conn.execute(
             f"MATCH (n:{node_table} {{id: $nid}}), (f:Fact {{id: $fid}}) "
             f"CREATE (n)-[:{rel}]->(f)",
             {"nid": node_id, "fid": fact_id},
         )
+        return fact_id
 
     def _find_similar_fact(self, existing_facts: list[dict], new_fact: str,
                            threshold: float = 0.65) -> str | None:
@@ -598,6 +704,15 @@ class LadybugGraphStore:
     def merge_nodes(self, keep_id: str, absorb_id: str, alias: str | None = None) -> bool:
         kid = _make_id(keep_id) if not self._get_node_table_by_id(keep_id) else keep_id
         aid = _make_id(absorb_id) if not self._get_node_table_by_id(absorb_id) else absorb_id
+
+        # Defense: self-merge would delete the surviving node via
+        # remove_node(aid) at the end of the function. The S1.5 parser now
+        # guards against this upstream but we also fail hard here so any
+        # future caller that feeds us equal ids gets a clear no-op instead
+        # of silent data loss.
+        if kid == aid:
+            log.warning("merge_nodes: refusing self-merge of %s", kid)
+            return False
 
         keep_table = self._get_node_table_by_id(kid)
         absorb_table = self._get_node_table_by_id(aid)
@@ -1245,3 +1360,156 @@ class LadybugGraphStore:
                     visited.add(nid)
 
         return layers
+
+    # ── GraphStorePort: Phase 2 — semantic search + bi-temporal mutations ───
+
+    def entity_similarity_search(
+        self,
+        query_embedding: list[float],
+        *,
+        limit: int = 15,
+        min_score: float = 0.6,
+    ) -> list[tuple[dict, float]]:
+        """Brute-force cosine similarity over EntityNode.name_embedding.
+
+        Phase 2 ships a Python fallback that reads every entity with a
+        populated ``name_embedding`` and scores them. This is O(N) but fine
+        for the graph sizes we care about (<10k nodes). When we confirm that
+        Ladybug exposes Kuzu's ``array_cosine_similarity`` we can swap this
+        for a Cypher-native path without changing the signature.
+        """
+        if not query_embedding:
+            return []
+
+        import math
+
+        r = self._conn.execute(
+            "MATCH (n:EntityNode) WHERE n.name_embedding IS NOT NULL "
+            "RETURN n.id, n.name_embedding"
+        )
+
+        # Pre-compute query norm once.
+        q_norm = math.sqrt(sum(x * x for x in query_embedding)) or 1.0
+
+        candidates: list[tuple[dict, float]] = []
+        while r.has_next():
+            nid, emb = r.get_next()
+            if not emb or len(emb) != len(query_embedding):
+                continue
+            dot = sum(a * b for a, b in zip(query_embedding, emb, strict=True))
+            n_norm = math.sqrt(sum(x * x for x in emb)) or 1.0
+            score = dot / (q_norm * n_norm)
+            if score < min_score:
+                continue
+            node = self.get_node(nid)
+            if node is not None:
+                candidates.append((node, float(score)))
+
+        candidates.sort(key=lambda pair: pair[1], reverse=True)
+        return candidates[:limit]
+
+    def fact_fulltext_search(
+        self,
+        query: str,
+        *,
+        limit: int = 15,
+    ) -> list[dict]:
+        """Case-insensitive substring + token match over Fact.fact_text.
+
+        This is a pragmatic Python fallback until Ladybug/Kuzu FTS is
+        wired up. Good enough for Phase 4 hybrid retrieval as one of the
+        signals fused via RRF — the other signals (vector, BFS) compensate
+        for its limitations.
+        """
+        if not query or not query.strip():
+            return []
+
+        query_lower = query.lower().strip()
+        query_tokens = {t for t in query_lower.split() if len(t) > 2}
+
+        r = self._conn.execute(
+            "MATCH (f:Fact) "
+            "RETURN f.id, f.fact_text, f.date, f.valid_at, f.invalid_at, "
+            "f.expired_at, f.reference_time"
+        )
+        scored: list[tuple[float, dict]] = []
+        while r.has_next():
+            fid, text, date, valid_at, invalid_at, expired_at, ref = r.get_next()
+            if not text:
+                continue
+            text_lower = text.lower()
+            score = 0.0
+            if query_lower in text_lower:
+                score += 2.0
+            if query_tokens:
+                text_tokens = set(text_lower.split())
+                overlap = len(query_tokens & text_tokens)
+                if overlap:
+                    score += overlap / len(query_tokens)
+            if score <= 0:
+                continue
+            scored.append((score, {
+                "fact_id": fid,
+                "fact": text,
+                "date": date or "",
+                "valid_at": valid_at,
+                "invalid_at": invalid_at,
+                "expired_at": expired_at,
+                "reference_time": ref,
+            }))
+
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return [fact for _, fact in scored[:limit]]
+
+    def invalidate_fact(
+        self,
+        fact_id: str,
+        *,
+        expired_at: str,
+        invalid_at: str | None = None,
+    ) -> bool:
+        """Mark a fact as expired (and optionally stamp its event-time end).
+
+        Does NOT delete the row — Acervo's knowledge graph is append-only
+        so the historical fact stays queryable with its temporal window.
+        Returns True when the fact was found and updated.
+        """
+        if not fact_id:
+            return False
+
+        # Check existence first so we can report a reliable boolean result.
+        probe = self._conn.execute(
+            "MATCH (f:Fact {id: $id}) RETURN f.id",
+            {"id": fact_id},
+        )
+        if not probe.has_next():
+            return False
+
+        if invalid_at is not None:
+            self._conn.execute(
+                "MATCH (f:Fact {id: $id}) "
+                "SET f.expired_at = $expired_at, f.invalid_at = $invalid_at",
+                {"id": fact_id, "expired_at": expired_at, "invalid_at": invalid_at},
+            )
+        else:
+            self._conn.execute(
+                "MATCH (f:Fact {id: $id}) SET f.expired_at = $expired_at",
+                {"id": fact_id, "expired_at": expired_at},
+            )
+        return True
+
+    def set_entity_embedding(self, node_id: str, embedding: list[float]) -> bool:
+        """Persist a name_embedding onto an existing EntityNode row."""
+        if not node_id or not embedding:
+            return False
+        probe = self._conn.execute(
+            "MATCH (n:EntityNode {id: $id}) RETURN n.id",
+            {"id": node_id},
+        )
+        if not probe.has_next():
+            return False
+        self._conn.execute(
+            "MATCH (n:EntityNode {id: $id}) SET n.name_embedding = $emb",
+            {"id": node_id, "emb": list(embedding)},
+        )
+        return True

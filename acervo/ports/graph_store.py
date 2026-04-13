@@ -240,3 +240,66 @@ class GraphStorePort(Protocol):
         Returns: {0: [hot_nodes], 1: [warm_nodes], 2: [cold_nodes]}
         """
         ...
+
+    # ── Phase 2: Semantic search + bi-temporal fact mutations ──
+
+    def entity_similarity_search(
+        self,
+        query_embedding: list[float],
+        *,
+        limit: int = 15,
+        min_score: float = 0.6,
+    ) -> list[tuple[dict[str, Any], float]]:
+        """Return entities most similar to ``query_embedding`` by cosine sim.
+
+        Used by the Phase 2 entity resolution pipeline to pre-filter dedup
+        candidates before running MinHash LSH. Backends that don't have a
+        native vector index should fall back to a Python brute-force scan
+        over persisted ``name_embedding`` columns.
+
+        Returns list of ``(node_dict, score)`` sorted by score descending.
+        Candidates with score below ``min_score`` are dropped.
+        """
+        ...
+
+    def fact_fulltext_search(
+        self,
+        query: str,
+        *,
+        limit: int = 15,
+    ) -> list[dict[str, Any]]:
+        """Return fact nodes whose text matches the query.
+
+        Used for BM25-style retrieval in Phase 4 hybrid search. Backends
+        without native FTS should fall back to a Python BM25 pass.
+        """
+        ...
+
+    def invalidate_fact(
+        self,
+        fact_id: str,
+        *,
+        expired_at: str,
+        invalid_at: str | None = None,
+    ) -> bool:
+        """Mark a fact as expired without deleting it (append-only model).
+
+        Sets ``expired_at`` (system/ingestion time) and optionally
+        ``invalid_at`` (event time — when the fact stopped being true in
+        the world). Returns True if the fact was found and updated.
+        """
+        ...
+
+    def set_entity_embedding(
+        self,
+        node_id: str,
+        embedding: list[float],
+    ) -> bool:
+        """Persist an entity name embedding to a node.
+
+        Called from the pipeline after S1 computes entity embeddings in
+        batch. Kept separate from ``upsert_entities`` so the legacy
+        signature stays unchanged and the persistence path is explicit.
+        Returns True when the node was found and updated.
+        """
+        ...

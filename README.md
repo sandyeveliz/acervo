@@ -666,6 +666,25 @@ Your agent's memory should work like a library: knowledge organized by subject, 
 
 Open source under Apache 2.0. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
+## Acknowledgments
+
+Acervo borrows architectural ideas and a handful of battle-tested code
+modules from [**Graphiti**](https://github.com/getzep/graphiti) by
+[Zep Software](https://www.getzep.com/) (Apache-2.0). Specifically, the
+deterministic entity dedup pipeline (MinHash LSH + entropy gate), the
+bi-temporal fact model with LLM-assisted contradiction detection and
+deterministic temporal arbitration, and the Reciprocal Rank Fusion +
+Maximal Marginal Relevance primitives used for hybrid retrieval are
+adapted from Graphiti and credited in
+[`acervo/THIRD_PARTY.md`](./acervo/THIRD_PARTY.md). Every ported file
+retains the upstream Apache-2.0 copyright header.
+
+The original analysis of Graphiti that informed these design decisions
+lives in
+[`docs/research/graphiti-analysis.md`](./docs/research/graphiti-analysis.md).
+Acervo remains its own project — local-first, embedded, 4-stage
+pipeline — but we stand on the shoulders of the Graphiti team's work.
+
 ## License
 
 Apache 2.0 — see [LICENSE](./LICENSE).

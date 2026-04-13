@@ -43,6 +43,13 @@ class ExtractedFact:
     fact: str
     source: str    # "user", "web", "rag"
     speaker: str = "user"  # "user" | "assistant"
+    # Phase 3 bi-temporal fields — populated when the LLM extracts explicit
+    # dates for the fact. Downstream edge_resolution uses them for
+    # deterministic contradiction arbitration; leave as None when the
+    # source text doesn't contain resolvable temporal info.
+    valid_at: str | None = None
+    invalid_at: str | None = None
+    reference_time: str | None = None
 
 @dataclass
 class ExtractionResult:

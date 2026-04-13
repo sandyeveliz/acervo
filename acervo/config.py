@@ -190,7 +190,12 @@ class AcervoConfig:
 
     workspace: str = "."
     data_dir: str = ".acervo/data"
-    graph_backend: str = "json"  # "json" | "ladybug"
+    # Default backend as of v0.6.0 is LadybugDB (KuzuDB fork) — it's the
+    # embedded Cypher store that supports the Phase 2 bi-temporal Fact
+    # schema and native vector/fulltext search. ``json`` (TopicGraph) is
+    # kept as an explicit fallback for environments where the driver
+    # isn't installed or for lightweight tooling.
+    graph_backend: str = "ladybug"  # "ladybug" | "json"
     owner: str = ""
     description: str = ""
     model: ModelConfig = field(default_factory=ModelConfig)
@@ -236,7 +241,7 @@ class AcervoConfig:
         config = AcervoConfig(
             workspace=acervo.get("workspace", "."),
             data_dir=acervo.get("data_dir", ".acervo/data"),
-            graph_backend=acervo.get("graph_backend", "json"),
+            graph_backend=acervo.get("graph_backend", "ladybug"),
             owner=acervo.get("owner", ""),
             description=acervo.get("description", ""),
         )

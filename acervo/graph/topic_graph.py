@@ -420,10 +420,18 @@ class TopicGraph:
             absorb_id: Node ID to absorb (will be deleted).
             alias: Optional alias label (e.g. "Man of Steel") stored as a fact.
 
-        Returns True if both nodes existed and merge succeeded.
+        Returns True if both nodes existed and merge succeeded. Returns
+        False (without touching the graph) when both inputs resolve to the
+        same canonical id — otherwise the del at the bottom would wipe the
+        surviving node. The S1.5 parser now guards against this, but we
+        defend against future regressions at the graph boundary too.
         """
         kid = _make_id(keep_id) if keep_id not in self._nodes else keep_id
         aid = _make_id(absorb_id) if absorb_id not in self._nodes else absorb_id
+
+        if kid == aid:
+            log.warning("merge_nodes: refusing self-merge of %s", kid)
+            return False
 
         keep = self._nodes.get(kid)
         absorb = self._nodes.get(aid)
@@ -1036,3 +1044,137 @@ class TopicGraph:
     @property
     def edge_count(self) -> int:
         return len(self._edges)
+
+    # ── Phase 2: Semantic search + bi-temporal fact mutations ───────────
+
+    def entity_similarity_search(
+        self,
+        query_embedding: list[float],
+        *,
+        limit: int = 15,
+        min_score: float = 0.6,
+    ) -> list[tuple[dict, float]]:
+        """Python brute-force cosine search over in-memory nodes.
+
+        TopicGraph stores ``name_embedding`` inside ``node['attributes']``
+        (it's a freeform JSON field). Nodes without an embedding are
+        skipped silently so a partially-embedded graph still works.
+        """
+        if not query_embedding:
+            return []
+
+        import math
+
+        q_norm = math.sqrt(sum(x * x for x in query_embedding)) or 1.0
+
+        candidates: list[tuple[dict, float]] = []
+        for node in self._nodes.values():
+            attrs = node.get("attributes") or {}
+            emb = attrs.get("name_embedding")
+            if not emb or len(emb) != len(query_embedding):
+                continue
+            dot = sum(a * b for a, b in zip(query_embedding, emb, strict=True))
+            n_norm = math.sqrt(sum(x * x for x in emb)) or 1.0
+            score = dot / (q_norm * n_norm)
+            if score < min_score:
+                continue
+            candidates.append((node, float(score)))
+
+        candidates.sort(key=lambda pair: pair[1], reverse=True)
+        return candidates[:limit]
+
+    def fact_fulltext_search(
+        self,
+        query: str,
+        *,
+        limit: int = 15,
+    ) -> list[dict]:
+        """Substring + token match over every fact in every node."""
+        if not query or not query.strip():
+            return []
+
+        query_lower = query.lower().strip()
+        query_tokens = {t for t in query_lower.split() if len(t) > 2}
+
+        scored: list[tuple[float, dict]] = []
+        for node in self._nodes.values():
+            for fact in node.get("facts", []) or []:
+                text = (fact.get("fact") or "").strip()
+                if not text:
+                    continue
+                text_lower = text.lower()
+                score = 0.0
+                if query_lower in text_lower:
+                    score += 2.0
+                if query_tokens:
+                    text_tokens = set(text_lower.split())
+                    overlap = len(query_tokens & text_tokens)
+                    if overlap:
+                        score += overlap / len(query_tokens)
+                if score <= 0:
+                    continue
+                # Shallow copy so callers can mutate without touching graph state.
+                scored.append((score, dict(fact) | {"_node_id": node.get("id", "")}))
+
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return [fact for _, fact in scored[:limit]]
+
+    def invalidate_fact(
+        self,
+        fact_id: str,
+        *,
+        expired_at: str,
+        invalid_at: str | None = None,
+    ) -> bool:
+        """Mark a fact as expired by updating its dict in place.
+
+        TopicGraph doesn't use stable fact IDs the way LadybugDB does —
+        facts are stored inline on each node. For backwards compatibility
+        we accept ``fact_id`` in the form ``"<node_id>::<fact_index>"``.
+        Callers that don't have an ID can also pass the raw fact text;
+        we fall back to matching by text.
+        """
+        if not fact_id:
+            return False
+
+        node_id: str | None = None
+        fact_index: int | None = None
+        if "::" in fact_id:
+            node_id, _, idx = fact_id.partition("::")
+            try:
+                fact_index = int(idx)
+            except ValueError:
+                fact_index = None
+
+        if node_id is not None and fact_index is not None:
+            node = self._nodes.get(node_id)
+            if node is None:
+                return False
+            facts = node.get("facts", []) or []
+            if 0 <= fact_index < len(facts):
+                facts[fact_index]["expired_at"] = expired_at
+                if invalid_at is not None:
+                    facts[fact_index]["invalid_at"] = invalid_at
+                return True
+            return False
+
+        # Fallback: match by exact fact text across all nodes.
+        for node in self._nodes.values():
+            for fact in node.get("facts", []) or []:
+                if (fact.get("fact") or "").strip() == fact_id.strip():
+                    fact["expired_at"] = expired_at
+                    if invalid_at is not None:
+                        fact["invalid_at"] = invalid_at
+                    return True
+        return False
+
+    def set_entity_embedding(self, node_id: str, embedding: list[float]) -> bool:
+        """Persist a name_embedding onto a node's attributes dict."""
+        if not node_id or not embedding:
+            return False
+        node = self._nodes.get(node_id)
+        if node is None:
+            return False
+        attrs = node.setdefault("attributes", {})
+        attrs["name_embedding"] = list(embedding)
+        return True

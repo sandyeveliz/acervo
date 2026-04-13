@@ -113,12 +113,21 @@ async def _run_conversation(scenario_name: str) -> ConversationResult:
     scenario = _load_scenario(scenario_name)
     print(f"\n  Running {scenario_name}...")
 
-    # Create Acervo with empty graph in temp dir
+    # Create Acervo with empty graph in temp dir. Apply the facade's
+    # Ollama auto-detection so thinking models (qwen3+/qwq/deepseek-r1)
+    # use /api/chat with think=false instead of /v1/chat/completions —
+    # otherwise their reasoning goes to message.reasoning and leaves
+    # content empty, silently corrupting every benchmark result.
     with tempfile.TemporaryDirectory() as tmpdir:
+        from acervo.facade import _ollama_dialect_kwargs
+
+        base_url = os.getenv("ACERVO_LIGHT_MODEL_URL", "http://localhost:11434/v1")
+        model = os.getenv("ACERVO_LIGHT_MODEL", "qwen3.5:9b")
         llm = OpenAIClient(
-            base_url="http://localhost:11434/v1",
-            model=os.getenv("ACERVO_LIGHT_MODEL", "qwen2.5:7b"),
-            api_key="ollama",
+            base_url=base_url,
+            model=model,
+            api_key=os.getenv("ACERVO_LIGHT_API_KEY", "ollama"),
+            **_ollama_dialect_kwargs(base_url, model),
         )
         acervo = Acervo(
             llm=llm,
