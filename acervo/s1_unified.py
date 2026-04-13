@@ -410,7 +410,18 @@ def _parse_s1_response(raw: str) -> S1Result:
         description = e_raw.get("description")
         if description and isinstance(description, str) and description.strip():
             attrs["description"] = description.strip()
-        entities.append(Entity(name=name, type=mapped_type, layer=layer, attributes=attrs))
+        # v0.6.1 Change 2 — confidence scoring. Tolerate missing/malformed.
+        conf_raw = e_raw.get("confidence")
+        try:
+            confidence = float(conf_raw) if conf_raw is not None else 1.0
+        except (TypeError, ValueError):
+            confidence = 1.0
+        if confidence < 0.0 or confidence > 1.0:
+            confidence = 1.0
+        entities.append(Entity(
+            name=name, type=mapped_type, layer=layer,
+            attributes=attrs, confidence=confidence,
+        ))
 
         # Collect nested facts from entity
         for f_raw in e_raw.get("facts", []):
@@ -446,7 +457,7 @@ def _parse_s1_response(raw: str) -> S1Result:
     relations: list[Relation] = []
     seen_relations: set[tuple[str, str, str]] = set()
 
-    def _add_relation(src: str, tgt: str, rel: str) -> None:
+    def _add_relation(src: str, tgt: str, rel: str, confidence: float = 1.0) -> None:
         src = _resolve_name(src)
         tgt = _resolve_name(tgt)
         if not src or not tgt or not rel or src.lower() == tgt.lower():
@@ -454,16 +465,26 @@ def _parse_s1_response(raw: str) -> S1Result:
         key = (src.lower(), tgt.lower(), rel.lower())
         if key not in seen_relations:
             seen_relations.add(key)
-            relations.append(Relation(source=src, target=tgt, relation=rel))
+            relations.append(Relation(
+                source=src, target=tgt, relation=rel, confidence=confidence,
+            ))
 
     # Top-level relations array
     for r_raw in obj.get("relations", []):
         if not isinstance(r_raw, dict):
             continue
+        r_conf_raw = r_raw.get("confidence")
+        try:
+            r_conf = float(r_conf_raw) if r_conf_raw is not None else 1.0
+        except (TypeError, ValueError):
+            r_conf = 1.0
+        if r_conf < 0.0 or r_conf > 1.0:
+            r_conf = 1.0
         _add_relation(
             str(r_raw.get("source", "")).strip(),
             str(r_raw.get("target", "")).strip(),
             str(r_raw.get("relation", "")).strip(),
+            confidence=r_conf,
         )
 
     # Nested relations inside entities
@@ -646,7 +667,13 @@ def _validate_s1(
     valid_names_lower: set[str] = set()
     for e in ext.entities:
         name_lower = e.name.lower()
-        if _is_garbage_entity(e.name):
+        # v0.6.1 Change 2: bypass the garbage filter when the LLM itself
+        # flagged the entity as low confidence (< 0.7). It's already marked
+        # uncertain — we don't need a second filter telling it off. Tech
+        # jargon like "Prisma schema" hits the pattern list but is a valid
+        # entity when the LLM explicitly downgraded its own confidence.
+        bypass_garbage = e.confidence < 0.7
+        if not bypass_garbage and _is_garbage_entity(e.name):
             log.info("S1: rejected garbage entity: %s", e.name)
             continue
         if name_lower not in conv_lower:

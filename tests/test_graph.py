@@ -52,6 +52,44 @@ class TestGraphWithNodeMeta:
         assert node["owner"] == "Sandy"
         assert node["confidence_for_owner"] == 1.0
 
+    def test_audit_fields_v061(self):
+        """v0.6.1: updated_by / updated_at stamped on upsert + merge + update."""
+        graph, _ = self._make_graph()
+        graph.upsert_entities(
+            entities=[("Alice", "Person"), ("Ali", "Person")],
+            facts=[("Alice", "Fact A", "s1")],
+            layer=Layer.PERSONAL,
+            source="llm",
+            updated_by="llm",
+        )
+        node = graph.get_node("alice")
+        assert node["updated_by"] == "llm"
+        assert node["updated_at"]
+        assert node["facts"][0]["updated_by"] == "llm"
+
+        # update_node stamps updated_by='user'
+        graph.update_node("alice", label="Alicia", updated_by="user")
+        assert graph.get_node("alice")["updated_by"] == "user"
+
+        # merge_nodes stamps updated_by on survivor
+        graph.merge_nodes("alice", "ali", alias="Ali", updated_by="user")
+        assert graph.get_node("alice")["updated_by"] == "user"
+
+    def test_upsert_respects_explicit_status_pending_review(self):
+        """Low-confidence entities can be created as pending_review."""
+        graph, _ = self._make_graph()
+        graph.upsert_entities(
+            entities=[("JWT", "Technology")],
+            layer=Layer.PERSONAL,
+            source="llm",
+            updated_by="llm",
+            confidence=0.5,
+            status="pending_review",
+        )
+        node = graph.get_node("jwt")
+        assert node["status"] == "pending_review"
+        assert node["confidence_for_owner"] == 0.5
+
     def test_unknown_type_marked_incomplete(self):
         """Entities with unknown types get status='incomplete'."""
         graph, _ = self._make_graph()

@@ -145,6 +145,7 @@ class S1Result:
 ### Side effects
 
 - None directly — S1 does NOT touch the graph. It builds the `S1Result` and returns it. The pipeline persists it later via `_persist_s1_entities` (see "How the stages talk to each other" below).
+- When `_persist_s1_entities` runs after S1, it stamps **`source="llm"`** and **`updated_by="llm"`** on every entity, relation, fact, topic edge, and orphan-fact pass-2 attachment (v0.6.1). This makes every LLM-driven write distinguishable from user edits coming through the REST API.
 
 ### Phase 1-4 visibility
 
@@ -501,12 +502,18 @@ After `resolve_s1_5_facts` mutates `assistant_extraction.facts` in place to drop
 
 S1.5 is the **only stage in the prepare/process cycle that mutates the graph** (other than `_persist_s1_entities` which the pipeline runs immediately after S1 to write the user-side facts — that's not S1.5 itself, it's a sibling step in `pipeline.py::process()`). Specifically:
 
-- `graph.merge_nodes(...)` — merges
-- `graph.update_node(...)` — type corrections
+- `graph.merge_nodes(..., updated_by="llm")` — merges
+- `graph.update_node(..., updated_by="llm")` — type corrections
 - `graph.remove_node(...)` — discards
-- `graph.upsert_entities(...)` — relations + assistant entities/facts (with the orphan fact pass-2 to handle facts about pre-existing entities)
+- `graph.upsert_entities(..., source="llm", updated_by="llm")` — relations + assistant entities/facts (with the orphan fact pass-2 to handle facts about pre-existing entities)
 - `graph.set_entity_embedding(...)` — when assistant entities have embeddings (currently they don't, but the path exists)
+- `graph.set_fact_embedding(...)` — v0.6.1 Change 3: persists the embedding cached on each kept `ExtractedFact` via `_persist_fact_embeddings_for_entity`, so future dedup passes skip re-embedding.
 - `graph.invalidate_fact(...)` — Phase 3 contradiction invalidations
+- `graph.update_node(..., status="confirmed", updated_by="system")` — v0.6.1 Change 2: `_auto_promote_pending_entities` promotes low-confidence nodes once they accumulate session_count ≥ 3 or a user edit.
+
+Every S1.5 mutation stamps **`source="llm"`** (or `"system"` for auto-promotions) and **`updated_by`** accordingly, paired with a fresh `updated_at` ISO timestamp (v0.6.1 audit trail — see section below).
+
+**New S1.5 sub-steps in v0.6.1:** between `resolve_s1_5_facts` (Phase 3) and `apply_s1_5_result` the pipeline calls `dedupe_s1_5_facts_by_embedding`, which drops semantically equivalent assistant facts without any extra LLM call. See the "Embedding-based fact dedup (Change 3)" section below.
 
 ### Phase 1-3 visibility
 
@@ -579,6 +586,126 @@ All entity IDs in the graph use `_make_id(label)` (lowercase + accent strip + no
 
 ---
 
+## v0.6.1 — Confidence scoring + pending_review auto-promotion (Change 2)
+
+Entities now carry an LLM-reported `confidence` score which controls
+persistence and visibility. This enables the graph to keep short
+technical jargon like `JWT`, `Prisma`, `Zod`, or `AAPL CEDEAR` — which
+previous versions dropped via the garbage filter or hallucination check —
+while still gating them behind a review state.
+
+**Flow:**
+
+1. **S1 prompt** asks for a `confidence` field on every entity and
+   relation (see [acervo/prompts/s1_unified.txt](../../acervo/prompts/s1_unified.txt)).
+   Rubric:
+   - 0.9-1.0 — explicitly mentioned and unambiguous
+   - 0.6-0.8 — inferred from clear context
+   - 0.3-0.5 — tech jargon / abbreviations / ambiguous
+2. **S1 parser** ([`_parse_s1_response`](../../acervo/s1_unified.py))
+   reads the field, clamps to `[0.0, 1.0]`, and defaults to `1.0` when
+   missing or malformed. The parsed value lives on
+   `Entity.confidence` / `Relation.confidence`.
+3. **`_validate_s1`** bypasses the garbage-entity filter when
+   `confidence < 0.7`. The rationale is that the LLM already marked the
+   entity as uncertain — a second heuristic filter would just re-reject
+   what we explicitly wanted to keep.
+4. **Pipeline `_persist_s1_entities`** reads `entity.confidence`,
+   derives `status="pending_review"` when it's below 0.6, and passes
+   both to `upsert_entities(confidence=..., status=...)`.
+5. **S1.5 `_auto_promote_pending_entities`** runs at the end of every
+   `apply_s1_5_result` and promotes `pending_review` nodes to
+   `confirmed` when either:
+   - `session_count >= 3` (the node keeps appearing across sessions)
+   - `updated_by == "user"` (a human edited it via the REST API)
+
+   Promoted nodes get `confidence_for_owner >= 0.8` (or 1.0 on user
+   edit) and are stamped with `updated_by="system"`.
+
+**Tests:**
+[tests/test_s1_confidence_and_promotion.py](../../tests/test_s1_confidence_and_promotion.py) —
+12 tests covering parsing, the garbage bypass, pending_review
+persistence, and the auto-promotion rules.
+
+---
+
+## v0.6.1 — Embedding-based fact dedup (Change 3)
+
+A zero-LLM dedup pass runs inside S1.5 between
+`resolve_s1_5_facts` (Phase 3) and `apply_s1_5_result`:
+
+1. **`dedupe_s1_5_facts_by_embedding`** (in
+   [acervo/s1_5_graph_update.py](../../acervo/s1_5_graph_update.py))
+   groups the assistant facts by canonical entity id and hands the
+   bucket to the core function.
+2. **`dedupe_facts_by_embedding`** in
+   [acervo/extraction/edge_resolution.py](../../acervo/extraction/edge_resolution.py)
+   - pulls each node's existing facts via `_load_existing_facts_for_dedup`
+     (prefers `graph._get_facts_for` so Ladybug gives us `fact_embedding`
+     directly).
+   - lazy-embeds any historical facts that don't have an embedding yet
+     and persists the result via `graph.set_fact_embedding` so future
+     turns skip the cost.
+   - batch-embeds the new facts.
+   - scores each new fact against every existing one with cosine
+     similarity:
+     - sim ≥ 0.85 → **drop** (duplicate, don't persist)
+     - sim ≥ 0.60 → **flag** (keep but mark as possible duplicate)
+     - below → keep with embedding cached on the `ExtractedFact`
+3. **`apply_s1_5_result`** calls
+   `_persist_fact_embeddings_for_entity` right after each
+   `upsert_entities` to look up the newly-written facts by text and
+   stamp their `fact_embedding` via `graph.set_fact_embedding`.
+4. **REST endpoint** `POST /acervo/graph/deduplicate-facts` runs the
+   same algorithm retroactively over any subset of nodes, useful as a
+   one-shot "warm up" after deploying v0.6.1 to embed and dedupe a
+   graph that was built before per-fact embeddings existed.
+
+**Cost:** 0 LLM calls. One `embed_batch` per node per turn (typically
+1-5 new facts). With Ollama + `qwen3-embedding` this is ~500-1000ms on
+CPU, ~100ms on GPU.
+
+**Tests:**
+[tests/test_fact_dedup_embeddings.py](../../tests/test_fact_dedup_embeddings.py) —
+13 tests covering cosine math, drop/flag/keep branches, lazy embedding
+persistence, the S1.5 wrapper, and no-op fallbacks.
+
+---
+
+## v0.6.1 — Source tracking and audit trail
+
+Every node, edge, and fact in the graph carries three v0.6.1 audit fields
+populated automatically at write time:
+
+| Field | Values | Set by |
+|---|---|---|
+| `source` | `"llm"`, `"user"`, `"system"` (plus legacy `"world"`, `"user_assertion"`, `"conversation"` on older rows) | The call site: pipeline/S1.5 write `"llm"`; REST handlers in `proxy.py` write `"user"`; batch maintenance jobs write `"system"`. |
+| `updated_by` | Same vocabulary as `source`. | Every mutator (`upsert_entities`, `update_node`, `merge_nodes`, `add_edge`, `_add_fact`) accepts an `updated_by=` kwarg that is stamped on the affected row. |
+| `updated_at` | ISO-8601 local timestamp | Auto-stamped on every mutation even when the caller forgets. `update_node` has an auto-stamp branch that fills it in if not supplied. |
+
+**Why it matters:**
+
+1. Tells LLM-driven writes apart from user edits, so future retrieval can
+   weight or color them differently.
+2. Powers the Change 2 auto-promotion rule ("nodes edited by a user become
+   `status="confirmed"`").
+3. Makes the graph auditable end-to-end without adding a separate
+   mutation log table.
+
+**Schema notes:**
+
+- `_ENTITY_NODE_DDL`, `_STRUCTURAL_NODE_DDL`, `_FACT_NODE_DDL` each
+  declare `updated_by STRING` and `updated_at STRING`.
+- `_REL_DDLS` add the same columns plus a dedicated `source` column
+  (distinct from the pre-existing `source_type` column, which still
+  carries `"world"` vs `"conversation"`).
+- `_ensure_v061_audit_columns` in `ladybug_store.py` runs
+  `ALTER TABLE ADD COLUMN IF NOT EXISTS` on startup so databases
+  created before v0.6.1 pick up the new columns without a manual
+  migration.
+
+---
+
 ## LLM calls per turn (worst case)
 
 Per-turn LLM call count for one user message + one assistant response:
@@ -608,7 +735,7 @@ output via `process(assistant_text)`.
   flow of S1/S2/S3/S1.5, the doc must be updated in the same PR. A
   CI hook to enforce this would be a nice-to-have but is not in
   place yet.
-- **Last verified version:** `release/v0.6.0` (2026-04-12)
+- **Last verified version:** `release/v0.6.1` (2026-04-13) — all three v0.6.1 changes applied: source tracking + audit trail, embedding-based fact dedup, confidence scoring with pending_review auto-promotion. 391 unit tests passing.
 - **Related docs:**
   - [docs/research/graphiti-analysis.md](../research/graphiti-analysis.md) — original Phase 1-4 design
   - [docs/research/v0.6.0-status-report.md](../research/v0.6.0-status-report.md) — full v0.6.0 status, including the 4 critical bug fixes

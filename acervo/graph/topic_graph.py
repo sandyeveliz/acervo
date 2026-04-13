@@ -219,6 +219,8 @@ class TopicGraph:
         source: str = "user_assertion",
         confidence: float = 1.0,
         owner: str | None = None,
+        status: str | None = None,
+        updated_by: str | None = None,
     ) -> tuple[int, int]:
         """Upsert entities, add relations and source-tagged facts.
 
@@ -242,16 +244,22 @@ class TopicGraph:
             if nid in self._nodes:
                 node = self._nodes[nid]
                 node["last_active"] = now
+                node["updated_by"] = updated_by
+                node["updated_at"] = now
                 sessions_seen = {f.get("session") for f in node.get("facts", [])}
                 if self._session_id not in sessions_seen:
                     node["session_count"] = node.get("session_count", 0) + 1
             else:
+                # If caller provided an explicit status, honor it; otherwise
+                # derive from ontology knowledge.
+                derived_status = "complete" if is_known_type(etype) else "incomplete"
+                effective_status = status or derived_status
                 meta = NodeMeta(
                     layer=layer,
                     owner=owner,
                     source=source,
                     confidence_for_owner=confidence,
-                    status="complete" if is_known_type(etype) else "incomplete",
+                    status=effective_status,
                     pending_fields=[] if is_known_type(etype) else ["type"],
                 )
                 self._nodes[nid] = {
@@ -266,6 +274,8 @@ class TopicGraph:
                     "facts": [],
                     "files": [],
                     "chunk_ids": [],
+                    "updated_by": updated_by,
+                    "updated_at": now,
                     **meta.to_dict(),
                 }
 
@@ -298,6 +308,9 @@ class TopicGraph:
                         "last_active": now,
                         "layer": layer.name,
                         "source_type": source,
+                        "source_field": source,
+                        "updated_by": updated_by,
+                        "updated_at": now,
                     })
 
         # Add source-tagged facts to nodes (with dedup)
@@ -316,6 +329,8 @@ class TopicGraph:
                             "date": now[:10],
                             "session": self._session_id,
                             "source": fact_source,
+                            "updated_by": updated_by,
+                            "updated_at": now,
                         })
 
         self._save()
@@ -405,14 +420,31 @@ class TopicGraph:
         node = self._nodes.get(nid)
         if not node:
             return False
-        allowed = {"label", "type", "attributes"}
+        allowed = {
+            "label", "type", "attributes",
+            # v0.6.1: audit + confidence + status fields
+            "source", "confidence_for_owner", "status",
+            "updated_by", "updated_at",
+        }
+        stamped_updated_at = False
         for key, value in fields.items():
             if key in allowed:
                 node[key] = value
+                if key == "updated_at":
+                    stamped_updated_at = True
+        if not stamped_updated_at:
+            node["updated_at"] = datetime.now().isoformat(timespec="seconds")
         log.info("Updated node %s: %s", nid, list(fields.keys()))
         return True
 
-    def merge_nodes(self, keep_id: str, absorb_id: str, alias: str | None = None) -> bool:
+    def merge_nodes(
+        self,
+        keep_id: str,
+        absorb_id: str,
+        alias: str | None = None,
+        *,
+        updated_by: str | None = None,
+    ) -> bool:
         """Merge two nodes: keep one, absorb the other's facts and edges.
 
         Args:
@@ -446,6 +478,8 @@ class TopicGraph:
                 keep["facts"].append(fact)
                 existing_facts.add(norm)
 
+        merge_now = datetime.now().isoformat(timespec="seconds")
+
         # Add alias as a fact if provided
         if alias:
             alias_fact = f"Also known as: {alias}"
@@ -453,9 +487,11 @@ class TopicGraph:
             if alias_norm not in existing_facts:
                 keep["facts"].append({
                     "fact": alias_fact,
-                    "date": datetime.now().isoformat(timespec="seconds"),
+                    "date": merge_now,
                     "session": self._session_id,
                     "source": "merge",
+                    "updated_by": updated_by,
+                    "updated_at": merge_now,
                 })
 
         # Merge attributes
@@ -467,6 +503,10 @@ class TopicGraph:
 
         # Aggregate session count
         keep["session_count"] = keep.get("session_count", 1) + absorb.get("session_count", 1)
+
+        # Stamp audit on the surviving node
+        keep["updated_by"] = updated_by
+        keep["updated_at"] = merge_now
 
         # Re-point edges from absorbed node to keep node
         for edge in self._edges:
@@ -562,6 +602,9 @@ class TopicGraph:
         relation: str,
         weight: float = 1.0,
         edge_type: str = "structural",
+        *,
+        source: str | None = None,
+        updated_by: str | None = None,
     ) -> bool:
         """Add an edge between two nodes if it doesn't already exist.
 
@@ -591,6 +634,9 @@ class TopicGraph:
             "layer": "UNIVERSAL",
             "source_type": "world",
             "edge_type": edge_type,
+            "source_field": source,
+            "updated_by": updated_by,
+            "updated_at": now,
         })
         return True
 
@@ -1178,3 +1224,22 @@ class TopicGraph:
         attrs = node.setdefault("attributes", {})
         attrs["name_embedding"] = list(embedding)
         return True
+
+    def set_fact_embedding(self, fact_id: str, embedding: list[float]) -> bool:
+        """Persist a fact_embedding on an existing fact dict (v0.6.1).
+
+        In TopicGraph facts live inside ``node["facts"]``, keyed by
+        position. ``fact_id`` is assumed to be ``{node_id}_f{index}``
+        matching the Ladybug format — we search each node's facts and
+        also accept an exact-text match as a fallback for facts that
+        predate id generation.
+        """
+        if not fact_id or not embedding:
+            return False
+        for node in self._nodes.values():
+            for idx, f in enumerate(node.get("facts", [])):
+                existing_id = f.get("fact_id") or f"{node['id']}_f{idx}"
+                if existing_id == fact_id:
+                    f["fact_embedding"] = list(embedding)
+                    return True
+        return False

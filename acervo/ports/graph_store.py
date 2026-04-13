@@ -88,8 +88,23 @@ class GraphStorePort(Protocol):
         source: str = "conversation",
         owner: str | None = None,
         confidence: float = 1.0,
+        status: str | None = None,
+        updated_by: str | None = None,
     ) -> tuple[int, int]:
         """Create or update entities, relations, and facts.
+
+        ``source`` is the provenance tag applied to both node and fact
+        rows — v0.6.1 uses ``"llm"``, ``"user"`` or ``"system"`` at call
+        sites, but legacy values like ``"conversation"`` or
+        ``"user_assertion"`` are still accepted.
+
+        ``status`` overrides the derived default (``complete`` /
+        ``incomplete``) and is used by the confidence pipeline to mark
+        newly-extracted low-confidence entities as ``pending_review``.
+
+        ``updated_by`` populates the audit column of the same name on
+        both nodes and the associated facts/edges created during this
+        upsert.
 
         Returns (node_count, edge_count) after upsert.
         """
@@ -105,8 +120,20 @@ class GraphStorePort(Protocol):
         """Update fields on an existing node. Returns True if found."""
         ...
 
-    def merge_nodes(self, keep_id: str, absorb_id: str, alias: str | None = None) -> bool:
-        """Merge two nodes: keep one, absorb facts/edges from the other."""
+    def merge_nodes(
+        self,
+        keep_id: str,
+        absorb_id: str,
+        alias: str | None = None,
+        *,
+        updated_by: str | None = None,
+    ) -> bool:
+        """Merge two nodes: keep one, absorb facts/edges from the other.
+
+        ``updated_by`` is stamped on the surviving node and the freshly
+        added alias/merge facts so the audit trail reflects who caused
+        the merge.
+        """
         ...
 
     def remove_fact(self, entity_name: str, fact_text: str) -> bool:
@@ -122,8 +149,15 @@ class GraphStorePort(Protocol):
         relation: str,
         weight: float = 1.0,
         edge_type: str = "structural",
+        *,
+        source: str | None = None,
+        updated_by: str | None = None,
     ) -> bool:
-        """Add an edge between two nodes. Returns True if added."""
+        """Add an edge between two nodes. Returns True if added.
+
+        ``source`` and ``updated_by`` are the v0.6.1 audit fields
+        (``"llm"`` / ``"user"`` / ``"system"``).
+        """
         ...
 
     def remove_edge(self, src_name: str, tgt_name: str, relation: str) -> bool:
@@ -301,5 +335,18 @@ class GraphStorePort(Protocol):
         batch. Kept separate from ``upsert_entities`` so the legacy
         signature stays unchanged and the persistence path is explicit.
         Returns True when the node was found and updated.
+        """
+        ...
+
+    def set_fact_embedding(
+        self,
+        fact_id: str,
+        embedding: list[float],
+    ) -> bool:
+        """Persist a fact embedding on an existing Fact row.
+
+        Used by the v0.6.1 fact dedup pass to lazy-populate embeddings on
+        historical facts that were written before embedding was tracked
+        per-fact. Returns True when the fact was found and updated.
         """
         ...

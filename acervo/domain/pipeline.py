@@ -293,6 +293,7 @@ class Pipeline:
         from acervo.s1_5_graph_update import (
             S1_5GraphUpdate,
             apply_s1_5_result,
+            dedupe_s1_5_facts_by_embedding,
             resolve_s1_5_facts,
         )
         _s15_t0 = time.perf_counter()
@@ -335,9 +336,20 @@ class Pipeline:
             s15_result, self._graph, llm=self._s15_llm,
         )
 
+        # v0.6.1 Change 3: embedding-based fact dedup — zero LLM calls,
+        # drops semantically equivalent new facts before persistence.
+        # Runs only when the pipeline has an embedder; otherwise no-op.
+        dedup_audit = await dedupe_s1_5_facts_by_embedding(
+            s15_result,
+            last_s1_extraction=self._last_s1_extraction,
+            graph=self._graph,
+            embedder=self._embedder,
+        )
+
         # Apply curation
         audit = apply_s1_5_result(self._graph, s15_result, owner=self._owner)
         audit.update(fact_audit)
+        audit.update(dedup_audit)
         log.info(
             "[acervo] S1.5 — merges=%d, fixes=%d, discards=%d, entities=%d, "
             "facts=%d, resolved_new=%d, dropped=%d, invalidated=%d (%dms)",
@@ -423,13 +435,23 @@ class Pipeline:
             for f_entity, f_text, _ in entity_facts:
                 attached_keys.add((f_entity.lower(), f_text.lower()))
 
+            # v0.6.1 Change 2: propagate per-entity confidence and derive
+            # status=pending_review for low-confidence extractions so they
+            # persist but are flagged for review.
+            entity_confidence = getattr(entity, "confidence", 1.0)
+            entity_status = (
+                "pending_review" if entity_confidence < 0.6 else "complete"
+            )
             self._graph.upsert_entities(
                 [(entity.name, resolved_type)],
                 None,
                 entity_facts if entity_facts else None,
                 layer=layer,
-                source="user_assertion",
+                source="llm",
                 owner=self._owner or None,
+                updated_by="llm",
+                confidence=entity_confidence,
+                status=entity_status,
             )
 
             # Phase 2: persist the name_embedding computed in S1 so Phase 2
@@ -503,8 +525,9 @@ class Pipeline:
                 None,
                 facts,
                 layer=existing_layer,
-                source="user_assertion",
+                source="llm",
                 owner=self._owner or None,
+                updated_by="llm",
             )
 
         if extraction.relations:
@@ -542,7 +565,8 @@ class Pipeline:
                 if entity_id != topic_id:
                     self._graph.upsert_entities(
                         [], [(entity.name, current_topic, "part_of")],
-                        layer=Layer.PERSONAL, source="user_assertion",
+                        layer=Layer.PERSONAL, source="llm",
+                        updated_by="llm",
                     )
 
         # Persist validation decisions

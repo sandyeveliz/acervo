@@ -44,7 +44,9 @@ CREATE NODE TABLE IF NOT EXISTS EntityNode (
     confidence_for_owner DOUBLE DEFAULT 1.0,
     status STRING DEFAULT 'complete',
     pending_fields STRING[],
-    name_embedding DOUBLE[]
+    name_embedding DOUBLE[],
+    updated_by STRING,
+    updated_at STRING
 )"""
 
 _STRUCTURAL_NODE_DDL = """\
@@ -67,7 +69,9 @@ CREATE NODE TABLE IF NOT EXISTS StructuralNode (
     pending_fields STRING[],
     stale BOOLEAN DEFAULT FALSE,
     stale_since STRING,
-    indexed_at STRING
+    indexed_at STRING,
+    updated_by STRING,
+    updated_at STRING
 )"""
 
 _FACT_NODE_DDL = """\
@@ -83,7 +87,9 @@ CREATE NODE TABLE IF NOT EXISTS Fact (
     expired_at STRING,
     reference_time STRING,
     fact_embedding DOUBLE[],
-    episodes STRING[]
+    episodes STRING[],
+    updated_by STRING,
+    updated_at STRING
 )"""
 
 _VALIDATION_LOG_DDL = """\
@@ -102,12 +108,37 @@ CREATE NODE TABLE IF NOT EXISTS ValidationLog (
 )"""
 
 _REL_DDLS = [
-    "CREATE REL TABLE IF NOT EXISTS SemanticRel (FROM EntityNode TO EntityNode, relation STRING, weight DOUBLE DEFAULT 1.0, created_at STRING, last_active STRING, layer STRING, source_type STRING, edge_type STRING DEFAULT 'semantic')",
-    "CREATE REL TABLE IF NOT EXISTS StructuralRel (FROM StructuralNode TO StructuralNode, relation STRING, weight DOUBLE DEFAULT 1.0, created_at STRING, last_active STRING, layer STRING DEFAULT 'UNIVERSAL', source_type STRING DEFAULT 'world', edge_type STRING DEFAULT 'structural')",
-    "CREATE REL TABLE IF NOT EXISTS EntityToStructural (FROM EntityNode TO StructuralNode, relation STRING, weight DOUBLE DEFAULT 1.0, created_at STRING, last_active STRING, layer STRING, source_type STRING, edge_type STRING DEFAULT 'semantic')",
-    "CREATE REL TABLE IF NOT EXISTS StructuralToEntity (FROM StructuralNode TO EntityNode, relation STRING, weight DOUBLE DEFAULT 1.0, created_at STRING, last_active STRING, layer STRING, source_type STRING, edge_type STRING DEFAULT 'semantic')",
+    "CREATE REL TABLE IF NOT EXISTS SemanticRel (FROM EntityNode TO EntityNode, relation STRING, weight DOUBLE DEFAULT 1.0, created_at STRING, last_active STRING, layer STRING, source_type STRING, edge_type STRING DEFAULT 'semantic', source STRING, updated_by STRING, updated_at STRING)",
+    "CREATE REL TABLE IF NOT EXISTS StructuralRel (FROM StructuralNode TO StructuralNode, relation STRING, weight DOUBLE DEFAULT 1.0, created_at STRING, last_active STRING, layer STRING DEFAULT 'UNIVERSAL', source_type STRING DEFAULT 'world', edge_type STRING DEFAULT 'structural', source STRING, updated_by STRING, updated_at STRING)",
+    "CREATE REL TABLE IF NOT EXISTS EntityToStructural (FROM EntityNode TO StructuralNode, relation STRING, weight DOUBLE DEFAULT 1.0, created_at STRING, last_active STRING, layer STRING, source_type STRING, edge_type STRING DEFAULT 'semantic', source STRING, updated_by STRING, updated_at STRING)",
+    "CREATE REL TABLE IF NOT EXISTS StructuralToEntity (FROM StructuralNode TO EntityNode, relation STRING, weight DOUBLE DEFAULT 1.0, created_at STRING, last_active STRING, layer STRING, source_type STRING, edge_type STRING DEFAULT 'semantic', source STRING, updated_by STRING, updated_at STRING)",
     "CREATE REL TABLE IF NOT EXISTS EntityHasFact (FROM EntityNode TO Fact)",
     "CREATE REL TABLE IF NOT EXISTS StructuralHasFact (FROM StructuralNode TO Fact)",
+]
+
+# Columns added in v0.6.1 for source tracking + audit trail.
+# On existing databases created with an older schema we'll ADD COLUMN these
+# via ALTER TABLE during _ensure_schema.
+_V061_AUDIT_COLUMNS: list[tuple[str, str, str]] = [
+    # (table, column, type)
+    ("EntityNode", "updated_by", "STRING"),
+    ("EntityNode", "updated_at", "STRING"),
+    ("StructuralNode", "updated_by", "STRING"),
+    ("StructuralNode", "updated_at", "STRING"),
+    ("Fact", "updated_by", "STRING"),
+    ("Fact", "updated_at", "STRING"),
+    ("SemanticRel", "source", "STRING"),
+    ("SemanticRel", "updated_by", "STRING"),
+    ("SemanticRel", "updated_at", "STRING"),
+    ("StructuralRel", "source", "STRING"),
+    ("StructuralRel", "updated_by", "STRING"),
+    ("StructuralRel", "updated_at", "STRING"),
+    ("EntityToStructural", "source", "STRING"),
+    ("EntityToStructural", "updated_by", "STRING"),
+    ("EntityToStructural", "updated_at", "STRING"),
+    ("StructuralToEntity", "source", "STRING"),
+    ("StructuralToEntity", "updated_by", "STRING"),
+    ("StructuralToEntity", "updated_at", "STRING"),
 ]
 
 # Kinds that go into StructuralNode table
@@ -148,6 +179,27 @@ class LadybugGraphStore:
             self._conn.execute(ddl)
 
         self._assert_bi_temporal_schema()
+        self._ensure_v061_audit_columns()
+
+    def _ensure_v061_audit_columns(self) -> None:
+        """Add v0.6.1 audit columns (source, updated_by, updated_at) to any
+        tables that predate them. Uses ALTER TABLE IF NOT EXISTS (silent
+        when the column is already present). Safe to call on fresh DBs
+        where CREATE TABLE already added the columns — ALTER becomes a
+        no-op because Kuzu raises a "duplicate column" error that we swallow.
+        """
+        for table, column, coltype in _V061_AUDIT_COLUMNS:
+            try:
+                self._conn.execute(
+                    f"ALTER TABLE {table} ADD {column} {coltype}"
+                )
+            except Exception as exc:
+                # Kuzu raises when the column already exists — that's fine.
+                # Anything else is a real problem.
+                msg = str(exc).lower()
+                if "already" in msg or "duplicate" in msg or "exists" in msg:
+                    continue
+                log.debug("ALTER TABLE %s ADD %s skipped: %s", table, column, exc)
 
     def _assert_bi_temporal_schema(self) -> None:
         """Fail fast if the current DB is still on the pre-Phase-2 schema.
@@ -271,7 +323,8 @@ class LadybugGraphStore:
         r = self._conn.execute(
             f"MATCH (n:{node_table} {{id: $id}})-[:{rel}]->(f:Fact) "
             "RETURN f.id, f.fact_text, f.date, f.session, f.source, f.speaker, "
-            "f.valid_at, f.invalid_at, f.expired_at, f.reference_time, f.episodes",
+            "f.valid_at, f.invalid_at, f.expired_at, f.reference_time, f.episodes, "
+            "f.fact_embedding, f.updated_by, f.updated_at",
             {"id": node_id},
         )
         facts = []
@@ -289,6 +342,9 @@ class LadybugGraphStore:
                 "expired_at": row[8],
                 "reference_time": row[9],
                 "episodes": row[10] or [],
+                "fact_embedding": row[11],
+                "updated_by": row[12],
+                "updated_at": row[13],
             })
         return facts
 
@@ -306,6 +362,8 @@ class LadybugGraphStore:
         reference_time: str | None = None,
         fact_embedding: list[float] | None = None,
         episodes: list[str] | None = None,
+        updated_by: str | None = None,
+        updated_at: str | None = None,
     ) -> str:
         """Add a fact node and link it to a parent node.
 
@@ -329,13 +387,15 @@ class LadybugGraphStore:
         if reference_time is None:
             reference_time = date
 
+        now_iso = self._now()
         self._conn.execute(
             "CREATE (f:Fact {"
             "id: $id, fact_text: $text, date: $date, "
             "session: $session, source: $source, speaker: 'user', "
             "valid_at: $valid_at, invalid_at: $invalid_at, "
             "expired_at: NULL, reference_time: $reference_time, "
-            "fact_embedding: $fact_embedding, episodes: $episodes"
+            "fact_embedding: $fact_embedding, episodes: $episodes, "
+            "updated_by: $updated_by, updated_at: $updated_at"
             "})",
             {
                 "id": fact_id,
@@ -348,6 +408,8 @@ class LadybugGraphStore:
                 "reference_time": reference_time,
                 "fact_embedding": fact_embedding,
                 "episodes": episodes or [],
+                "updated_by": updated_by,
+                "updated_at": updated_at or now_iso,
             },
         )
         self._conn.execute(
@@ -581,6 +643,8 @@ class LadybugGraphStore:
         source: str = "conversation",
         owner: str | None = None,
         confidence: float = 1.0,
+        status: str = "complete",
+        updated_by: str | None = None,
     ) -> tuple[int, int]:
         now = self._now()
         layer_name = layer.name if hasattr(layer, "name") else (layer or "PERSONAL")
@@ -591,15 +655,17 @@ class LadybugGraphStore:
             existing = self._query_node(table, nid)
 
             if existing:
-                # Update last_active + session_count
+                # Update last_active + session_count + audit
                 sessions = {f.get("session") for f in existing.get("facts", [])}
                 new_count = existing.get("session_count", 1)
                 if self._session_id not in sessions:
                     new_count += 1
                 self._conn.execute(
                     f"MATCH (n:{table} {{id: $id}}) "
-                    f"SET n.last_active = $now, n.session_count = $count",
-                    {"id": nid, "now": now, "count": new_count},
+                    f"SET n.last_active = $now, n.session_count = $count, "
+                    f"n.updated_by = $ub, n.updated_at = $now",
+                    {"id": nid, "now": now, "count": new_count,
+                     "ub": updated_by},
                 )
             else:
                 self._conn.execute(
@@ -607,10 +673,11 @@ class LadybugGraphStore:
                     f"kind: 'entity', created_at: $now, last_active: $now, "
                     f"session_count: 1, attributes: '{{}}', files: [], chunk_ids: [], "
                     f"layer: $layer, owner: $owner, source: $source, "
-                    f"confidence_for_owner: $conf, status: 'complete', pending_fields: []}})",
+                    f"confidence_for_owner: $conf, status: $status, pending_fields: [], "
+                    f"updated_by: $ub, updated_at: $now}})",
                     {"id": nid, "label": name, "type": etype, "now": now,
                      "layer": layer_name, "owner": owner or "", "source": source,
-                     "conf": confidence},
+                     "conf": confidence, "status": status, "ub": updated_by},
                 )
 
         # Add relations
@@ -633,9 +700,11 @@ class LadybugGraphStore:
                         f"MATCH (a:{src_table} {{id: $src}}), (b:{tgt_table} {{id: $tgt}}) "
                         f"CREATE (a)-[:{rel_table} {{relation: $rel, weight: 1.0, "
                         f"created_at: $now, last_active: $now, layer: $layer, "
-                        f"source_type: $source, edge_type: 'semantic'}}]->(b)",
+                        f"source_type: $stype, edge_type: 'semantic', "
+                        f"source: $src_field, updated_by: $ub, updated_at: $now}}]->(b)",
                         {"src": src_id, "tgt": tgt_id, "rel": relation,
-                         "now": now, "layer": layer_name, "source": source},
+                         "now": now, "layer": layer_name, "stype": source,
+                         "src_field": source, "ub": updated_by},
                     )
                     edge_count += 1
                 except Exception as e:
@@ -654,7 +723,10 @@ class LadybugGraphStore:
                 if dup:
                     self._dedup_log.append((entity_name, fact_text, f"duplicate of '{dup}'"))
                 else:
-                    self._add_fact(nid, table, fact_text, now[:10], self._session_id, fact_source)
+                    self._add_fact(
+                        nid, table, fact_text, now[:10], self._session_id, fact_source,
+                        updated_by=updated_by, updated_at=now,
+                    )
 
         n_count = self.node_count
         e_count = self.edge_count
@@ -684,24 +756,44 @@ class LadybugGraphStore:
         table = self._get_node_table_by_id(nid)
         if not table:
             return False
-        allowed = {"label", "type", "attributes"}
+        allowed = {
+            "label", "type", "attributes",
+            # v0.6.1: audit + confidence + status fields
+            "source", "confidence_for_owner", "status",
+            "updated_by", "updated_at",
+        }
         set_clauses = []
         params: dict[str, Any] = {"id": nid}
+        stamped_updated_at = False
         for key, value in fields.items():
             if key in allowed:
                 if key == "attributes" and isinstance(value, dict):
                     value = json.dumps(value, ensure_ascii=False)
                 set_clauses.append(f"n.{key} = ${key}")
                 params[key] = value
+                if key == "updated_at":
+                    stamped_updated_at = True
         if not set_clauses:
             return True
+        # Auto-stamp updated_at on any update where the caller didn't provide one,
+        # so the audit trail reflects every mutation.
+        if not stamped_updated_at:
+            set_clauses.append("n.updated_at = $__now")
+            params["__now"] = self._now()
         self._conn.execute(
             f"MATCH (n:{table} {{id: $id}}) SET {', '.join(set_clauses)}",
             params,
         )
         return True
 
-    def merge_nodes(self, keep_id: str, absorb_id: str, alias: str | None = None) -> bool:
+    def merge_nodes(
+        self,
+        keep_id: str,
+        absorb_id: str,
+        alias: str | None = None,
+        *,
+        updated_by: str | None = None,
+    ) -> bool:
         kid = _make_id(keep_id) if not self._get_node_table_by_id(keep_id) else keep_id
         aid = _make_id(absorb_id) if not self._get_node_table_by_id(absorb_id) else absorb_id
 
@@ -724,6 +816,8 @@ class LadybugGraphStore:
         if not keep_node or not absorb_node:
             return False
 
+        merge_now = self._now()
+
         # Merge facts (with dedup)
         keep_facts = keep_node.get("facts", [])
         existing_norms = {_normalize_for_dedup(f.get("fact", "")) for f in keep_facts}
@@ -732,7 +826,8 @@ class LadybugGraphStore:
             if norm and norm not in existing_norms:
                 self._add_fact(kid, keep_table, fact["fact"],
                                fact.get("date", ""), fact.get("session", ""),
-                               fact.get("source", "merge"))
+                               fact.get("source", "merge"),
+                               updated_by=updated_by, updated_at=merge_now)
                 existing_norms.add(norm)
 
         # Alias fact
@@ -741,15 +836,18 @@ class LadybugGraphStore:
             alias_norm = _normalize_for_dedup(alias_fact)
             if alias_norm not in existing_norms:
                 self._add_fact(kid, keep_table, alias_fact,
-                               self._now()[:10], self._session_id, "merge")
+                               merge_now[:10], self._session_id, "merge",
+                               updated_by=updated_by, updated_at=merge_now)
 
         # Merge attributes
         keep_attrs = keep_node.get("attributes", {})
         absorb_attrs = absorb_node.get("attributes", {})
         merged_attrs = {**absorb_attrs, **keep_attrs}  # keep takes precedence
         self._conn.execute(
-            f"MATCH (n:{keep_table} {{id: $id}}) SET n.attributes = $attrs",
-            {"id": kid, "attrs": json.dumps(merged_attrs, ensure_ascii=False)},
+            f"MATCH (n:{keep_table} {{id: $id}}) "
+            f"SET n.attributes = $attrs, n.updated_by = $ub, n.updated_at = $now",
+            {"id": kid, "attrs": json.dumps(merged_attrs, ensure_ascii=False),
+             "ub": updated_by, "now": merge_now},
         )
 
         # Update session count
@@ -813,6 +911,9 @@ class LadybugGraphStore:
     def add_edge(
         self, source_id: str, target_id: str, relation: str,
         weight: float = 1.0, edge_type: str = "structural",
+        *,
+        source: str | None = None,
+        updated_by: str | None = None,
     ) -> bool:
         if source_id == target_id:
             return False
@@ -829,9 +930,11 @@ class LadybugGraphStore:
                 f"MATCH (a:{src_table} {{id: $src}}), (b:{tgt_table} {{id: $tgt}}) "
                 f"CREATE (a)-[:{rel_table} {{relation: $rel, weight: $w, "
                 f"created_at: $now, last_active: $now, layer: 'UNIVERSAL', "
-                f"source_type: 'world', edge_type: $et}}]->(b)",
+                f"source_type: 'world', edge_type: $et, "
+                f"source: $src_field, updated_by: $ub, updated_at: $now}}]->(b)",
                 {"src": source_id, "tgt": target_id, "rel": relation,
-                 "w": weight, "now": now, "et": edge_type},
+                 "w": weight, "now": now, "et": edge_type,
+                 "src_field": source, "ub": updated_by},
             )
             return True
         except Exception as e:
@@ -1511,5 +1614,21 @@ class LadybugGraphStore:
         self._conn.execute(
             "MATCH (n:EntityNode {id: $id}) SET n.name_embedding = $emb",
             {"id": node_id, "emb": list(embedding)},
+        )
+        return True
+
+    def set_fact_embedding(self, fact_id: str, embedding: list[float]) -> bool:
+        """Persist a fact_embedding on an existing Fact row (v0.6.1)."""
+        if not fact_id or not embedding:
+            return False
+        probe = self._conn.execute(
+            "MATCH (f:Fact {id: $id}) RETURN f.id",
+            {"id": fact_id},
+        )
+        if not probe.has_next():
+            return False
+        self._conn.execute(
+            "MATCH (f:Fact {id: $id}) SET f.fact_embedding = $emb",
+            {"id": fact_id, "emb": list(embedding)},
         )
         return True

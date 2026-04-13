@@ -398,3 +398,97 @@ class TestLifecycle:
             layer=Layer.PERSONAL,
         )
         assert len(store.dedup_log) >= 1
+
+
+class TestAuditFieldsV061:
+    """v0.6.1: source / updated_by / updated_at trail on nodes, facts, edges."""
+
+    def test_upsert_stamps_source_and_updated_by_on_node(self, store):
+        store.upsert_entities(
+            [("Alice", "person")],
+            layer=Layer.PERSONAL,
+            source="llm",
+            updated_by="llm",
+        )
+        node = store.get_node("alice")
+        assert node is not None
+        assert node["source"] == "llm"
+        assert node["updated_by"] == "llm"
+        assert node["updated_at"]  # ISO timestamp, non-empty
+
+    def test_upsert_stamps_audit_on_fact(self, store):
+        store.upsert_entities(
+            [("Alice", "person")],
+            facts=[("Alice", "Lives in Neuquen", "s1")],
+            layer=Layer.PERSONAL,
+            source="llm",
+            updated_by="llm",
+        )
+        node = store.get_node("alice")
+        assert node and node["facts"]
+        f = node["facts"][0]
+        assert f["updated_by"] == "llm"
+        assert f["updated_at"]
+
+    def test_update_node_stamps_updated_by(self, store):
+        store.upsert_entities(
+            [("Alice", "person")], layer=Layer.PERSONAL,
+            source="llm", updated_by="llm",
+        )
+        ok = store.update_node("alice", label="Alicia", updated_by="user")
+        assert ok
+        node = store.get_node("alice")
+        assert node["label"] == "Alicia"
+        assert node["updated_by"] == "user"
+
+    def test_update_node_autostamps_updated_at_when_not_provided(self, store):
+        store.upsert_entities(
+            [("Alice", "person")], layer=Layer.PERSONAL,
+            source="llm", updated_by="llm",
+        )
+        before = store.get_node("alice")["updated_at"]
+        # Tiny wait trick: just update again and confirm timestamp column
+        # remains populated (exact equality isn't important — we just want
+        # to prove the auto-stamp branch runs).
+        ok = store.update_node("alice", label="Alicia")
+        assert ok
+        after = store.get_node("alice")["updated_at"]
+        assert after is not None
+        assert after >= before  # monotonic ISO string
+
+    def test_merge_nodes_stamps_updated_by_on_survivor(self, store):
+        store.upsert_entities(
+            [("Alice", "person"), ("Ali", "person")],
+            layer=Layer.PERSONAL,
+            source="llm", updated_by="llm",
+        )
+        ok = store.merge_nodes("alice", "ali", alias="Ali", updated_by="user")
+        assert ok
+        node = store.get_node("alice")
+        assert node["updated_by"] == "user"
+        assert any("Also known as" in f["fact"] for f in node["facts"])
+
+    def test_upsert_accepts_status_pending_review(self, store):
+        store.upsert_entities(
+            [("JWT", "technology")],
+            layer=Layer.PERSONAL,
+            source="llm", updated_by="llm",
+            confidence=0.5,
+            status="pending_review",
+        )
+        node = store.get_node("jwt")
+        assert node is not None
+        assert node["status"] == "pending_review"
+        assert abs(float(node["confidence_for_owner"]) - 0.5) < 1e-6
+
+    def test_add_edge_accepts_source_and_updated_by(self, store):
+        store.upsert_entities(
+            [("Alice", "person"), ("Neuquen", "place")],
+            layer=Layer.PERSONAL,
+        )
+        ok = store.add_edge(
+            "alice", "neuquen", "lives_in",
+            edge_type="semantic",
+            source="user", updated_by="user",
+        )
+        assert ok

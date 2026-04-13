@@ -271,6 +271,216 @@ def _parse_s1_5_response(raw: str) -> S1_5Result:
 
 # ── Graph application ──
 
+def _auto_promote_pending_entities(
+    graph: object,
+    *,
+    session_count_threshold: int = 3,
+) -> int:
+    """v0.6.1 Change 2: auto-promote ``pending_review`` entities.
+
+    Promotion rules (any triggers):
+      1. ``session_count >= session_count_threshold`` — the node keeps
+         appearing across distinct sessions, so it has accumulated enough
+         evidence to graduate.
+      2. ``updated_by == "user"`` — a human explicitly edited it via the
+         REST API, which is stronger signal than any LLM heuristic.
+
+    Promoted nodes are updated with ``status="confirmed"`` and their
+    confidence bumped to at least 0.8 (1.0 when promoted by user edit).
+
+    Returns the number of promotions applied.
+    """
+    promoted = 0
+    try:
+        nodes = graph.get_all_nodes()
+    except Exception as exc:
+        log.debug("auto_promote: get_all_nodes failed: %s", exc)
+        return 0
+    for node in nodes:
+        if (node.get("status") or "") != "pending_review":
+            continue
+        session_count = int(node.get("session_count") or 0)
+        updated_by = (node.get("updated_by") or "") or ""
+        promote_reason: str | None = None
+        new_confidence: float | None = None
+        if updated_by == "user":
+            promote_reason = "user edit"
+            new_confidence = 1.0
+        elif session_count >= session_count_threshold:
+            promote_reason = f"session_count={session_count}"
+            new_confidence = max(float(node.get("confidence_for_owner") or 0.0), 0.8)
+        if promote_reason is None:
+            continue
+        try:
+            ok = graph.update_node(
+                node["id"],
+                status="confirmed",
+                confidence_for_owner=new_confidence,
+                updated_by="system",
+            )
+        except Exception as exc:
+            log.debug("auto_promote: update_node failed for %s: %s", node["id"], exc)
+            ok = False
+        if ok:
+            promoted += 1
+            log.info(
+                "auto_promote: %s → confirmed (reason=%s, confidence=%.2f)",
+                node["id"], promote_reason, new_confidence,
+            )
+    return promoted
+
+
+def _persist_fact_embeddings_for_entity(
+    graph: object,
+    entity_name: str,
+    fact_objs: list,
+) -> int:
+    """After upsert_entities has written the facts, look up each one by its
+    text, grab the auto-generated fact_id, and call
+    ``graph.set_fact_embedding`` when the in-memory ExtractedFact carries a
+    cached embedding from the v0.6.1 dedup pre-pass.
+
+    Returns the number of embeddings persisted.
+    """
+    if not fact_objs:
+        return 0
+    has_setter = hasattr(graph, "set_fact_embedding")
+    if not has_setter:
+        return 0
+    # Filter to facts that actually have a cached embedding.
+    targets = [f for f in fact_objs if getattr(f, "fact_embedding", None)]
+    if not targets:
+        return 0
+    try:
+        node = graph.get_node(entity_name)
+    except Exception:
+        node = None
+    if not node:
+        return 0
+    existing_facts = node.get("facts") or []
+    # Index by normalized text so multiple facts written in the same
+    # upsert don't collide.
+    index: dict[str, str] = {}
+    for f in existing_facts:
+        text = (f.get("fact") or "").strip().lower()
+        fid = f.get("fact_id")
+        if text and fid and text not in index:
+            index[text] = fid
+    written = 0
+    for fobj in targets:
+        key = (getattr(fobj, "fact", "") or "").strip().lower()
+        fid = index.get(key)
+        if not fid:
+            continue
+        try:
+            if graph.set_fact_embedding(fid, list(fobj.fact_embedding)):
+                written += 1
+        except Exception as exc:
+            log.debug("set_fact_embedding(%s) failed: %s", fid, exc)
+    return written
+
+
+async def dedupe_s1_5_facts_by_embedding(
+    result: S1_5Result,
+    last_s1_extraction: object | None,
+    graph: object,
+    embedder: object | None,
+) -> dict:
+    """Run the v0.6.1 embedding-based fact dedup on the assistant facts.
+
+    Mutates ``result.assistant_extraction.facts`` in place to drop facts
+    whose cosine similarity against an existing fact on the same entity
+    exceeds the drop threshold. Kept facts receive their computed
+    embedding via the ``fact_embedding`` attribute so downstream persistence
+    can write it in one call.
+
+    The ``last_s1_extraction`` argument is accepted for future use (so we
+    can restrict dedup to nodes actually touched this turn) but currently
+    we dedup against every assistant fact's entity — the cost is bounded
+    because there's usually only 1-5 new facts per turn.
+
+    Returns an audit dict compatible with the existing S1.5 telemetry log.
+    """
+    audit = {
+        "dedup_checked": 0,
+        "dedup_dropped": 0,
+        "dedup_flagged": 0,
+    }
+
+    if embedder is None:
+        return audit
+
+    assistant_ext = getattr(result, "assistant_extraction", None)
+    if assistant_ext is None:
+        return audit
+    facts = list(getattr(assistant_ext, "facts", []) or [])
+    if not facts:
+        return audit
+
+    try:
+        from acervo.extraction.edge_resolution import dedupe_facts_by_embedding
+    except Exception as exc:  # pragma: no cover — import guard
+        log.warning("dedupe_s1_5_facts_by_embedding: import failed: %s", exc)
+        return audit
+
+    # Build {node_id: [facts]}. We key on _make_id(entity_name) so it
+    # matches Ladybug's id scheme.
+    from acervo.graph.ids import _make_id
+    facts_by_node: dict[str, list] = {}
+    # Side index so we can rebuild the list in original order after dedup.
+    order_index: list[tuple[str, int]] = []  # (node_id, idx_in_that_bucket)
+    for f in facts:
+        ent = getattr(f, "entity", "") or ""
+        if not ent:
+            continue
+        nid = _make_id(ent)
+        bucket = facts_by_node.setdefault(nid, [])
+        order_index.append((nid, len(bucket)))
+        bucket.append(f)
+
+    if not facts_by_node:
+        return audit
+
+    try:
+        kept_by_node, dedup_audit = await dedupe_facts_by_embedding(
+            graph, embedder, facts_by_node,
+        )
+    except Exception as exc:
+        log.warning(
+            "dedupe_s1_5_facts_by_embedding: dedup pass failed: %s", exc,
+        )
+        return audit
+
+    # Reconstruct the mutable facts list, preserving the set of kept facts
+    # while dropping the dedupe'd ones. We build a set of (node_id, idx)
+    # keys for what survived.
+    survivors: set[int] = set()
+    kept_buckets_seen: dict[str, int] = {node_id: 0 for node_id in kept_by_node}
+    # kept_by_node buckets are in the same order as the input bucket, so
+    # we can walk them in lockstep.
+    for (node_id, orig_bucket_idx), fact in zip(order_index, facts):
+        kept_bucket = kept_by_node.get(node_id) or []
+        # The kept list preserves original order — just check if the
+        # pointer equality holds at the current "walk position".
+        pos = kept_buckets_seen[node_id]
+        if pos < len(kept_bucket) and kept_bucket[pos] is fact:
+            survivors.add(id(fact))
+            kept_buckets_seen[node_id] = pos + 1
+
+    new_facts = [f for f in facts if id(f) in survivors]
+    assistant_ext.facts = new_facts
+
+    audit["dedup_checked"] = dedup_audit.checked
+    audit["dedup_dropped"] = dedup_audit.dropped
+    audit["dedup_flagged"] = dedup_audit.flagged
+    if dedup_audit.dropped or dedup_audit.flagged:
+        log.info(
+            "S1.5 embedding dedup: checked=%d dropped=%d flagged=%d",
+            dedup_audit.checked, dedup_audit.dropped, dedup_audit.flagged,
+        )
+    return audit
+
+
 async def resolve_s1_5_facts(
     result: S1_5Result,
     graph: object,
@@ -417,7 +627,7 @@ def apply_s1_5_result(
             )
             continue
 
-        ok = graph.merge_nodes(merge.into_id, merge.from_id)
+        ok = graph.merge_nodes(merge.into_id, merge.from_id, updated_by="llm")
         if ok:
             audit["merges_applied"] += 1
             log.info("S1.5 merged: %s → %s (%s)", merge.from_id, merge.into_id, merge.reason)
@@ -436,7 +646,7 @@ def apply_s1_5_result(
             continue
         old = node.get("type", "")
         vt = validator.validate_entity_type(tc.new_type, entity_name=tc.node_id)
-        graph.update_node(tc.node_id, type=vt.resolved)
+        graph.update_node(tc.node_id, type=vt.resolved, updated_by="llm")
         audit["type_corrections"] += 1
         log.info("S1.5 type fix: %s %s → %s (%s)", tc.node_id, old, vt.resolved, tc.reason)
 
@@ -464,8 +674,9 @@ def apply_s1_5_result(
             graph.upsert_entities(
                 [], validated,
                 layer=Layer.PERSONAL,
-                source="s1_5_curation",
+                source="llm",
                 owner=owner or None,
+                updated_by="llm",
             )
         audit["relations_added"] += len(validated)
 
@@ -475,21 +686,27 @@ def apply_s1_5_result(
         for entity in ext.entities:
             vt = validator.validate_entity_type(entity.type, entity_name=entity.name)
             layer = Layer.UNIVERSAL if entity.layer == "UNIVERSAL" else Layer.PERSONAL
+            entity_fact_objs = [f for f in ext.facts if f.entity == entity.name]
             entity_facts = [
-                (f.entity, f.fact, f.source)
-                for f in ext.facts
-                if f.entity == entity.name
+                (f.entity, f.fact, f.source) for f in entity_fact_objs
             ]
             graph.upsert_entities(
                 [(entity.name, vt.resolved)],
                 None,
                 entity_facts if entity_facts else None,
                 layer=layer,
-                source="assistant_response",
+                source="llm",
                 owner=owner or None,
+                updated_by="llm",
             )
             audit["entities_added"] += 1
             audit["facts_added"] += len(entity_facts)
+
+            # v0.6.1 Change 3: persist fact_embedding on any fact that the
+            # dedup pre-pass cached on the ExtractedFact. Look up the node
+            # after upsert, find the freshly written fact by text match,
+            # and call set_fact_embedding with its fact_id.
+            _persist_fact_embeddings_for_entity(graph, entity.name, entity_fact_objs)
 
         if ext.relations:
             validated_rels = []
@@ -501,8 +718,9 @@ def apply_s1_5_result(
                 graph.upsert_entities(
                     [], validated_rels,
                     layer=Layer.PERSONAL,
-                    source="assistant_response",
+                    source="llm",
                     owner=owner or None,
+                    updated_by="llm",
                 )
             audit["relations_added"] += len(validated_rels)
 
@@ -514,6 +732,17 @@ def apply_s1_5_result(
         rejected = sum(1 for e in log_entries if e.action == "rejected")
         if mapped or rejected:
             log.info("S1.5 validation: %d mapped, %d rejected", mapped, rejected)
+
+    # v0.6.1 Change 2: auto-promote pending_review entities that have
+    # accumulated enough evidence (session_count >= 3) or were edited by a
+    # user. This runs once per S1.5 cycle to catch anything the current
+    # turn just nudged over the threshold.
+    try:
+        promoted = _auto_promote_pending_entities(graph)
+        audit["promoted_pending"] = promoted
+    except Exception as exc:
+        log.debug("auto_promote: pass failed: %s", exc)
+        audit["promoted_pending"] = 0
 
     graph.save()
     return audit

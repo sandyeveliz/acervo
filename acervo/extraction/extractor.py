@@ -30,12 +30,19 @@ class Entity:
     type: str
     layer: str = ""  # "PERSONAL" or "UNIVERSAL" (from LLM), empty = unset
     attributes: dict = field(default_factory=dict)  # optional structured properties
+    # v0.6.1 Change 2 — LLM-reported confidence in the extraction.
+    # 0.9-1.0 = explicit & clear, 0.6-0.8 = inferred, 0.3-0.5 = jargon/ambiguous.
+    # Entities with confidence < 0.6 get status="pending_review" and bypass
+    # the garbage filter so tech abbreviations (JWT, AAPL, Prisma) survive.
+    # Default 1.0 preserves backward compat with callers that don't set it.
+    confidence: float = 1.0
 
 @dataclass
 class Relation:
     source: str
     target: str
     relation: str
+    confidence: float = 1.0
 
 @dataclass
 class ExtractedFact:
@@ -50,6 +57,10 @@ class ExtractedFact:
     valid_at: str | None = None
     invalid_at: str | None = None
     reference_time: str | None = None
+    # v0.6.1 Change 3 — cached embedding so the dedupe pass can attach it
+    # to the fact object and apply_s1_5_result can persist it with
+    # ``_add_fact(fact_embedding=...)`` without re-embedding.
+    fact_embedding: list[float] | None = None
 
 @dataclass
 class ExtractionResult:

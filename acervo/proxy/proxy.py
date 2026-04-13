@@ -78,6 +78,9 @@ class AcervoProxy:
         self._app.router.add_get("/acervo/graph/stats", self._handle_graph_stats)
         self._app.router.add_get("/acervo/graph/validation-log", self._handle_validation_log)
         self._app.router.add_post("/acervo/graph/merge", self._handle_graph_merge)
+        self._app.router.add_post(
+            "/acervo/graph/deduplicate-facts", self._handle_graph_dedup_facts,
+        )
         self._app.router.add_post("/acervo/graph/export/training", self._handle_export_training)
         # Document management
         self._app.router.add_post("/acervo/documents", self._handle_document_upload)
@@ -567,11 +570,141 @@ class AcervoProxy:
         absorb_id = body.get("absorb", "")
         if not keep_id or not absorb_id:
             return web.json_response({"error": "missing keep or absorb"}, status=400)
-        ok = graph.merge_nodes(keep_id, absorb_id)
+        ok = graph.merge_nodes(keep_id, absorb_id, updated_by="user")
         if not ok:
             return web.json_response({"error": "one or both nodes not found"}, status=404)
         graph.save()
         return web.json_response({"merged": {"keep": keep_id, "absorbed": absorb_id}})
+
+    async def _handle_graph_dedup_facts(self, request: web.Request) -> web.Response:
+        """POST /acervo/graph/deduplicate-facts — run v0.6.1 embedding-based
+        fact dedup retroactively over a subset of the graph.
+
+        Body (all optional):
+            {
+                "node_ids": ["alice", "bob"],          // restrict to these nodes
+                "drop_threshold": 0.85,
+                "flag_threshold": 0.6
+            }
+
+        When ``node_ids`` is empty or missing, every node in the graph is
+        processed. The endpoint requires the proxy to have an embedder
+        configured (either via the Acervo facade's ``embedder`` or the
+        default Ollama one).
+        """
+        graph = self._require_graph()
+        embedder = getattr(self._facade, "_embedder", None) if self._facade else None
+        if embedder is None:
+            return web.json_response(
+                {"error": "embedder not configured — cannot dedupe facts"},
+                status=400,
+            )
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        node_ids = body.get("node_ids") or []
+        drop_threshold = float(body.get("drop_threshold", 0.85))
+        flag_threshold = float(body.get("flag_threshold", 0.60))
+
+        # Build the list of nodes to process.
+        if node_ids:
+            target_ids = []
+            for nid in node_ids:
+                n = graph.get_node(nid)
+                if n:
+                    target_ids.append(n["id"])
+        else:
+            target_ids = [n["id"] for n in graph.get_all_nodes()]
+
+        from acervo.extraction.edge_resolution import dedupe_facts_by_embedding
+
+        total_checked = 0
+        total_dropped = 0
+        total_flagged = 0
+        nodes_processed = 0
+        # This endpoint is for *existing* facts. We create a synthetic
+        # new_facts input per node where every existing fact becomes a
+        # "new fact" — then we compare pairwise. To avoid false positives,
+        # drop only when a fact matches a DIFFERENT existing fact. We
+        # implement this by running the dedup per-node with empty new_facts
+        # input and using a special branch: the easier approach is to
+        # iterate existing facts ourselves and call the cosine helper
+        # directly.
+        from acervo.extraction.edge_resolution import (
+            _cosine_sim,
+            _load_existing_facts_for_dedup,
+        )
+        for nid in target_ids:
+            existing = _load_existing_facts_for_dedup(graph, nid)
+            if len(existing) < 2:
+                continue
+            # Lazy-embed any facts without an embedding.
+            missing = [f for f in existing if not f.get("fact_embedding")]
+            if missing:
+                try:
+                    embs = await embedder.embed_batch(
+                        [f.get("fact") or "" for f in missing]
+                    )
+                except Exception as exc:
+                    log.warning("dedup endpoint: embed_batch failed: %s", exc)
+                    embs = []
+                for f, emb in zip(missing, embs):
+                    if not emb:
+                        continue
+                    f["fact_embedding"] = list(emb)
+                    fid = f.get("fact_id")
+                    if fid and hasattr(graph, "set_fact_embedding"):
+                        try:
+                            graph.set_fact_embedding(fid, list(emb))
+                        except Exception:
+                            pass
+
+            # Compare pairwise; drop facts with sim >= drop_threshold
+            # relative to an earlier fact on the same node. We mark dropped
+            # facts via graph.remove_fact (keeping the earliest one).
+            kept_embs: list[tuple[dict, list[float]]] = []
+            for f in existing:
+                emb = f.get("fact_embedding")
+                if not emb:
+                    kept_embs.append((f, []))
+                    continue
+                best = 0.0
+                for prev_f, prev_emb in kept_embs:
+                    if not prev_emb:
+                        continue
+                    s = _cosine_sim(list(emb), list(prev_emb))
+                    if s > best:
+                        best = s
+                total_checked += 1
+                if best >= drop_threshold:
+                    total_dropped += 1
+                    # Remove this duplicate fact from the graph.
+                    try:
+                        node = graph.get_node(nid)
+                        if node:
+                            graph.remove_fact(
+                                node.get("label") or nid, f.get("fact") or ""
+                            )
+                    except Exception as exc:
+                        log.debug("dedup endpoint: remove_fact failed: %s", exc)
+                    continue
+                if best >= flag_threshold:
+                    total_flagged += 1
+                kept_embs.append((f, list(emb)))
+            nodes_processed += 1
+
+        try:
+            graph.save()
+        except Exception:
+            pass
+
+        return web.json_response({
+            "nodes_processed": nodes_processed,
+            "checked": total_checked,
+            "dropped": total_dropped,
+            "flagged": total_flagged,
+        })
 
     # ── New graph CRUD handlers ──
 
@@ -588,7 +721,10 @@ class AcervoProxy:
         layer = Layer.UNIVERSAL if body.get("layer") == "UNIVERSAL" else Layer.PERSONAL
         facts_raw = body.get("facts", [])
         facts = [(label, f, "api") for f in facts_raw] if facts_raw else None
-        graph.upsert_entities([(label, ntype)], facts=facts, layer=layer, source="api")
+        graph.upsert_entities(
+            [(label, ntype)], facts=facts, layer=layer,
+            source="user", updated_by="user",
+        )
         graph.save()
         nid = _make_id(label)
         node = graph.get_node(nid)
@@ -611,6 +747,7 @@ class AcervoProxy:
             attrs["description"] = body["description"]
             updates["attributes"] = attrs
         if updates:
+            updates.setdefault("updated_by", "user")
             graph.update_node(node["id"], **updates)
             graph.save()
         return web.json_response(graph.get_node(node["id"]))
@@ -649,7 +786,10 @@ class AcervoProxy:
         if not src or not tgt or not rel:
             return web.json_response({"error": "missing source, target, or relation"}, status=400)
         weight = body.get("weight", 1.0)
-        ok = graph.add_edge(src, tgt, rel, weight=weight, edge_type="semantic")
+        ok = graph.add_edge(
+            src, tgt, rel, weight=weight, edge_type="semantic",
+            source="user", updated_by="user",
+        )
         if not ok:
             return web.json_response({"error": "edge exists or nodes not found"}, status=409)
         graph.save()

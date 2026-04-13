@@ -27,14 +27,16 @@ Analyze the conversation and extract:
       "type": "person | organization | project | technology | place | event | document | concept",
       "layer": "PERSONAL | UNIVERSAL",
       "description": "One sentence description",
-      "existing_id": null
+      "existing_id": null,
+      "confidence": 0.9
     }
   ],
   "relations": [
     {
       "source": "entity_id",
       "target": "entity_id",
-      "relation": "part_of | created_by | maintains | works_at | member_of | uses_technology | depends_on | alternative_to | located_in | deployed_on | produces | serves | documented_in | participated_in | triggered_by | resulted_in"
+      "relation": "part_of | created_by | maintains | works_at | member_of | uses_technology | depends_on | alternative_to | located_in | deployed_on | produces | serves | documented_in | participated_in | triggered_by | resulted_in",
+      "confidence": 0.9
     }
   ],
   "facts": [
@@ -57,7 +59,8 @@ Analyze the conversation and extract:
 - Generate "id" as lowercase_snake_case derived from the label
 - Never extract the user or assistant themselves
 - Use the most specific form from the text ("road cycling" not "cycling", "wool coat" not "coat")
-- Specificity test: could it have its own Wikipedia entry? If not, skip it
+- Specificity test: could a knowledgeable reader identify what this refers to without further context? If yes → extract. If only with domain context → extract with confidence 0.5-0.7. If genuinely ambiguous → skip
+- **Short technical abbreviations like "JWT", "Zod", "Prisma", "AAPL", "CEDEAR" ARE valid entities** — extract them with confidence 0.4-0.5 instead of skipping them. The graph has a pending_review status precisely for these cases
 - NEVER extract: pronouns, abstract feelings, dates, sentence fragments, adjectives, or bare generic nouns (cosa, gente, equipo, reunión, foto, evento, oficina, empresa) unless explicitly named
 - NEVER extract bare kinship or animal terms (papá, mamá, hermano, perro, gato) unless qualified with a possessor — extract "el papá de Nisha" not "papá", "la perra de Sandy" not "perra"
 - Extract each real-world entity only ONCE per turn even if mentioned multiple times
@@ -98,6 +101,15 @@ Analyze the conversation and extract:
 - "with_chunks": the question needs detailed content (code, full text, specific data)
 - Default to "with_chunks" if unsure
 
+### Confidence scoring (v0.6.1)
+- Every entity and relation MUST include a `"confidence"` field (float 0-1).
+- Rubric:
+  - **0.9-1.0**: explicitly mentioned and unambiguous ("Trabajo en Butaco desde 2019")
+  - **0.6-0.8**: inferred from clear context ("ese sistema" → Butaco, when Butaco is the only system in the graph)
+  - **0.3-0.5**: possible but ambiguous — use this for tech jargon, abbreviations, or short names (JWT, Zod, Prisma, AAPL, CEDEAR)
+- Entities with confidence < 0.6 are persisted with `status="pending_review"` and auto-promoted once they appear in multiple sessions. **Do NOT skip them — extract with low confidence instead.**
+- If you omit the confidence field, the parser defaults to 1.0.
+
 ### When to return empty arrays
 - Greetings, small talk, meta-questions about the AI → entities: [], relations: [], facts: []
 - Questions that only READ from the graph without adding info → entities: [], relations: [], facts: []
@@ -135,7 +147,21 @@ Output:
   ]
 }
 
-### Example 3: Small talk (empty output)
+### Example 3: Low-confidence tech jargon
+User: "Estoy usando Prisma con JWT para auth"
+Output:
+{
+  "topic": {"action": "same", "label": "backend auth"},
+  "intent": {"type": "specific", "retrieval": "with_chunks"},
+  "entities": [
+    {"id": "prisma", "label": "Prisma", "type": "technology", "layer": "UNIVERSAL", "description": "ORM for TypeScript/JavaScript", "existing_id": null, "confidence": 0.5},
+    {"id": "jwt", "label": "JWT", "type": "technology", "layer": "UNIVERSAL", "description": "JSON Web Token authentication standard", "existing_id": null, "confidence": 0.5}
+  ],
+  "relations": [],
+  "facts": []
+}
+
+### Example 4: Small talk (empty output)
 User: "Hola, cómo andás?"
 Output:
 {
