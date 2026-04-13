@@ -164,6 +164,36 @@ class TestValidateRelation:
                     f"RELATION_SYNONYMS['{source}'] = '{target}' is not a valid relation"
                 )
 
+    @pytest.mark.parametrize("relation", [
+        "appears_in", "child_of", "married_to", "set_in", "narrated_by",
+    ])
+    def test_literary_kinship_relations_v061(self, relation):
+        """v0.6.1 — new literary/kinship relations accepted directly."""
+        v = OntologyValidator(source_stage="test")
+        result = v.validate_relation(relation, entity_name="test")
+        assert result.resolved == relation
+        assert result.action == "accepted"
+
+    @pytest.mark.parametrize("variant,canonical", [
+        ("parent_of", "child_of"),
+        ("father_of", "child_of"),
+        ("mother_of", "child_of"),
+        ("spouse_of", "married_to"),
+        ("husband_of", "married_to"),
+        ("wife_of", "married_to"),
+        ("character_in", "appears_in"),
+        ("features", "appears_in"),
+        ("takes_place_in", "set_in"),
+        ("told_by", "narrated_by"),
+        ("narrator", "narrated_by"),
+    ])
+    def test_literary_kinship_synonyms_mapped(self, variant, canonical):
+        """Common variants of the new relations get mapped to canonical form."""
+        v = OntologyValidator(source_stage="test")
+        result = v.validate_relation(variant, entity_name="test")
+        assert result.resolved == canonical
+        assert result.action == "mapped"
+
 
 class TestValidationLog:
     """Test structured logging of validation decisions."""
@@ -224,8 +254,12 @@ class TestOntologyCompleteness:
     def test_4_structural_types(self):
         assert len(VALID_STRUCTURAL_TYPES) == 4
 
-    def test_16_semantic_relations(self):
-        assert len(VALID_SEMANTIC_RELATIONS) == 16
+    def test_20_semantic_relations(self):
+        # 16 original + 4 v0.6.1 literary/kinship (appears_in, married_to,
+        # set_in, narrated_by). child_of is also a v0.6.1 kinship relation
+        # but is already in VALID_STRUCTURAL_RELATIONS so it doesn't
+        # increment this count.
+        assert len(VALID_SEMANTIC_RELATIONS) == 20
 
     def test_7_structural_relations(self):
         assert len(VALID_STRUCTURAL_RELATIONS) == 7

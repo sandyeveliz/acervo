@@ -36,6 +36,12 @@ VALID_SEMANTIC_RELATIONS: frozenset[str] = frozenset({
     "uses_technology", "depends_on", "alternative_to", "located_in",
     "deployed_on", "produces", "serves", "documented_in",
     "participated_in", "triggered_by", "resulted_in",
+    # v0.6.1 — literary / kinship relations. Added to cover book,
+    # film and family-tree conversations that previously had no way to
+    # express character-in-work or parent-of links. ``child_of`` is
+    # already accepted via ``VALID_STRUCTURAL_RELATIONS`` so we don't
+    # re-list it here.
+    "appears_in", "married_to", "set_in", "narrated_by",
 })
 
 VALID_STRUCTURAL_RELATIONS: frozenset[str] = frozenset({
@@ -88,7 +94,6 @@ TYPE_SYNONYMS: dict[str, str] = {
 RELATION_SYNONYMS: dict[str, str] = {
     # Semantic mappings
     "is_a": "part_of",
-    "set_in": "located_in",
     "debuted_in": "documented_in",
     "published_by": "created_by",
     "lives_in": "located_in",
@@ -98,12 +103,28 @@ RELATION_SYNONYMS: dict[str, str] = {
     "uses": "uses_technology",
     "played_for": "member_of",
     "directed_by": "created_by",
+    # v0.6.1 — common variants of the new literary / kinship relations
+    "character_in": "appears_in",
+    "features": "appears_in",
+    "appears": "appears_in",
+    "parent_of": "child_of",   # invert is fine; graph only stores one direction
+    "father_of": "child_of",
+    "mother_of": "child_of",
+    "son_of": "child_of",
+    "daughter_of": "child_of",
+    "spouse_of": "married_to",
+    "wife_of": "married_to",
+    "husband_of": "married_to",
+    "takes_place_in": "set_in",
+    "setting": "set_in",
+    "told_by": "narrated_by",
+    "narrator": "narrated_by",
     # UPPERCASE → snake_case normalization
     "IS_A": "part_of",
     "CREATED_BY": "created_by",
     "ALIAS_OF": None,  # rejected — handled as fact
     "PART_OF": "part_of",
-    "SET_IN": "located_in",
+    "SET_IN": "set_in",
     "DEBUTED_IN": "documented_in",
     "PUBLISHED_BY": "created_by",
     "WORKS_AT": "works_at",
@@ -121,6 +142,9 @@ RELATION_SYNONYMS: dict[str, str] = {
     "CALLS": "calls",
     "EXTENDS": "extends",
     "IMPLEMENTS": "implements",
+    "APPEARS_IN": "appears_in",
+    "MARRIED_TO": "married_to",
+    "NARRATED_BY": "narrated_by",
 }
 
 REJECTED_RELATIONS: frozenset[str] = frozenset({

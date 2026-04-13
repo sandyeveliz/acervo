@@ -80,6 +80,9 @@ BUILTIN_RELATIONS: set[str] = {
     "maintains", "member_of", "depends_on", "alternative_to",
     "deployed_on", "produces", "serves", "documented_in",
     "participated_in", "triggered_by", "resulted_in",
+    # v0.6.1 — literary / kinship relations
+    "appears_in", "married_to", "narrated_by",
+    "APPEARS_IN", "MARRIED_TO", "NARRATED_BY",
     # Structural parsing relations
     "CONTAINS", "contains",       # File -> Symbol/Section
     "DEFINED_IN", "defined_in",   # Symbol -> File

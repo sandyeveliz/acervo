@@ -588,32 +588,30 @@ All entity IDs in the graph use `_make_id(label)` (lowercase + accent strip + no
 
 ## v0.6.1 — Confidence scoring + pending_review auto-promotion (Change 2)
 
-Entities now carry an LLM-reported `confidence` score which controls
-persistence and visibility. This enables the graph to keep short
-technical jargon like `JWT`, `Prisma`, `Zod`, or `AAPL CEDEAR` — which
-previous versions dropped via the garbage filter or hallucination check —
-while still gating them behind a review state.
+The graph now carries forward a `confidence` score on every
+`Entity` and `Relation` so the pipeline can decide which extractions
+to persist vs. gate behind a review state. v0.6.1 ships the full
+plumbing but the **S1 prompt does not instruct the LLM to populate the
+field** — a v0.6.1 experiment found that asking qwen3.5:9b for
+confidence scores hurt fact extraction (prompt confusion), so the
+prompt was reverted to v0.6.0 baseline. The `confidence` field stays in
+the dataclasses and the downstream machinery is live, ready to activate
+automatically once a stronger model populates it.
 
-**Flow:**
+**What is active today:**
 
-1. **S1 prompt** asks for a `confidence` field on every entity and
-   relation (see [acervo/prompts/s1_unified.txt](../../acervo/prompts/s1_unified.txt)).
-   Rubric:
-   - 0.9-1.0 — explicitly mentioned and unambiguous
-   - 0.6-0.8 — inferred from clear context
-   - 0.3-0.5 — tech jargon / abbreviations / ambiguous
-2. **S1 parser** ([`_parse_s1_response`](../../acervo/s1_unified.py))
-   reads the field, clamps to `[0.0, 1.0]`, and defaults to `1.0` when
-   missing or malformed. The parsed value lives on
+1. **S1 parser** ([`_parse_s1_response`](../../acervo/s1_unified.py))
+   reads a `confidence` field when present on entities or relations,
+   clamps to `[0.0, 1.0]`, and defaults to `1.0`. Lives on
    `Entity.confidence` / `Relation.confidence`.
-3. **`_validate_s1`** bypasses the garbage-entity filter when
-   `confidence < 0.7`. The rationale is that the LLM already marked the
-   entity as uncertain — a second heuristic filter would just re-reject
-   what we explicitly wanted to keep.
-4. **Pipeline `_persist_s1_entities`** reads `entity.confidence`,
+2. **`_validate_s1`** bypasses the garbage-entity filter when
+   `confidence < 0.7`. Dead code at the current default of 1.0 but it
+   activates automatically for any future model that volunteers
+   confidence on short tech jargon.
+3. **Pipeline `_persist_s1_entities`** reads `entity.confidence`,
    derives `status="pending_review"` when it's below 0.6, and passes
    both to `upsert_entities(confidence=..., status=...)`.
-5. **S1.5 `_auto_promote_pending_entities`** runs at the end of every
+4. **S1.5 `_auto_promote_pending_entities`** runs at the end of every
    `apply_s1_5_result` and promotes `pending_review` nodes to
    `confirmed` when either:
    - `session_count >= 3` (the node keeps appearing across sessions)
@@ -622,10 +620,23 @@ while still gating them behind a review state.
    Promoted nodes get `confidence_for_owner >= 0.8` (or 1.0 on user
    edit) and are stamped with `updated_by="system"`.
 
+**Literary / kinship relations (v0.6.1):** the S1 prompt's relation
+vocabulary was extended from 16 to 21 with five new verbs for book,
+film, and family conversations: `appears_in`, `child_of` (already
+existed structurally), `married_to`, `set_in`, `narrated_by`. The
+`OntologyValidator` has matching synonyms for common variants
+(`parent_of` / `father_of` / `mother_of` → `child_of`, `character_in` /
+`features` → `appears_in`, etc.). This unblocks the libro benchmark
+case which previously had 0-9% relation accuracy because its
+character-in-book and family-tree edges had no ontology slot.
+
 **Tests:**
 [tests/test_s1_confidence_and_promotion.py](../../tests/test_s1_confidence_and_promotion.py) —
-12 tests covering parsing, the garbage bypass, pending_review
-persistence, and the auto-promotion rules.
+parsing, garbage-filter bypass, pending_review persistence,
+auto-promotion rules.
+[tests/test_ontology_validator.py](../../tests/test_ontology_validator.py) —
+new `test_literary_kinship_*` cases cover the 5 new relations plus 11
+common synonym variants.
 
 ---
 

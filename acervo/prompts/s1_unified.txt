@@ -34,7 +34,7 @@ Analyze the conversation and extract:
     {
       "source": "entity_id",
       "target": "entity_id",
-      "relation": "part_of | created_by | maintains | works_at | member_of | uses_technology | depends_on | alternative_to | located_in | deployed_on | produces | serves | documented_in | participated_in | triggered_by | resulted_in"
+      "relation": "part_of | created_by | maintains | works_at | member_of | uses_technology | depends_on | alternative_to | located_in | deployed_on | produces | serves | documented_in | participated_in | triggered_by | resulted_in | appears_in | child_of | married_to | set_in | narrated_by"
     }
   ],
   "facts": [
@@ -75,11 +75,17 @@ Analyze the conversation and extract:
 - Attribute to "user" or "assistant" based on who stated it
 
 ### Relation rules
-- ONLY use the 16 relations listed in the schema above
+- ONLY use the 21 relations listed in the schema above
 - If no listed relation fits, do NOT create the relation — skip it entirely
 - Common WRONG relations that you must NOT use: near, visited, has, needs, says, uses, owns, supports, proposes, implemented, works_with, has_document, departures_from, arrives_at
 - Source and target must both be entity IDs (either new or existing)
 - Do NOT create self-referential relations
+- **Literary / kinship relations** (added v0.6.1): use these when the conversation is about books, stories, film, or family:
+  - `appears_in`: character → book / film / story (e.g. `úrsula → cien_años_de_soledad`)
+  - `child_of`: person → parent (e.g. `meme → fernanda_del_carpio`); use once per parent
+  - `married_to`: person → spouse (bidirectional — pick one direction)
+  - `set_in`: work → setting / place / era (e.g. `cien_años_de_soledad → macondo`)
+  - `narrated_by`: work → narrator / POV character (e.g. `el_túnel → juan_pablo_castel`)
 
 ### Topic rules
 - "same": conversation continues on the same subject
